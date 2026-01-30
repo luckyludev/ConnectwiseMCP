@@ -1,0 +1,38 @@
+{
+  "name": "@jasondsmith72/cwm-api-gateway-mcp",
+  "version": "1.0.0",
+  "description": "ConnectWise API Gateway MCP Server for Claude",
+  "main": "index.js",
+  "bin": {
+    "cwm-api-gateway-mcp": "bin/server.js"
+  },
+  "scripts": {
+    "start": "node bin/server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jasondsmith72/CWM-API-Gateway-MCP.git"
+  },
+  "keywords": [
+    "connectwise",
+    "api",
+    "gateway",
+    "claude",
+    "mcp",
+    "model",
+    "context",
+    "protocol"
+  ],
+  "author": "Jason Smith",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/jasondsmith72/CWM-API-Gateway-MCP/issues"
+  },
+  "homepage": "https://github.com/jasondsmith72/CWM-API-Gateway-MCP#readme",
+  "dependencies": {
+    "cross-spawn": "^7.0.3"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

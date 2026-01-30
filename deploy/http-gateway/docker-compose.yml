@@ -1,0 +1,22 @@
+services:
+  mcp-gateway:
+    build:
+      context: ..
+      dockerfile: http-gateway/Dockerfile
+    container_name: connectwise-mcp-gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: connectwise-mcp-cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      mcp-gateway:
+        condition: service_started

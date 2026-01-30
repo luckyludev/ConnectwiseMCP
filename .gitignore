@@ -1,0 +1,14 @@
+.DS_Store
+.env
+
+# Local env files
+/deploy/.env
+/deploy/http-gateway/.env
+
+# Python/Node artifacts
+/deploy/cwm-mcp/venv/
+/deploy/cwm-mcp/node_modules/
+
+# Runtime data/logs
+/deploy/cwm-mcp/api_gateway/api_gateway.log
+/deploy/cwm-mcp/api_gateway/fast_memory_api.db

@@ -1,0 +1,24 @@
+services:
+  connectwise-supergateway:
+    build:
+      context: ..
+      dockerfile: supergateway/Dockerfile
+    container_name: connectwise-supergateway
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    env_file:
+      - ../.env
+
+    command:
+      - supergateway
+      - --stdio
+      - node /app/mcp-server/bin/server.js
+      - --port
+      - "8000"
+      - --ssePath
+      - /sse
+      - --messagePath
+      - /message

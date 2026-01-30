@@ -1,0 +1,5 @@
+**/.DS_Store
+cwm-mcp/node_modules
+cwm-mcp/venv
+cwm-mcp/api_gateway/api_gateway.log
+cwm-mcp/api_gateway/fast_memory_api.db
