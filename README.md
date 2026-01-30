@@ -8,28 +8,30 @@ ConnectWise MCP server with an HTTP gateway and Cloudflare Tunnel.
 .
 ├── deploy/
 │   ├── cwm-mcp/              # Core MCP tools (ConnectWise API gateway)
-│   ├── http-gateway/         # HTTP gateway (token auth + Azure AD JWT)
+│   ├── http-gateway/         # HTTP gateway (OAuth + token auth)
 │   └── supergateway/         # Legacy/optional
 ├── docs/
-│   └── oauth-cloudflare/     # OAuth + Cloudflare guidance (from Claude files)
+│   ├── chatgpt-connector.md  # ChatGPT connector setup
+│   └── oauth-cloudflare/     # OAuth + Cloudflare guidance
 └── README.md
 ```
 
-## Architecture (current)
+## Architecture
 
 ```
-┌───────────────┐       ┌────────────────────┐       ┌───────────────────────┐
-│ MCP Clients   │──────▶│ Cloudflare Tunnel  │──────▶│ HTTP Gateway (FastAPI) │
-│ (ChatGPT/etc) │ HTTPS │ connectwisemcp...  │ HTTPS │  - Token auth          │
-└───────────────┘       └────────────────────┘       │  - Azure AD JWT (opt)  │
-                                                     │  - /mcp + /sse         │
-                                                     └───────────────┬───────┘
-                                                                     │
-                                                                     ▼
-                                                         ┌────────────────────┐
-                                                         │ MCP Tools (cwm-mcp)│
-                                                         │ ConnectWise API     │
-                                                         └────────────────────┘
+┌──────────────────────────┐    HTTPS    ┌──────────────────────┐    HTTP    ┌──────────────────────┐
+│ MCP Clients              │────────────▶│ Cloudflare Tunnel     │──────────▶│ HTTP Gateway (FastAPI)│
+│ (ChatGPT / Claude / etc) │             │ connectwisemcp...     │           │ - OAuth 2.1 + PKCE    │
+└──────────────────────────┘             └──────────────────────┘           │ - DCR endpoints       │
+                                                                            │ - Azure AD login      │
+                                                                            │ - /mcp + /sse         │
+                                                                            └───────────┬──────────┘
+                                                                                        │
+                                                                                        ▼
+                                                                            ┌──────────────────────┐
+                                                                            │ MCP Tools (cwm-mcp)  │
+                                                                            │ ConnectWise API      │
+                                                                            └──────────────────────┘
 ```
 
 ## Quick start (token auth + Cloudflare Tunnel)
@@ -60,14 +62,9 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:8000/mcp
 curl -H "Authorization: Bearer YOUR_TOKEN" https://connectwisemcp.funcshun.com/mcp
 ```
 
-## SSO (Azure AD) - optional
+## OAuth + ChatGPT connectors
 
-The gateway can validate Azure AD access tokens if you set:
-- `AZURE_TENANT_ID`
-- `AZURE_CLIENT_ID` or `AZURE_AUDIENCE`
-
-OAuth endpoints (dynamic client registration, /oauth/*) are **not** implemented yet.
-See `docs/oauth-cloudflare` for the reference implementation.
+See `docs/chatgpt-connector.md` for full OAuth setup with dynamic client registration.
 
 ## Security notes
 
