@@ -18,7 +18,7 @@ Redirect URIs (Web):
 - `https://platform.openai.com/apps-manage/oauth`
 
 Scopes:
-- `openid profile email` (default)
+- `openid profile email`
 
 ## 2) Configure the gateway
 
@@ -61,6 +61,24 @@ Complete the OAuth login when prompted.
 
 From ChatGPT, try:
 "List the last 5 open ConnectWise tickets"
+
+## Troubleshooting
+
+- **401 or invalid_token**
+  - Check `SERVER_URL` and `MCP_RESOURCE_URL` match the public URL.
+  - Confirm the Cloudflare tunnel is pointing to the gateway.
+
+- **OAuth redirect errors**
+  - Ensure all redirect URIs are present in Azure AD.
+  - Make sure you created a client secret (not just certificate).
+
+- **Azure token exchange fails**
+  - Verify `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` are correct.
+  - Check the Azure app is set as a **Web** app.
+
+- **MCP tools not appearing**
+  - Check gateway logs for tool registration.
+  - Confirm ConnectWise env vars are valid.
 
 ## Notes
 

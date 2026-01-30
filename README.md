@@ -11,7 +11,10 @@ ConnectWise MCP server with an HTTP gateway and Cloudflare Tunnel.
 │   ├── http-gateway/         # HTTP gateway (OAuth + token auth)
 │   └── supergateway/         # Legacy/optional
 ├── docs/
-│   └── chatgpt-connector.md  # ChatGPT connector setup
+│   ├── README.md             # Docs index
+│   ├── chatgpt-connector.md  # ChatGPT connector setup
+│   ├── azure-ad-checklist.md # Azure AD setup checklist
+│   └── troubleshooting.md    # Common issues and checks
 └── README.md
 ```
 
@@ -67,22 +70,11 @@ Notes:
 - The gateway binds to `127.0.0.1:8000` and is only exposed publicly through Cloudflare.
 - Ensure your Cloudflare Tunnel routes `connectwisemcp.funcshun.com` to this service.
 
-## Quick start (token auth)
-
-1) Test locally:
-```
-curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:8000/mcp
-```
-
-2) Test via Cloudflare:
-```
-curl -H "Authorization: Bearer YOUR_TOKEN" https://connectwisemcp.funcshun.com/mcp
-```
-
 ## OAuth + ChatGPT connectors
 
-- OAuth endpoints are built into the gateway.
-- Full connector setup: `docs/chatgpt-connector.md`
+- Full setup: `docs/chatgpt-connector.md`
+- Azure AD checklist: `docs/azure-ad-checklist.md`
+- Troubleshooting: `docs/troubleshooting.md`
 
 ## Security notes
 
