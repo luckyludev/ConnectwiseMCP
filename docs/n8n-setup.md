@@ -47,6 +47,16 @@ Replace `method` with `tools/call` and set `params`:
 }
 ```
 
+## Known-good n8n config
+
+- **Node:** HTTP Request
+- **Method:** POST
+- **URL:** `https://connectwisemcp.funcshun.com/mcp`
+- **Headers:**
+  - `Authorization: Bearer YOUR_TOKEN`
+  - `Content-Type: application/json`
+- **Body (JSON):** `tools/list` or `tools/call`
+
 ## Option B: n8n credentials (reusable)
 
 Create a **Generic Credential** (or use HTTP Request with header injection) that stores:

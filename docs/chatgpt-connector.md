@@ -57,6 +57,15 @@ In ChatGPT:
 
 Complete the OAuth login when prompted.
 
+## Known-good ChatGPT connector config
+
+Use these values in the ChatGPT connector form:
+
+- **Name:** `ConnectwiseMCP`
+- **MCP Server URL:** `https://connectwisemcp.funcshun.com/sse`
+- **Auth Type:** OAuth
+- **Client ID / Secret:** leave empty (dynamic registration)
+
 ## 5) Test
 
 From ChatGPT, try:

@@ -29,6 +29,13 @@ If you enabled OAuth on the gateway:
    - Leave Client ID/Secret blank (dynamic registration)
 2) Complete the Azure AD login prompt.
 
+## Known-good Claude connector config
+
+- **Name:** `ConnectwiseMCP`
+- **Server URL:** `https://connectwisemcp.funcshun.com/sse`
+- **Auth:** OAuth (or Bearer token)
+- **Token:** (only required for Bearer token)
+
 ## Notes
 
 - For OAuth, ensure your Azure AD app includes:
