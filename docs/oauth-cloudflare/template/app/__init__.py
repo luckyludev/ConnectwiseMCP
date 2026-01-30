@@ -1,1 +1,0 @@
-# MCP OAuth Server Package

@@ -11,8 +11,7 @@ ConnectWise MCP server with an HTTP gateway and Cloudflare Tunnel.
 │   ├── http-gateway/         # HTTP gateway (OAuth + token auth)
 │   └── supergateway/         # Legacy/optional
 ├── docs/
-│   ├── chatgpt-connector.md  # ChatGPT connector setup
-│   └── oauth-cloudflare/     # OAuth + Cloudflare guidance
+│   └── chatgpt-connector.md  # ChatGPT connector setup
 └── README.md
 ```
 
