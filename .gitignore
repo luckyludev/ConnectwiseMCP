@@ -8,6 +8,8 @@
 # Python/Node artifacts
 /deploy/cwm-mcp/venv/
 /deploy/cwm-mcp/node_modules/
+**/__pycache__/
+**/*.pyc
 
 # Runtime data/logs
 /deploy/cwm-mcp/api_gateway/api_gateway.log
