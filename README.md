@@ -117,6 +117,7 @@ Call a tool:
 - ChatGPT: `docs/chatgpt-connector.md`
 - Claude: `docs/claude-setup.md`
 - n8n: `docs/n8n-setup.md`
+- Copilot Studio + Azure: `docs/copilot-studio-azure.md`
 - Azure AD checklist: `docs/azure-ad-checklist.md`
 - Troubleshooting: `docs/troubleshooting.md`
 
