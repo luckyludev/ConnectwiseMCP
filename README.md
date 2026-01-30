@@ -13,8 +13,10 @@ ConnectWise MCP server with an HTTP gateway and Cloudflare Tunnel.
 ├── docs/
 │   ├── README.md             # Docs index
 │   ├── chatgpt-connector.md  # ChatGPT connector setup
+│   ├── claude-setup.md       # Claude MCP setup
 │   ├── azure-ad-checklist.md # Azure AD setup checklist
-│   └── troubleshooting.md    # Common issues and checks
+│   ├── troubleshooting.md    # Common issues and checks
+│   └── n8n-setup.md           # n8n setup
 └── README.md
 ```
 
@@ -70,9 +72,51 @@ Notes:
 - The gateway binds to `127.0.0.1:8000` and is only exposed publicly through Cloudflare.
 - Ensure your Cloudflare Tunnel routes `connectwisemcp.funcshun.com` to this service.
 
-## OAuth + ChatGPT connectors
+## Quick start (token auth)
 
-- Full setup: `docs/chatgpt-connector.md`
+1) Test locally:
+```
+curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:8000/mcp
+```
+
+2) Test via Cloudflare:
+```
+curl -H "Authorization: Bearer YOUR_TOKEN" https://connectwisemcp.funcshun.com/mcp
+```
+
+## Copy/paste JSON-RPC examples
+
+List tools:
+```
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list",
+  "params": {}
+}
+```
+
+Call a tool:
+```
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "search_api_endpoints",
+    "arguments": {
+      "query": "tickets",
+      "max_results": 5
+    }
+  }
+}
+```
+
+## OAuth + client guides
+
+- ChatGPT: `docs/chatgpt-connector.md`
+- Claude: `docs/claude-setup.md`
+- n8n: `docs/n8n-setup.md`
 - Azure AD checklist: `docs/azure-ad-checklist.md`
 - Troubleshooting: `docs/troubleshooting.md`
 
