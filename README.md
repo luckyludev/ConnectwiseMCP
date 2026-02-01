@@ -72,6 +72,53 @@ Notes:
 - The gateway binds to `127.0.0.1:8000` and is only exposed publicly through Cloudflare.
 - Ensure your Cloudflare Tunnel routes `connectwisemcp.funcshun.com` to this service.
 
+## Local macOS install (Homebrew + Docker)
+
+Use this if you want to run the MCP gateway locally and connect Claude to `127.0.0.1`.
+
+1) Install Homebrew + tooling:
+```
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install git
+brew install --cask docker
+```
+Open **Docker Desktop** once and wait for it to finish starting.
+
+2) Clone the repo:
+```
+git clone https://github.com/luckyludev/ConnectwiseMCP.git
+cd ConnectwiseMCP
+```
+
+3) Configure local env:
+```
+cp deploy/http-gateway/.env.example deploy/http-gateway/.env
+```
+Edit `deploy/http-gateway/.env` and set:
+- `MCP_STATIC_TOKEN` (strong random token)
+- `JWT_SECRET_KEY` (strong random secret)
+- `CONNECTWISE_*` values
+- `SERVER_URL=http://127.0.0.1:8000`
+- `MCP_RESOURCE_URL=http://127.0.0.1:8000`
+
+4) Start the local gateway (Docker):
+```
+cd deploy/http-gateway
+docker compose up -d --build mcp-gateway
+```
+Verify:
+```
+curl http://127.0.0.1:8000/health
+```
+
+5) Add the local MCP server in Claude:
+- **Name:** `ConnectwiseMCP (Local)`
+- **Server URL:** `http://127.0.0.1:8000/sse`
+- **Auth:** Bearer token
+- **Token:** your `MCP_STATIC_TOKEN`
+
+> If you want the Cloudflare tunnel too, set `CLOUDFLARE_TUNNEL_TOKEN` and run `docker compose up -d --build` without the service name.
+
 ## Quick start (token auth)
 
 1) Test locally:
