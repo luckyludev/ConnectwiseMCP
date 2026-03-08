@@ -43,7 +43,9 @@ logging.basicConfig(
 logger = logging.getLogger("api_gateway")
 
 # MCP server
-mcp = FastMCP("api_gateway")
+# Use non-loopback host so FastMCP does not auto-enable strict localhost-only
+# DNS-rebinding protection that breaks reverse-proxy/tunnel deployments.
+mcp = FastMCP("api_gateway", host="0.0.0.0")
 
 # Global config vars
 API_URL = None

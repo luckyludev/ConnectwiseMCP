@@ -19,9 +19,9 @@ from typing import Any, Dict, Optional
 
 import httpx
 from jose import jwt, JWTError
-from fastapi import FastAPI, Request, Depends, HTTPException, Form, Query
+from fastapi import FastAPI, Request, Depends, HTTPException, Form, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 # Reuse the existing MCP server + tools
@@ -120,7 +120,15 @@ class AzureTokenVerifier:
         audience = os.getenv("AZURE_AUDIENCE")
         client_id = os.getenv("AZURE_CLIENT_ID")
         values = [v for v in [audience, client_id] if v]
-        return values or None
+        # Common Azure audience variant for app IDs
+        if client_id:
+            values.append(f"api://{client_id}")
+        # de-dup while preserving order
+        deduped = []
+        for v in values:
+            if v and v not in deduped:
+                deduped.append(v)
+        return deduped or None
 
     async def _get_jwks(self) -> Optional[Dict[str, Any]]:
         jwks_url = self._jwks_url()
@@ -157,13 +165,29 @@ class AzureTokenVerifier:
                 token,
                 key,
                 algorithms=["RS256"],
-                audience=audiences,
                 issuer=issuer,
+                options={"verify_aud": False},
             )
+
+            # python-jose expects audience to be a single string; validate manually
+            token_aud = payload.get("aud")
+            if isinstance(token_aud, str):
+                aud_ok = token_aud in audiences
+            elif isinstance(token_aud, list):
+                aud_ok = any(a in audiences for a in token_aud)
+            else:
+                aud_ok = False
+
+            if not aud_ok:
+                logger.error(f"Azure token audience mismatch: token aud={token_aud}, expected one of={audiences}")
+                return None
+
             return payload
-        except JWTError:
+        except JWTError as e:
+            logger.error(f"Azure token JWT verification failed: {e}")
             return None
-        except Exception:
+        except Exception as e:
+            logger.error(f"Azure token verification error: {e}")
             return None
 
 
@@ -370,9 +394,70 @@ async def authorization_server_metadata():
 
 @app.post("/oauth/register")
 @app.post("/register")
-async def register_client(redirect_uris: list[str], client_name: str = "MCP Client"):
-    client = _register_client({"redirect_uris": redirect_uris, "client_name": client_name})
-    return JSONResponse(content=client, status_code=201)
+async def register_client(request: Request, body: Optional[Dict[str, Any]] = Body(default=None)):
+    """RFC7591-ish Dynamic Client Registration endpoint.
+
+    Accepts JSON body (preferred) and falls back to form fields.
+    """
+    payload: Dict[str, Any] = {}
+
+    # Preferred: application/json
+    if body is not None:
+        payload = dict(body)
+    else:
+        # Fallback for simple form posts
+        form = await request.form()
+        payload = {k: v for k, v in form.items()}
+
+    redirect_uris = payload.get("redirect_uris") or []
+    if isinstance(redirect_uris, str):
+        redirect_uris = [redirect_uris]
+
+    # Basic validation: require at least one HTTPS redirect URI
+    if not isinstance(redirect_uris, list) or not redirect_uris:
+        raise HTTPException(status_code=400, detail="redirect_uris is required")
+    for uri in redirect_uris:
+        if not isinstance(uri, str) or not uri.startswith("https://"):
+            raise HTTPException(status_code=400, detail="redirect_uris must be https URLs")
+
+    client_name = payload.get("client_name", "MCP Client")
+    token_auth_method = payload.get("token_endpoint_auth_method", "client_secret_post")
+    grant_types = payload.get("grant_types", ["authorization_code", "refresh_token"])
+    response_types = payload.get("response_types", ["code"])
+
+    client = _register_client(
+        {
+            "redirect_uris": redirect_uris,
+            "client_name": client_name,
+            "token_endpoint_auth_method": token_auth_method,
+            "grant_types": grant_types,
+            "response_types": response_types,
+        }
+    )
+
+    # RFC7591-style response fields
+    resp = {
+        **client,
+        "redirect_uris": redirect_uris,
+        "grant_types": grant_types,
+        "response_types": response_types,
+        "token_endpoint_auth_method": token_auth_method,
+        "client_secret_expires_at": 0,
+        "registration_client_uri": f"{_server_url()}/oauth/register/{client['client_id']}",
+    }
+    return JSONResponse(content=resp, status_code=201)
+
+
+@app.get("/oauth/register/{client_id}")
+async def get_registered_client(client_id: str):
+    client = _get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {
+        **client,
+        "client_secret_expires_at": 0,
+        "registration_client_uri": f"{_server_url()}/oauth/register/{client_id}",
+    }
 
 
 @app.get("/oauth/authorize")
@@ -391,7 +476,21 @@ async def oauth_authorize(
 
     client = _get_client(client_id)
     if not client:
-        raise HTTPException(status_code=400, detail="Invalid client_id")
+        # Some clients (including retries) may present a previously cached
+        # dynamic client_id before re-registering. Auto-provision as a
+        # PKCE public client to keep the OAuth flow moving.
+        logger.warning(f"Auto-provisioning missing client_id={client_id} for redirect_uri={redirect_uri}")
+        client = {
+            "client_id": client_id,
+            "client_secret": "",
+            "redirect_uris": [redirect_uri],
+            "client_name": "Auto-Provisioned MCP Client",
+            "token_endpoint_auth_method": "none",
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "client_id_issued_at": int(time.time()),
+        }
+        _clients[client_id] = client
     if redirect_uri not in client.get("redirect_uris", []):
         raise HTTPException(status_code=400, detail="Invalid redirect_uri")
     if code_challenge_method != "S256":
@@ -469,10 +568,18 @@ async def oauth_callback(
     tokens = token_resp.json()
     id_token = tokens.get("id_token")
     user_payload = None
-    if id_token:
-        user_payload = await azure_token_verifier.verify(id_token)
+    if not id_token:
+        raise HTTPException(status_code=400, detail="Azure token response missing id_token (check AZURE_SCOPES includes openid)")
+
+    try:
+        unverified = jwt.get_unverified_claims(id_token)
+        logger.info(f"Azure id_token claims (unverified): iss={unverified.get('iss')} aud={unverified.get('aud')} tid={unverified.get('tid')}")
+    except Exception:
+        pass
+
+    user_payload = await azure_token_verifier.verify(id_token)
     if not user_payload:
-        raise HTTPException(status_code=400, detail="Unable to verify Azure ID token")
+        raise HTTPException(status_code=400, detail="Unable to verify Azure ID token (check AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_AUDIENCE)")
 
     user_id = user_payload.get("sub") or user_payload.get("oid")
 
@@ -556,12 +663,43 @@ async def oauth_token(
 # MCP endpoints (protected)
 # --------------------------
 
+async def _proxy_asgi_app(asgi_app, request: Request, path: str = "/") -> Response:
+    body = await request.body()
+    # Forward only safe ASCII headers needed by MCP handlers.
+    headers = {}
+    for k in ("authorization", "content-type", "accept", "mcp-session-id", "last-event-id"):
+        v = request.headers.get(k)
+        if not v:
+            continue
+        try:
+            v.encode("ascii")
+        except UnicodeEncodeError:
+            continue
+        headers[k] = v
+    headers["host"] = httpx.URL(_server_url()).host
+    transport = httpx.ASGITransport(app=asgi_app)
+    async with httpx.AsyncClient(transport=transport, base_url=_server_url()) as client:
+        resp = await client.request(
+            request.method,
+            path,
+            headers=headers,
+            content=body,
+            params=dict(request.query_params),
+        )
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=dict(resp.headers),
+        media_type=resp.headers.get("content-type"),
+    )
+
+
 @app.api_route("/mcp", methods=["GET", "POST"])
 async def mcp_endpoint(
     request: Request,
     _auth: Dict[str, Any] = Depends(verify_request),
 ):
-    return await mcp.handle_streamable_http(request)
+    return await _proxy_asgi_app(mcp.streamable_http_app(), request, path="/mcp")
 
 
 @app.api_route("/sse", methods=["GET", "POST"])
@@ -569,4 +707,4 @@ async def sse_endpoint(
     request: Request,
     _auth: Dict[str, Any] = Depends(verify_request),
 ):
-    return await mcp.handle_sse(request)
+    return await _proxy_asgi_app(mcp.sse_app(), request, path="/sse")
