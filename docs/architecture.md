@@ -28,7 +28,7 @@ flowchart LR
     W -->|ConnectWise REST API| C
 ```
 
-A richer standalone visual is available at [`architecture.html`](architecture.html).
+A richer standalone visual is available at [`architecture.html`](architecture.html). Persistent authentication and Entra configuration are covered in [`entra-authentication.md`](entra-authentication.md).
 
 ## Authorization model
 
