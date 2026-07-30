@@ -1,6 +1,6 @@
 # ConnectWise MCP v2 Architecture
 
-> **Status:** Proposed target architecture. The existing Docker deployment remains the supported implementation until the Worker passes tests, MCP conformance, and staging verification.
+> **Status:** v2 security/authentication foundation implemented in `src/`. ConnectWise read/write tools and staging validation remain outstanding. The existing Docker deployment stays available for rollback until those gates pass.
 
 ## Recommendation
 
@@ -19,8 +19,8 @@ flowchart LR
     S[Worker secrets<br/>six credential profiles]
     C[ConnectWise Manage API]
 
-    U -. OAuth 2.1 + PKCE .-> E
-    E -. signed identity token .-> W
+    U -.->|OAuth 2.1 + PKCE| E
+    E -.->|signed identity token| W
     U -->|MCP 2026-07-28 over HTTPS| W
     W -->|validate tid, oid, groups, roles| M
     M -->|profile alias only| S
@@ -47,10 +47,11 @@ Entra does not automatically translate its groups into ConnectWise Security Role
 ### Non-secret Worker variables
 
 ```text
-AZURE_TENANT_ID
-AZURE_CLIENT_ID
-AZURE_AUDIENCE
-ENTRA_ALLOWED_GROUP_IDS
+ENTRA_TENANT_ID
+ENTRA_CLIENT_ID
+ALLOWED_GROUP_IDS
+ALLOWED_APP_ROLES
+ALLOWED_CLIENT_REDIRECT_URIS
 ```
 
 The user-to-profile mapping may be a secret binding if Entra object IDs should not be visible in ordinary Worker configuration:
@@ -66,7 +67,7 @@ The user-to-profile mapping may be a secret binding if Entra object IDs should n
 }
 ```
 
-Bind this JSON as `CW_USER_PROFILE_MAP`. Never commit real tenant IDs, object IDs, API keys, tokens, or client secrets to the repository.
+Bind this JSON as the `IDENTITY_PROFILE_MAP` Worker secret. Never commit real tenant IDs, object IDs, API keys, tokens, or client secrets to the repository.
 
 ### Per-profile Worker secrets
 

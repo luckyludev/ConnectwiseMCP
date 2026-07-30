@@ -1,12 +1,18 @@
 # ConnectwiseMCP
 
-ConnectWise MCP server with an HTTP gateway and Cloudflare Tunnel.
+ConnectWise MCP server migrating from the legacy Docker/FastAPI gateway to a secure Cloudflare Worker v2.
+
+> **Migration status:** v2 foundation is implemented in `src/` with Entra OAuth, rotating refresh, immutable identity mapping, tests, and CI. ConnectWise read/write tools are added in later staged PRs. The legacy deployment under `deploy/` remains available for rollback and must not be removed before staging acceptance. See [`docs/v2-foundation.md`](docs/v2-foundation.md).
 
 ## Structure
 
 ```
 .
-├── deploy/
+├── src/                       # Cloudflare Worker v2 foundation
+├── tests/                     # v2 security and OAuth tests
+├── package.json               # exact v2 dependency versions and checks
+├── wrangler.jsonc             # non-secret Worker configuration
+├── deploy/                    # legacy Docker/FastAPI rollback path
 │   ├── cwm-mcp/              # Core MCP tools (ConnectWise API gateway)
 │   ├── http-gateway/         # HTTP gateway (OAuth + token auth)
 │   └── supergateway/         # Legacy/optional

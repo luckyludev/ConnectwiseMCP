@@ -1,0 +1,30 @@
+{
+  "name": "connectwise-mcp-v2",
+  "version": "2.0.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "format:check": "prettier --check src tests .github/workflows/v2-ci.yml docs/v2-foundation.md package.json tsconfig.json wrangler.jsonc",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "check": "npm run typecheck && npm test && npm run format:check && npm audit --audit-level=high && npm run build"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "0.8.3",
+    "@modelcontextprotocol/server": "2.0.0",
+    "agents": "0.20.1",
+    "jose": "6.2.5",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260730.1",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10",
+    "wrangler": "4.115.0"
+  }
+}
