@@ -10,22 +10,63 @@ import {
   type ConnectWiseCredentials,
 } from "./connectwise-profile";
 import type { EntraAccessTokenProps } from "./auth-handler";
+import {
+  emitToolAudit,
+  getAuditStartTime,
+  type ToolAuditDependencies,
+} from "./audit";
+
+export type AuditedToolDependencies = {
+  audit?: ToolAuditDependencies;
+};
 
 export function whoamiResult(
   props: Partial<EntraAccessTokenProps> | undefined,
+  dependencies: AuditedToolDependencies = {},
 ): CallToolResult {
+  const startedAtMs = getAuditStartTime(dependencies.audit);
   if (!props?.scopes?.includes("mcp:read")) {
+    emitToolAudit(
+      {
+        props: props as unknown as Record<string, unknown> | undefined,
+        tool: "whoami",
+        outcome: "denied",
+        reason: "insufficient_scope",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
     return {
       isError: true,
       content: [{ type: "text", text: "Insufficient scope" }],
     };
   }
   if (!props.profileAlias) {
+    emitToolAudit(
+      {
+        props: props as unknown as Record<string, unknown>,
+        tool: "whoami",
+        outcome: "denied",
+        reason: "profile_unavailable",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
     return {
       isError: true,
       content: [{ type: "text", text: "Authenticated profile unavailable" }],
     };
   }
+  emitToolAudit(
+    {
+      props: props as unknown as Record<string, unknown>,
+      tool: "whoami",
+      outcome: "success",
+      reason: "ok",
+      startedAtMs,
+    },
+    dependencies.audit,
+  );
   return {
     content: [
       {
@@ -42,7 +83,7 @@ const serviceTicketSchema = z.object({
   status: z.object({ name: z.string().max(100) }),
 });
 
-export type ServiceTicketDependencies = {
+export type ServiceTicketDependencies = AuditedToolDependencies & {
   createClient?: (credentials: ConnectWiseCredentials) => ConnectWiseClient;
 };
 
@@ -52,13 +93,34 @@ export async function getServiceTicketResult(
   ticketId: number,
   dependencies: ServiceTicketDependencies = {},
 ): Promise<CallToolResult> {
+  const startedAtMs = getAuditStartTime(dependencies.audit);
   if (!props?.scopes?.includes("mcp:read")) {
+    emitToolAudit(
+      {
+        props: props as unknown as Record<string, unknown> | undefined,
+        tool: "get_service_ticket",
+        outcome: "denied",
+        reason: "insufficient_scope",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
     return {
       isError: true,
       content: [{ type: "text", text: "Insufficient scope" }],
     };
   }
   if (!props.profileAlias) {
+    emitToolAudit(
+      {
+        props: props as unknown as Record<string, unknown>,
+        tool: "get_service_ticket",
+        outcome: "denied",
+        reason: "profile_unavailable",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
     return {
       isError: true,
       content: [{ type: "text", text: "Authenticated profile unavailable" }],
@@ -73,6 +135,16 @@ export async function getServiceTicketResult(
     const parsed = serviceTicketSchema.parse(
       await client.getServiceTicket(ticketId),
     );
+    emitToolAudit(
+      {
+        props: props as unknown as Record<string, unknown>,
+        tool: "get_service_ticket",
+        outcome: "success",
+        reason: "ok",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
     return {
       content: [
         {
@@ -86,6 +158,16 @@ export async function getServiceTicketResult(
       ],
     };
   } catch {
+    emitToolAudit(
+      {
+        props: props as unknown as Record<string, unknown>,
+        tool: "get_service_ticket",
+        outcome: "failure",
+        reason: "lookup_failed",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
     return {
       isError: true,
       content: [{ type: "text", text: "ConnectWise ticket lookup failed" }],
@@ -111,7 +193,7 @@ export function createMcpServer(
     async (_args): Promise<CallToolResult> => {
       const props = getMcpAuthContext()?.props as
         Partial<EntraAccessTokenProps> | undefined;
-      return whoamiResult(props);
+      return whoamiResult(props, dependencies);
     },
   );
 

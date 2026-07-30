@@ -2,7 +2,7 @@
 
 ConnectWise MCP server migrating from the legacy Docker/FastAPI gateway to a secure Cloudflare Worker v2.
 
-> **Migration status:** v2 is implemented in `src/` with Entra OAuth, rotating refresh, immutable identity mapping, and the first request-scoped read-only ConnectWise tool (`get_service_ticket`). The tool resolves exactly one `CW_PROFILE_<ALIAS>` Worker secret, requires its origin in the separate `CONNECTWISE_ALLOWED_ORIGINS` deployment allowlist, rejects redirects, and creates a fresh bounded client for each authenticated call. Additional read tools and all write tools remain gated behind later staged work. The legacy deployment under `deploy/` remains available for rollback and must not be removed before v2 passes staging, isolation, and rollback acceptance. See [`docs/v2-foundation.md`](docs/v2-foundation.md).
+> **Migration status:** v2 is implemented in `src/` with Entra OAuth, rotating refresh, immutable identity mapping, structured sanitized tool audit events, and the first request-scoped read-only ConnectWise tool (`get_service_ticket`). The tool resolves exactly one `CW_PROFILE_<ALIAS>` Worker secret, requires its origin in the separate `CONNECTWISE_ALLOWED_ORIGINS` deployment allowlist, rejects redirects, and creates a fresh bounded client for each authenticated call. Additional read tools and all write tools remain gated behind later staged work. The legacy deployment under `deploy/` remains available for rollback and must not be removed before v2 passes staging, isolation, observability, and rollback acceptance. See [`docs/v2-foundation.md`](docs/v2-foundation.md).
 
 ## Structure
 
