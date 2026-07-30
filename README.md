@@ -2,7 +2,7 @@
 
 ConnectWise MCP server migrating from the legacy Docker/FastAPI gateway to a secure Cloudflare Worker v2.
 
-> **Migration status:** v2 foundation is implemented in `src/` with Entra OAuth, rotating refresh, immutable identity mapping, tests, and CI. ConnectWise read/write tools are added in later staged PRs. The legacy deployment under `deploy/` remains available for rollback and must not be removed before staging acceptance. See [`docs/v2-foundation.md`](docs/v2-foundation.md).
+> **Migration status:** v2 is implemented in `src/` with Entra OAuth, rotating refresh, immutable identity mapping, and the first request-scoped read-only ConnectWise tool (`get_service_ticket`). The tool resolves exactly one `CW_PROFILE_<ALIAS>` Worker secret, requires its origin in the separate `CONNECTWISE_ALLOWED_ORIGINS` deployment allowlist, rejects redirects, and creates a fresh bounded client for each authenticated call. Additional read tools and all write tools remain gated behind later staged work. The legacy deployment under `deploy/` remains available for rollback and must not be removed before v2 passes staging, isolation, and rollback acceptance. See [`docs/v2-foundation.md`](docs/v2-foundation.md).
 
 ## Structure
 
@@ -49,34 +49,40 @@ ConnectWise MCP server migrating from the legacy Docker/FastAPI gateway to a sec
 ## Docker setup (gateway + tunnel)
 
 The Docker setup lives in `deploy/http-gateway/docker-compose.yml` and runs:
+
 - `mcp-gateway` (FastAPI HTTP gateway)
 - `cloudflared` (Cloudflare Tunnel)
 
 Steps:
 
-1) Copy env template and fill values:
+1. Copy env template and fill values:
+
 ```
 cp deploy/http-gateway/.env.example deploy/http-gateway/.env
 ```
 
 Required values:
+
 - `MCP_STATIC_TOKEN` (strong random token)
 - `JWT_SECRET_KEY` (required for OAuth tokens)
 - `CONNECTWISE_*` variables
 - `CLOUDFLARE_TUNNEL_TOKEN`
 
-2) Build + run:
+2. Build + run:
+
 ```
 cd deploy/http-gateway
 docker compose up -d --build
 ```
 
-3) Verify:
+3. Verify:
+
 ```
 curl http://127.0.0.1:8000/health
 ```
 
 Notes:
+
 - The gateway binds to `127.0.0.1:8000` and is only exposed publicly through Cloudflare.
 - Ensure your Cloudflare Tunnel routes `connectwisemcp.funcshun.com` to this service.
 
@@ -84,42 +90,52 @@ Notes:
 
 Use this if you want to run the MCP gateway locally and connect Claude to `127.0.0.1`.
 
-1) Install Homebrew + tooling:
+1. Install Homebrew + tooling:
+
 ```
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew install git
 brew install --cask docker
 ```
+
 Open **Docker Desktop** once and wait for it to finish starting.
 
-2) Clone the repo:
+2. Clone the repo:
+
 ```
 git clone https://github.com/luckyludev/ConnectwiseMCP.git
 cd ConnectwiseMCP
 ```
 
-3) Configure local env:
+3. Configure local env:
+
 ```
 cp deploy/http-gateway/.env.example deploy/http-gateway/.env
 ```
+
 Edit `deploy/http-gateway/.env` and set:
+
 - `MCP_STATIC_TOKEN` (strong random token)
 - `JWT_SECRET_KEY` (strong random secret)
 - `CONNECTWISE_*` values
 - `SERVER_URL=http://127.0.0.1:8000`
 - `MCP_RESOURCE_URL=http://127.0.0.1:8000`
 
-4) Start the local gateway (Docker):
+4. Start the local gateway (Docker):
+
 ```
 cd deploy/http-gateway
 docker compose up -d --build mcp-gateway
 ```
+
 Verify:
+
 ```
 curl http://127.0.0.1:8000/health
 ```
 
-5) Add the local MCP server in Claude:
+5. Add the local MCP server in Claude:
+
 - **Name:** `ConnectwiseMCP (Local)`
 - **Server URL:** `http://127.0.0.1:8000/sse`
 - **Auth:** Bearer token
@@ -129,12 +145,14 @@ curl http://127.0.0.1:8000/health
 
 ## Quick start (token auth)
 
-1) Test locally:
+1. Test locally:
+
 ```
 curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:8000/mcp
 ```
 
-2) Test via Cloudflare:
+2. Test via Cloudflare:
+
 ```
 curl -H "Authorization: Bearer YOUR_TOKEN" https://connectwisemcp.funcshun.com/mcp
 ```
@@ -142,6 +160,7 @@ curl -H "Authorization: Bearer YOUR_TOKEN" https://connectwisemcp.funcshun.com/m
 ## Copy/paste JSON-RPC examples
 
 List tools:
+
 ```
 {
   "jsonrpc": "2.0",
@@ -152,6 +171,7 @@ List tools:
 ```
 
 Call a tool:
+
 ```
 {
   "jsonrpc": "2.0",

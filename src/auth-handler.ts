@@ -33,6 +33,7 @@ export type WorkerEnv = {
   ALLOWED_GROUP_IDS: string;
   ALLOWED_APP_ROLES: string;
   ALLOWED_CLIENT_REDIRECT_URIS: string;
+  CONNECTWISE_ALLOWED_ORIGINS: string;
 };
 
 export type EntraGrantProps = {

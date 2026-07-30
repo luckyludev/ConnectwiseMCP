@@ -10,7 +10,7 @@ import { validateClientRegistration } from "./client-registration";
 import { createMcpServer } from "./mcp-server";
 
 const runtimeEnv = cloudflareEnv as unknown as WorkerEnv;
-const mcpHandler = createMcpHandler(createMcpServer, {
+const mcpHandler = createMcpHandler(() => createMcpServer(runtimeEnv), {
   route: "/mcp",
   corsOptions: false,
 });
