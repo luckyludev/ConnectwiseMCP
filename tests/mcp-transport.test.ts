@@ -22,11 +22,15 @@ const env = {
 describe("authenticated MCP transport", () => {
   it("isolates concurrent profile contexts from hostile headers and arguments", async () => {
     const selectedCompanies: string[] = [];
+    const auditMessages: string[] = [];
 
     const call = async (profileAlias: "LUIS" | "MAYA", ticketId: number) => {
       const handler = createMcpHandler(
         () =>
           createMcpServer(env, {
+            audit: {
+              logger: (message) => auditMessages.push(message),
+            },
             createClient: (credentials) => {
               selectedCompanies.push(credentials.companyId);
               return {
@@ -92,5 +96,36 @@ describe("authenticated MCP transport", () => {
     expect(luis.body).not.toContain("hostile");
     expect(maya.body).not.toContain("hostile");
     expect(selectedCompanies.sort()).toEqual(["company-luis", "company-maya"]);
+
+    const auditEvents = auditMessages.map((message) => JSON.parse(message));
+    expect(auditEvents).toHaveLength(2);
+    expect(auditEvents.map((event) => event.profileAlias).sort()).toEqual([
+      "LUIS",
+      "MAYA",
+    ]);
+    for (const event of auditEvents) {
+      expect(event).toMatchObject({
+        event: "mcp_tool_invocation",
+        tool: "get_service_ticket",
+        outcome: "success",
+        reason: "ok",
+      });
+      expect(Object.keys(event).sort()).toEqual(
+        [
+          "correlationId",
+          "durationMs",
+          "event",
+          "outcome",
+          "profileAlias",
+          "reason",
+          "timestamp",
+          "tool",
+          "version",
+        ].sort(),
+      );
+    }
+    expect(auditMessages.join("\n")).not.toContain("hostile");
+    expect(auditMessages.join("\n")).not.toContain("company-luis");
+    expect(auditMessages.join("\n")).not.toContain("company-maya");
   });
 });

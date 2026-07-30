@@ -15,6 +15,7 @@
 - Stateless MCP transport with `whoami` and a deliberately limited read-only `get_service_ticket` tool.
 - Per-request ConnectWise client creation from exactly one validated `CW_PROFILE_<ALIAS>` secret; no caller-supplied profile or credential headers and no shared fallback.
 - Fixed ConnectWise endpoint construction, bounded timeout/retry/response size, strict ticket output projection, and sanitized errors.
+- Structured best-effort audit events for both MCP tools with allowlisted identity, tool, outcome, correlation, and latency fields; tool inputs, credentials, tokens, URLs, headers, upstream bodies, and exception text are never included.
 - Blocking tests, typecheck, formatting, npm audit, and Wrangler dry-run bundle in CI.
 
 ## Configuration
@@ -73,6 +74,39 @@ https://<worker-origin>/callback
 ```
 
 Request `openid profile offline_access`. Configure group claims or app roles in the Entra application. For tenants where group overage is possible, prefer app roles until a Microsoft Graph overage-resolution path is deliberately implemented; this Worker rejects group-overage tokens when no allowed app role is present.
+
+## Audit events and production observability
+
+Every completed `whoami` or `get_service_ticket` invocation attempts to emit one single-line JSON event through the Worker logger. Audit delivery is best-effort: logger or serialization failures never alter the MCP response and are not recursively logged.
+
+The event schema is allowlist-only:
+
+| Field           | Meaning                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------- |
+| `version`       | Schema version `1`                                                                            |
+| `event`         | Fixed value `mcp_tool_invocation`                                                             |
+| `timestamp`     | UTC ISO-8601 event completion time                                                            |
+| `correlationId` | Server-generated UUID                                                                         |
+| `tenantId`      | Validated Entra tenant GUID when available                                                    |
+| `objectId`      | Validated Entra object GUID when available                                                    |
+| `profileAlias`  | Validated server-selected profile alias when available                                        |
+| `tool`          | Fixed `whoami` or `get_service_ticket` value                                                  |
+| `outcome`       | `success`, `denied`, or `failure`                                                             |
+| `reason`        | Fixed sanitized reason: `ok`, `insufficient_scope`, `profile_unavailable`, or `lookup_failed` |
+| `durationMs`    | Nonnegative integer latency, defensively capped at 300,000 ms                                 |
+
+Malformed identity/profile fields are omitted. Malformed core correlation or clock fields suppress the event. The emitter never copies arbitrary properties from authentication context or exceptions.
+
+Audit events deliberately exclude MCP arguments, ticket IDs, scopes, access or refresh tokens, authorization/cookie headers, Entra client secrets, OAuth state, ConnectWise credentials, profile JSON, API URLs, request or response bodies, upstream fields, and raw exception text. Do not add any of these fields to logging or downstream log-enrichment rules.
+
+Before production cutover:
+
+1. Restrict Cloudflare log access to approved operators and document the selected retention period; the Worker code assumes no retention duration.
+2. Verify one event per successful staging call for both tools and verify `denied` events for scope/profile failures.
+3. Run concurrent calls for at least two mapped users and confirm their tenant/object/profile fields remain isolated.
+4. Inspect exported events and confirm no tool arguments, ticket content, tokens, headers, credentials, URLs, or upstream bodies appear.
+5. Configure alerts for sustained `failure`/`denied` increases and for an unexpected absence of audit events during known test traffic. Alert payloads must use only the allowlisted schema.
+6. Record the staging evidence and approved retention/access settings in the deployment checklist. Local unit tests and Wrangler dry-run do not satisfy these live gates.
 
 ## Verification
 
