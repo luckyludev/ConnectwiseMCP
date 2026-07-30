@@ -18,6 +18,7 @@
     "ALLOWED_GROUP_IDS": "[]",
     "ALLOWED_APP_ROLES": "[]",
     "ALLOWED_CLIENT_REDIRECT_URIS": "[]",
+    "CONNECTWISE_ALLOWED_ORIGINS": "[]",
   },
   "observability": {
     "enabled": true,
