@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ConnectWise MCP v2 Architecture</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#020617;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:32px}.page{max-width:1200px;margin:auto}.head{display:flex;align-items:center;gap:12px}.dot{width:12px;height:12px;border-radius:50%;background:#22d3ee;box-shadow:0 0 18px #22d3ee;animation:p 2s infinite}@keyframes p{50%{opacity:.45}}h1{font-size:24px;margin:0}.sub{color:#94a3b8;margin:8px 0 24px 24px;font-size:14px}.panel,.card{background:rgba(15,23,42,.72);border:1px solid #1e293b;border-radius:16px}.panel{padding:18px;overflow:auto}svg{width:100%;min-width:980px;display:block}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:18px}.card{padding:18px}.card h2{font-size:14px;margin:0 0 10px}.card p,.card li{color:#94a3b8;font-size:12px;line-height:1.6}.card ul{margin:0;padding-left:17px}.rose{color:#fb7185}.amber{color:#fbbf24}.green{color:#34d399}.cyan{color:#22d3ee}.foot{text-align:center;color:#475569;font-size:11px;margin-top:18px}code{color:#c4b5fd}
+</style>
+</head>
+<body><main class="page">
+<header><div class="head"><span class="dot"></span><h1>ConnectWise MCP v2 Architecture</h1></div><p class="sub">Stateless MCP 2026-07-28 • Microsoft Entra • Cloudflare Worker • per-user ConnectWise security</p></header>
+<section class="panel">
+<svg viewBox="0 0 1120 720" role="img" aria-labelledby="title desc">
+<title id="title">ConnectWise MCP v2 request and identity architecture</title>
+<desc id="desc">MCP clients authenticate with Entra, call a Cloudflare Worker, which maps tenant and object identity to Worker secret credential profiles and calls ConnectWise.</desc>
+<defs>
+ <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#1e293b" stroke-width=".6"/></pattern>
+ <marker id="a" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><path d="M0 0L10 3.5 0 7Z" fill="#64748b"/></marker>
+ <marker id="ac" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><path d="M0 0L10 3.5 0 7Z" fill="#22d3ee"/></marker>
+ <marker id="ar" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><path d="M0 0L10 3.5 0 7Z" fill="#fb7185"/></marker>
+</defs>
+<rect width="1120" height="720" fill="url(#grid)"/>
+<!-- arrows first -->
+<path d="M180 347H280" stroke="#22d3ee" stroke-width="2" marker-end="url(#ac)"/>
+<path d="M130 305V190H280" fill="none" stroke="#fb7185" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#ar)"/>
+<path d="M440 190H550V275" fill="none" stroke="#fb7185" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#ar)"/>
+<path d="M700 350H790" stroke="#34d399" stroke-width="2" marker-end="url(#a)"/>
+<path d="M625 425V525H740" fill="none" stroke="#a78bfa" stroke-width="2" marker-end="url(#a)"/>
+<path d="M920 525V425" stroke="#a78bfa" stroke-width="2" marker-end="url(#a)"/>
+<path d="M970 350H1040" stroke="#34d399" stroke-width="2" marker-end="url(#a)"/>
+<!-- labels -->
+<text x="225" y="337" fill="#94a3b8" font-size="10" text-anchor="middle">HTTPS / MCP</text>
+<text x="205" y="178" fill="#fb7185" font-size="10" text-anchor="middle">OAuth 2.1 + PKCE</text>
+<text x="500" y="178" fill="#fb7185" font-size="10" text-anchor="middle">verified JWT claims</text>
+<text x="745" y="339" fill="#94a3b8" font-size="10" text-anchor="middle">tid:oid</text>
+<text x="682" y="505" fill="#94a3b8" font-size="10" text-anchor="middle">profile alias</text>
+<text x="1005" y="339" fill="#94a3b8" font-size="10" text-anchor="middle">REST API</text>
+<!-- boundaries -->
+<rect x="255" y="245" width="745" height="230" rx="16" fill="rgba(120,53,15,.05)" stroke="#fbbf24" stroke-dasharray="8 5"/>
+<text x="272" y="265" fill="#fbbf24" font-size="11" font-weight="700">CLOUDFLARE EDGE</text>
+<!-- components with opaque masks -->
+<g><rect x="30" y="305" width="150" height="85" rx="8" fill="#0f172a"/><rect x="30" y="305" width="150" height="85" rx="8" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.7"/><text x="105" y="335" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">MCP Clients</text><text x="105" y="355" fill="#94a3b8" font-size="9" text-anchor="middle">Claude • ChatGPT</text><text x="105" y="371" fill="#94a3b8" font-size="9" text-anchor="middle">other MCP hosts</text></g>
+<g><rect x="280" y="135" width="160" height="90" rx="8" fill="#0f172a"/><rect x="280" y="135" width="160" height="90" rx="8" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1.7"/><text x="360" y="166" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Microsoft Entra</text><text x="360" y="187" fill="#94a3b8" font-size="9" text-anchor="middle">identity + group/app role</text><text x="360" y="204" fill="#fb7185" font-size="9" text-anchor="middle">tid • oid • groups • roles</text></g>
+<g><rect x="280" y="290" width="420" height="135" rx="10" fill="#0f172a"/><rect x="280" y="290" width="420" height="135" rx="10" fill="rgba(6,78,59,.35)" stroke="#34d399" stroke-width="1.8"/><text x="490" y="320" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">ConnectWise MCP Cloudflare Worker</text><text x="490" y="346" fill="#94a3b8" font-size="10" text-anchor="middle">OAuth • token verification • profile resolver</text><text x="490" y="365" fill="#94a3b8" font-size="10" text-anchor="middle">stateless MCP tools • request-scoped CW client</text><text x="490" y="393" fill="#34d399" font-size="9" text-anchor="middle">MCP 2026-07-28 • no Docker • no credential headers</text></g>
+<g><rect x="790" y="295" width="180" height="110" rx="8" fill="#0f172a"/><rect x="790" y="295" width="180" height="110" rx="8" fill="rgba(30,41,59,.6)" stroke="#94a3b8" stroke-width="1.7"/><text x="880" y="323" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Identity Map</text><text x="880" y="345" fill="#94a3b8" font-size="9" text-anchor="middle">&lt;tenant&gt;:&lt;object&gt;</text><text x="880" y="362" fill="#94a3b8" font-size="9" text-anchor="middle">→ LUIS / USER2 / …</text><text x="880" y="385" fill="#fbbf24" font-size="8" text-anchor="middle">fail closed if unmapped</text></g>
+<g><rect x="740" y="510" width="360" height="125" rx="10" fill="#0f172a"/><rect x="740" y="510" width="360" height="125" rx="10" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.8"/><text x="920" y="540" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Cloudflare Worker Secrets</text><text x="920" y="564" fill="#94a3b8" font-size="9" text-anchor="middle">LUIS • USER2 • USER3 • USER4 • USER5 • USER6</text><text x="920" y="584" fill="#94a3b8" font-size="9" text-anchor="middle">company • public key • private key • client ID • API URL</text><text x="920" y="609" fill="#a78bfa" font-size="8" text-anchor="middle">credentials never reach the MCP client</text></g>
+<g><rect x="1010" y="295" width="105" height="110" rx="8" fill="#0f172a"/><rect x="1010" y="295" width="105" height="110" rx="8" fill="rgba(30,41,59,.6)" stroke="#94a3b8" stroke-width="1.7"/><text x="1062" y="326" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">ConnectWise</text><text x="1062" y="344" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Manage API</text><text x="1062" y="369" fill="#94a3b8" font-size="8" text-anchor="middle">API member</text><text x="1062" y="384" fill="#34d399" font-size="8" text-anchor="middle">Security Role</text></g>
+<!-- bottom audit lane -->
+<rect x="280" y="665" width="540" height="35" rx="6" fill="rgba(30,41,59,.5)" stroke="#64748b"/>
+<text x="550" y="687" fill="#94a3b8" font-size="9" text-anchor="middle">Audit: tid • oid • profile alias • tool • correlation ID • outcome — never tokens or keys</text>
+</svg>
+</section>
+<section class="cards">
+<div class="card"><h2 class="rose">Identity and access</h2><ul><li>One Entra group gates application access</li><li>Validated <code>tid:oid</code> selects the exact profile</li><li>Names and unverified email are never authorization keys</li></ul></div>
+<div class="card"><h2 class="green">ConnectWise permissions</h2><ul><li>One API member per team member when practical</li><li>ConnectWise Security Role remains final enforcement</li><li>No shared administrator fallback</li></ul></div>
+<div class="card"><h2 class="amber">Lean deployment</h2><ul><li>Single stateless TypeScript Worker</li><li>No Docker, tunnel, proxy, database, or admin UI</li><li>Current Docker stack retained during migration</li></ul></div>
+<div class="card"><h2 class="cyan">Security posture</h2><ul><li>Secrets selected only by verified server-side identity</li><li>Request-scoped clients prevent cross-user leakage</li><li>Unmapped, ambiguous, or incomplete profiles fail closed</li></ul></div>
+</section>
+<p class="foot">ConnectWise MCP v2 • proposed architecture • standalone HTML documentation</p>
+</main></body></html>

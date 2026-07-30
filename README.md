@@ -22,6 +22,8 @@ ConnectWise MCP server with an HTTP gateway and Cloudflare Tunnel.
 
 ## Architecture
 
+> See the [proposed Cloudflare Worker v2 architecture](docs/architecture.md) and [standalone HTML visual](docs/architecture.html). The diagram below describes the current Docker deployment.
+
 ```
 ┌──────────────────────────┐    HTTPS    ┌──────────────────────┐    HTTP    ┌──────────────────────┐
 │ MCP Clients              │────────────▶│ Cloudflare Tunnel     │──────────▶│ HTTP Gateway (FastAPI)│
