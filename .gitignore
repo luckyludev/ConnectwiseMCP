@@ -6,6 +6,12 @@
 /deploy/http-gateway/.env
 
 # Python/Node artifacts
+/node_modules/
+/dist/
+/.wrangler/
+/coverage/
+/dev.vars
+/.dev.vars
 /deploy/cwm-mcp/venv/
 /deploy/cwm-mcp/node_modules/
 **/__pycache__/
