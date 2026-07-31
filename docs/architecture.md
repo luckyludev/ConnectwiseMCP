@@ -1,6 +1,6 @@
 # ConnectWise MCP v2 Architecture
 
-> **Status:** v2 security/authentication foundation implemented in `src/`. ConnectWise read/write tools and staging validation remain outstanding. The existing Docker deployment stays available for rollback until those gates pass.
+> **Status:** Worker V2 security/authentication is implemented in `src/`, including `whoami` and one narrow request-scoped read-only `get_service_ticket` tool that returns only ticket ID and status metadata. Additional reads, all writes, and live staging validation remain gated. The existing Docker deployment stays available for rollback until the required acceptance gates pass.
 
 ## Recommendation
 
@@ -28,7 +28,7 @@ flowchart LR
     W -->|ConnectWise REST API| C
 ```
 
-A richer standalone visual is available at [`architecture.html`](architecture.html). Persistent authentication and Entra configuration are covered in [`entra-authentication.md`](entra-authentication.md).
+A richer standalone visual is available at [`architecture.html`](architecture.html). The implemented configuration contract is [`v2-foundation.md`](v2-foundation.md), and live validation is governed by [`v2-staging-acceptance-checklist.md`](v2-staging-acceptance-checklist.md).
 
 ## Authorization model
 
@@ -71,32 +71,9 @@ Bind this JSON as the `IDENTITY_PROFILE_MAP` Worker secret. Never commit real te
 
 ### Per-profile Worker secrets
 
-For each profile alias, provision:
+For each profile alias, provision exactly one `CW_PROFILE_<ALIAS>` Worker secret. Its value is strict JSON containing the approved ConnectWise API base URL, company ID, public key, private key, and client ID. For example, the alias `LUIS` uses only `CW_PROFILE_LUIS`.
 
-```text
-CW_PROFILE_<ALIAS>_COMPANY_ID
-CW_PROFILE_<ALIAS>_PUBLIC_KEY
-CW_PROFILE_<ALIAS>_PRIVATE_KEY
-CW_PROFILE_<ALIAS>_CLIENT_ID
-CW_PROFILE_<ALIAS>_API_URL
-```
-
-For Luis, the bindings are:
-
-```text
-CW_PROFILE_LUIS_COMPANY_ID
-CW_PROFILE_LUIS_PUBLIC_KEY
-CW_PROFILE_LUIS_PRIVATE_KEY
-CW_PROFILE_LUIS_CLIENT_ID
-CW_PROFILE_LUIS_API_URL
-```
-
-Enter secret values interactively so they do not appear in shell history:
-
-```bash
-npx wrangler secret put CW_PROFILE_LUIS_PUBLIC_KEY
-npx wrangler secret put CW_PROFILE_LUIS_PRIVATE_KEY
-```
+The runtime derives this binding name only from the authenticated server-side profile alias. MCP inputs and ordinary headers cannot select another profile, host, or credential. The detailed schema, origin allowlist, and approved secret-entry process are authoritative in [`v2-foundation.md`](v2-foundation.md); do not put real values in this architecture document or shell commands.
 
 ## Request lifecycle
 
@@ -129,27 +106,23 @@ There must be no fallback to a shared administrator profile.
 
 ```text
 main
-├── deploy/                         # Current Docker implementation, retained during migration
-├── docs/
-│   ├── architecture.md             # This specification
-│   ├── architecture.html           # Standalone visual
-│   └── migration-v2.md             # Implementation and rollback plan
-└── worker/                          # Proposed Cloudflare-native implementation
-    ├── src/
-    ├── tests/
-    ├── package.json
-    └── wrangler.example.jsonc
+├── src/                            # Implemented Cloudflare Worker V2
+├── tests/                          # V2 security, OAuth, and isolation tests
+├── package.json                    # Exact V2 dependency versions and checks
+├── wrangler.jsonc                  # Non-secret Worker configuration template
+├── deploy/                         # Legacy Docker/FastAPI rollback path
+└── docs/                           # Architecture, V2 boundary, migration, and staging records
 ```
 
 Recommended delivery sequence:
 
-1. **Documentation PR:** target design, threat model, secrets contract, migration plan.
-2. **Worker foundation PR:** current SDKs, stateless handler, health endpoint, CI, no ConnectWise writes.
-3. **Identity PR:** Entra validation and tested `tid:oid` profile resolution.
-4. **Read-tools PR:** request-scoped ConnectWise client and read-only MCP tools.
-5. **Write-tools PR:** explicit annotations, confirmation policy, least-privilege tests, and audit logging.
-6. **Staging deployment:** six test profiles and MCP conformance suite.
-7. **Cutover:** update clients, monitor, then mark Docker architecture as legacy.
+1. **Completed:** documentation, threat model, secret contract, and migration records.
+2. **Completed:** Worker foundation, OAuth provider mechanics, CI, and no write tools.
+3. **Completed:** Entra validation and tested `tid:oid` profile resolution.
+4. **Completed:** one fixed-route, metadata-only read tool with request-scoped ConnectWise credentials; the remaining legacy surface is classified in [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md).
+5. **Pending:** live staging with six test profiles, MCP conformance, ConnectWise permission, isolation, audit, and rollback acceptance as defined in [`v2-staging-acceptance-checklist.md`](v2-staging-acceptance-checklist.md).
+6. **Future, separately authorized:** guarded write tools with explicit policy, confirmation, idempotency, least-privilege tests, and audit controls.
+7. **After acceptance:** approved production cutover, monitoring, and eventual retirement of the Docker rollback path.
 
 ## Security requirements
 
@@ -166,15 +139,15 @@ Recommended delivery sequence:
 
 ## Decision record
 
-| Decision | Choice | Reason |
-|---|---|---|
-| Repository | Update existing repository | Same product; preserves history and discoverability |
-| Runtime | Cloudflare Worker | Removes Docker, tunnel, and proxy layers |
-| Language | TypeScript | Strong Cloudflare and MCP SDK support |
-| MCP transport | Stateless HTTP | Aligns with MCP 2026-07-28 and simplifies scaling |
-| Authentication | Microsoft Entra OAuth | Existing organizational identity provider |
-| Access gate | Entra group or app role | Centralized joiner/mover/leaver control |
-| Credential selection | Validated `tid:oid` map | Deterministic and resistant to renamed users |
-| Credential storage | Worker secrets | Appropriate for six static profiles |
-| ConnectWise scope | Per-profile API member Security Role | Least privilege and downstream enforcement |
-| Admin UI | None | Unnecessary for six managed users |
+| Decision             | Choice                               | Reason                                              |
+| -------------------- | ------------------------------------ | --------------------------------------------------- |
+| Repository           | Update existing repository           | Same product; preserves history and discoverability |
+| Runtime              | Cloudflare Worker                    | Removes Docker, tunnel, and proxy layers            |
+| Language             | TypeScript                           | Strong Cloudflare and MCP SDK support               |
+| MCP transport        | Stateless HTTP                       | Aligns with MCP 2026-07-28 and simplifies scaling   |
+| Authentication       | Microsoft Entra OAuth                | Existing organizational identity provider           |
+| Access gate          | Entra group or app role              | Centralized joiner/mover/leaver control             |
+| Credential selection | Validated `tid:oid` map              | Deterministic and resistant to renamed users        |
+| Credential storage   | Worker secrets                       | Appropriate for six static profiles                 |
+| ConnectWise scope    | Per-profile API member Security Role | Least privilege and downstream enforcement          |
+| Admin UI             | None                                 | Unnecessary for six managed users                   |
