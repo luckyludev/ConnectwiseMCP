@@ -1,4 +1,6 @@
-# Azure AD (Entra) Checklist
+# Azure AD (Entra) Checklist — legacy rollback gateway
+
+> **Legacy-only:** the variables, redirect URIs, scopes, and secret names below apply to the Docker/FastAPI rollback gateway. They are not a Cloudflare Worker V2 configuration guide. For the implemented Worker V2 configuration boundary, use [v2-foundation.md](v2-foundation.md); execute live staging only through the human-operated [V2 staging acceptance checklist](v2-staging-acceptance-checklist.md).
 
 Use this when setting up the Azure AD app for ConnectwiseMCP.
 

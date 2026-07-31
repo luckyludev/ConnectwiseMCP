@@ -1,4 +1,6 @@
-# n8n Setup (MCP via HTTP Gateway)
+# n8n Setup (MCP via HTTP Gateway) — legacy rollback gateway
+
+> **Legacy-only:** this guide uses the Docker/FastAPI JSON-RPC gateway and its static bearer-token flow. It is not compatible with, or an onboarding guide for, Cloudflare Worker V2. In particular, its generic API-discovery example is intentionally excluded from V2; see [the V2 migration classification](legacy-read-surface-classification.md).
 
 This guide shows how to call the ConnectwiseMCP HTTP gateway from n8n.
 
@@ -10,15 +12,16 @@ This guide shows how to call the ConnectwiseMCP HTTP gateway from n8n.
 
 ## Option A: HTTP Request node (simple)
 
-1) Add **HTTP Request** node.
-2) Method: **POST**
-3) URL: `https://connectwisemcp.funcshun.com/mcp`
-4) Authentication: **None**
-5) Headers:
+1. Add **HTTP Request** node.
+2. Method: **POST**
+3. URL: `https://connectwisemcp.funcshun.com/mcp`
+4. Authentication: **None**
+5. Headers:
    - `Authorization: Bearer YOUR_TOKEN`
    - `Content-Type: application/json`
 
-6) Body (JSON):
+6. Body (JSON):
+
 ```
 {
   "jsonrpc": "2.0",
@@ -31,7 +34,9 @@ This guide shows how to call the ConnectwiseMCP HTTP gateway from n8n.
 Run the node to list MCP tools.
 
 ### Example: call a tool
+
 Replace `method` with `tools/call` and set `params`:
+
 ```
 {
   "jsonrpc": "2.0",
@@ -60,6 +65,7 @@ Replace `method` with `tools/call` and set `params`:
 ## Option B: n8n credentials (reusable)
 
 Create a **Generic Credential** (or use HTTP Request with header injection) that stores:
+
 - `Authorization: Bearer YOUR_TOKEN`
 
 Then attach it to any HTTP Request node that calls the MCP gateway.

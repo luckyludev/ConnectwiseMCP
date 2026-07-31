@@ -1,13 +1,17 @@
-# Troubleshooting
+# Troubleshooting — legacy rollback gateway
+
+> **Legacy-only:** these endpoints, environment variables, and Docker commands apply to the Docker/FastAPI rollback gateway. They do not diagnose or configure Cloudflare Worker V2. Use the V2 [foundation](v2-foundation.md) and [staging acceptance checklist](v2-staging-acceptance-checklist.md) for the approved Worker path.
 
 ## Gateway health
 
 - Check health endpoint:
+
 ```
 curl http://127.0.0.1:8000/health
 ```
 
 - Logs:
+
 ```
 docker compose logs -f
 ```

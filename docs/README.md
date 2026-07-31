@@ -8,12 +8,14 @@
 - [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md) - explicit V2 migration decisions for the legacy MCP tool surface
 - [`v2-staging-acceptance-checklist.md`](v2-staging-acceptance-checklist.md) - human-operated, non-secret staging and cutover gates
 
-## Client and deployment guides
+## Legacy rollback client/deployment guides
 
-- [`entra-authentication.md`](entra-authentication.md) - persistent Entra sessions, refresh-token rotation, claims, Conditional Access, and troubleshooting
-- `chatgpt-connector.md` - full setup for ChatGPT OAuth connector
-- `claude-setup.md` - Claude MCP connector setup
-- `n8n-setup.md` - call MCP from n8n via HTTP gateway
-- `copilot-studio-azure.md` - Copilot Studio + Azure internal-only setup
-- `troubleshooting.md` - common issues and checks
-- `azure-ad-checklist.md` - Azure AD setup checklist
+> These guides are retained only for the restricted Docker/FastAPI rollback path. They are not Worker V2 deployment or onboarding instructions; follow [`v2-staging-acceptance-checklist.md`](v2-staging-acceptance-checklist.md) for the human-gated V2 path.
+
+- [`entra-authentication.md`](entra-authentication.md) - legacy Entra session and troubleshooting reference
+- `chatgpt-connector.md` - legacy ChatGPT OAuth connector setup
+- `claude-setup.md` - legacy Claude MCP connector setup
+- `n8n-setup.md` - legacy HTTP gateway setup
+- `copilot-studio-azure.md` - legacy Azure App Service/Copilot pattern
+- `troubleshooting.md` - legacy gateway troubleshooting
+- `azure-ad-checklist.md` - legacy Azure AD setup checklist
