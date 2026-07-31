@@ -79,7 +79,6 @@ export function whoamiResult(
 
 const serviceTicketSchema = z.object({
   id: z.number().int().positive(),
-  summary: z.string().max(1_000),
   status: z.object({ name: z.string().max(100) }),
 });
 
@@ -151,7 +150,6 @@ export async function getServiceTicketResult(
           type: "text",
           text: JSON.stringify({
             id: parsed.id,
-            summary: parsed.summary,
             status: parsed.status.name,
           }),
         },
@@ -200,7 +198,8 @@ export function createMcpServer(
   server.registerTool(
     "get_service_ticket",
     {
-      description: "Get one ConnectWise service ticket by numeric ID",
+      description:
+        "Get non-text metadata for one ConnectWise service ticket by numeric ID",
       inputSchema: { ticketId: z.number().int().positive() },
       annotations: {
         readOnlyHint: true,

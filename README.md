@@ -185,7 +185,9 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:8000/mcp
 curl -H "Authorization: Bearer YOUR_TOKEN" https://connectwisemcp.funcshun.com/mcp
 ```
 
-## Copy/paste JSON-RPC examples
+## Legacy-only JSON-RPC example
+
+> This request targets the broad Docker/FastAPI rollback surface and is **not** a Worker V2 capability or recommendation. Worker V2 intentionally does not expose generic API discovery tools such as `search_api_endpoints`; see [`docs/legacy-read-surface-classification.md`](docs/legacy-read-surface-classification.md).
 
 List tools:
 
