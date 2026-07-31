@@ -12,9 +12,9 @@
 - Fail-closed group/app-role eligibility and exact `<tid>:<oid> → profile alias` mapping.
 - Browser-bound signed state, local consent, and secure cookie attributes.
 - CIMD support and allowlisted dynamic client redirect origins.
-- Stateless MCP transport with `whoami` and a deliberately limited read-only `get_service_ticket` tool.
+- Stateless MCP transport with `whoami` and a deliberately limited read-only `get_service_ticket` tool that returns only ticket ID and status metadata—never ticket-authored text.
 - Per-request ConnectWise client creation from exactly one validated `CW_PROFILE_<ALIAS>` secret; no caller-supplied profile or credential headers and no shared fallback.
-- Fixed ConnectWise endpoint construction, bounded timeout/retry/response size, strict ticket output projection, and sanitized errors.
+- Fixed ConnectWise endpoint construction, bounded timeout/retry/response size, strict metadata-only ticket projection, and sanitized errors.
 - Structured best-effort audit events for both MCP tools with allowlisted identity, tool, outcome, correlation, and latency fields; tool inputs, credentials, tokens, URLs, headers, upstream bodies, and exception text are never included.
 - Blocking tests, typecheck, formatting, npm audit, and Wrangler dry-run bundle in CI.
 
@@ -119,7 +119,7 @@ npm run check
 
 ## Next stages
 
-1. Expand the read-only tool set only after confirming the team's required lookups; do not add a generic endpoint or caller-defined ConnectWise condition executor.
+1. Treat [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md) as the V2 migration decision record. Expand the read-only tool set only after a demonstrated requirement and a separate policy/schema review; do not add ticket text, notes, attachments, attachment metadata, generic endpoints, caller-defined conditions, or downloads by default.
 2. Add guarded write tools with explicit OAuth/tool policy and destructive-operation controls.
 3. Run Entra, MCP Inspector, staging ConnectWise, and six-user isolation tests.
 4. Remove legacy Docker/FastAPI code only after rollback and cutover acceptance.

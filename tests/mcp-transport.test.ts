@@ -89,9 +89,11 @@ describe("authenticated MCP transport", () => {
 
     expect(luis.status, luis.body).toBe(200);
     expect(maya.status, maya.body).toBe(200);
-    expect(luis.body).toContain("company-luis");
+    expect(luis.body).toContain('\\"id\\":1,\\"status\\":\\"New\\"');
+    expect(maya.body).toContain('\\"id\\":2,\\"status\\":\\"New\\"');
+    expect(luis.body).not.toContain("company-luis");
     expect(luis.body).not.toContain("company-maya");
-    expect(maya.body).toContain("company-maya");
+    expect(maya.body).not.toContain("company-maya");
     expect(maya.body).not.toContain("company-luis");
     expect(luis.body).not.toContain("hostile");
     expect(maya.body).not.toContain("hostile");

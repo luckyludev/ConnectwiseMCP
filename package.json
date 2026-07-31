@@ -9,7 +9,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "format:check": "prettier --check src tests .github/workflows/v2-ci.yml docs/v2-foundation.md package.json tsconfig.json wrangler.jsonc",
+    "format:check": "prettier --check src tests .github/workflows/v2-ci.yml docs/v2-foundation.md docs/legacy-read-surface-classification.md package.json tsconfig.json wrangler.jsonc",
     "build": "wrangler deploy --dry-run --outdir dist",
     "check": "npm run typecheck && npm test && npm run format:check && npm audit --audit-level=high && npm run build"
   },

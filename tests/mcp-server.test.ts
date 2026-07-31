@@ -137,7 +137,7 @@ describe("whoami", () => {
 });
 
 describe("get_service_ticket", () => {
-  it("uses only the authenticated profile secret and allowlists output fields", async () => {
+  it("uses only the authenticated profile secret and excludes raw ticket text", async () => {
     const reads: string[] = [];
     const auditMessages: string[] = [];
     const times = [900, 1_000];
@@ -199,13 +199,14 @@ describe("get_service_ticket", () => {
           type: "text",
           text: JSON.stringify({
             id: 123,
-            summary: "Printer offline",
             status: "New",
           }),
         },
       ],
     });
     expect(reads).toEqual(["CONNECTWISE_ALLOWED_ORIGINS", "CW_PROFILE_LUIS"]);
+    expect(JSON.stringify(result)).not.toContain("Printer offline");
+    expect(JSON.stringify(result)).not.toContain("privateUpstreamField");
     expect(auditMessages).toHaveLength(1);
     expect(JSON.parse(auditMessages[0]!)).toEqual({
       version: 1,
@@ -283,7 +284,7 @@ describe("get_service_ticket", () => {
     expect(auditMessages[0]!).not.toContain("upstream included");
   });
 
-  it("rejects an oversized projected ticket field", async () => {
+  it("drops oversized upstream ticket text instead of returning it", async () => {
     const env = {
       CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
         "https://api-na.myconnectwise.net",
@@ -315,12 +316,14 @@ describe("get_service_ticket", () => {
     );
 
     expect(result).toMatchObject({
-      isError: true,
-      content: [{ type: "text", text: "ConnectWise ticket lookup failed" }],
+      content: [
+        { type: "text", text: JSON.stringify({ id: 123, status: "New" }) },
+      ],
     });
+    expect(JSON.stringify(result)).not.toContain("x".repeat(1_001));
   });
 
-  it("accepts the exact projected ticket field boundaries", async () => {
+  it("accepts the exact status-name boundary", async () => {
     const env = {
       CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
         "https://api-na.myconnectwise.net",
@@ -342,7 +345,6 @@ describe("get_service_ticket", () => {
           async getServiceTicket() {
             return {
               id: 123,
-              summary: "s".repeat(1_000),
               status: { name: "n".repeat(100) },
             };
           },
@@ -525,9 +527,19 @@ describe("get_service_ticket", () => {
     );
 
     expect(selectedCompanies).toEqual(["company-luis", "company-maya"]);
-    expect(JSON.stringify(luis)).toContain("company-luis");
+    expect(luis).toMatchObject({
+      content: [
+        { type: "text", text: JSON.stringify({ id: 1, status: "New" }) },
+      ],
+    });
+    expect(maya).toMatchObject({
+      content: [
+        { type: "text", text: JSON.stringify({ id: 2, status: "New" }) },
+      ],
+    });
+    expect(JSON.stringify(luis)).not.toContain("company-luis");
     expect(JSON.stringify(luis)).not.toContain("company-maya");
-    expect(JSON.stringify(maya)).toContain("company-maya");
     expect(JSON.stringify(maya)).not.toContain("company-luis");
+    expect(JSON.stringify(maya)).not.toContain("company-maya");
   });
 });
