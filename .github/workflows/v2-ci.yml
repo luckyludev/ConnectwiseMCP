@@ -9,6 +9,7 @@ on:
       - "package-lock.json"
       - "tsconfig.json"
       - "wrangler.jsonc"
+      - "docs/architecture.html"
       - ".github/workflows/v2-ci.yml"
   push:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - "package-lock.json"
       - "tsconfig.json"
       - "wrangler.jsonc"
+      - "docs/architecture.html"
       - ".github/workflows/v2-ci.yml"
 
 permissions:
