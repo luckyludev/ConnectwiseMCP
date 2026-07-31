@@ -1,4 +1,6 @@
-# Copilot Studio + Azure (Internal M365 Only)
+# Copilot Studio + Azure (Internal M365 Only) — legacy rollback gateway
+
+> **Legacy-only:** this document describes hosting the Docker/FastAPI rollback gateway on Azure App Service. It is not the approved Cloudflare Worker V2 architecture and must not be used to provision or cut over V2. Any V2 staging work follows the non-secret [staging acceptance checklist](v2-staging-acceptance-checklist.md) and requires authorized Cloudflare/Entra/ConnectWise operators.
 
 This guide explains how to run the ConnectwiseMCP gateway on Azure and connect it to
 Copilot Studio using a Power Platform custom connector. It includes an **internal-only**
@@ -15,27 +17,27 @@ the Azure App Service hosting the gateway.
 
 ## Option A (Recommended): Private Endpoint (Internal Only)
 
-1) **Deploy the gateway to Azure App Service (container)**
+1. **Deploy the gateway to Azure App Service (container)**
    - Build the container from `deploy/http-gateway` and push to ACR.
    - Configure env vars in App Service (no secrets in code).
 
-2) **Add a Private Endpoint** to the App Service
+2. **Add a Private Endpoint** to the App Service
    - Private Endpoint routes traffic over Private Link.
    - Disable public network access on the app.
 
-3) **Private DNS**
+3. **Private DNS**
    - Add a Private DNS zone for the app hostname and link it to the VNet.
 
-4) **Power Platform VNet access**
+4. **Power Platform VNet access**
    - Your Power Platform environment must be linked to a VNet to reach private endpoints.
    - Check the custom connector VNet limitations for your environment.
 
-5) **Create a Custom Connector** (Power Platform)
+5. **Create a Custom Connector** (Power Platform)
    - Security: **OAuth 2.0** with Azure AD.
    - Base URL: your private endpoint hostname.
    - Define a POST action to `/mcp`.
 
-6) **Add an Action in Copilot Studio**
+6. **Add an Action in Copilot Studio**
    - Add your custom connector as a tool/action.
 
 ## Option B: Public Endpoint + Access Restrictions (Less strict)

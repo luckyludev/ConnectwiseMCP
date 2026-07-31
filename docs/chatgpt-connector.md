@@ -1,9 +1,12 @@
-# ChatGPT Connector Setup (OAuth)
+# ChatGPT Connector Setup (OAuth) — legacy rollback gateway
+
+> **Legacy-only:** this guide configures the Docker/FastAPI rollback gateway, not the Cloudflare Worker V2. It must not be used to deploy, configure, or represent the V2 production path. Worker V2 client onboarding remains human-gated until the non-secret [staging acceptance checklist](v2-staging-acceptance-checklist.md) has passed. The V2 read-surface boundary is documented in [the migration classification](legacy-read-surface-classification.md).
 
 This guide configures the ConnectwiseMCP HTTP gateway for ChatGPT (and other MCP clients)
 that require OAuth 2.1 + Dynamic Client Registration (DCR).
 
 If you follow this top-to-bottom, you should be able to:
+
 - Connect the server in ChatGPT.
 - Complete OAuth login successfully.
 - See MCP tools from ConnectwiseMCP.
@@ -29,6 +32,7 @@ curl -i https://connectwisemcp.funcshun.com/.well-known/oauth-authorization-serv
 ```
 
 Expected:
+
 - `/health` returns `200`.
 - Both `/.well-known/*` endpoints return `200` JSON.
 
@@ -37,19 +41,23 @@ Expected:
 Create an **App Registration** for the gateway server (confidential client).
 
 Required values:
+
 - **Tenant ID**
 - **Client ID**
 - **Client Secret**
 
 Redirect URIs (**Web**):
+
 - `https://connectwisemcp.funcshun.com/oauth/callback`
 - `https://chatgpt.com/connector_platform_oauth_redirect`
 - `https://platform.openai.com/apps-manage/oauth`
 
 Scopes:
+
 - `openid profile email`
 
 Important Azure settings:
+
 - Platform type must be **Web** (not SPA).
 - Generate and store a **Client Secret**.
 - Token configuration should include standard OpenID scopes.
@@ -57,11 +65,13 @@ Important Azure settings:
 ## 2) Configure the gateway
 
 Copy the env template and fill values:
+
 ```
 cp deploy/http-gateway/.env.example deploy/http-gateway/.env
 ```
 
 Set:
+
 - `SERVER_URL=https://connectwisemcp.funcshun.com`
 - `MCP_RESOURCE_URL=https://connectwisemcp.funcshun.com`
 - `JWT_SECRET_KEY` (random secret)
@@ -70,11 +80,13 @@ Set:
 - `CLOUDFLARE_TUNNEL_TOKEN`
 
 Notes:
+
 - `SERVER_URL` and `MCP_RESOURCE_URL` should exactly match your public URL
   (scheme + host, no trailing path).
 - `JWT_SECRET_KEY` should be long and random.
 
 Start the stack:
+
 ```
 cd deploy/http-gateway
 docker compose up -d --build
@@ -99,6 +111,7 @@ Confirm that URLs and issuer/resource fields reference your public domain.
 ## 4) Add the MCP Connector in ChatGPT
 
 In ChatGPT:
+
 - **MCP Server URL:** `https://connectwisemcp.funcshun.com/sse`
 - **Authentication:** OAuth
 - Leave Client ID/Secret blank (dynamic registration)
