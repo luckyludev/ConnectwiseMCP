@@ -1,0 +1,50 @@
+name: legacy-oauth-ci
+
+on:
+  pull_request:
+    paths:
+      - "deploy/http-gateway/**"
+      - ".github/workflows/legacy-oauth-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "deploy/http-gateway/**"
+      - ".github/workflows/legacy-oauth-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legacy-oauth-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: deploy/http-gateway/requirements.txt
+      - name: Install gateway and verification dependencies
+        run: >-
+          python -m pip install -r deploy/http-gateway/requirements.txt
+          pytest==9.1.1 ruff==0.16.1 pip-audit==2.10.1
+      - name: Compile legacy gateway
+        run: python -m compileall -q deploy/http-gateway/app deploy/http-gateway/tests
+      - name: Run core Python checks
+        run: >-
+          ruff check --select E4,E7,E9,F
+          deploy/http-gateway/app/main.py
+          deploy/http-gateway/tests/test_oauth_registration.py
+      - name: Run legacy OAuth security tests
+        run: python -m pytest -q deploy/http-gateway/tests/test_oauth_registration.py
+      - name: Audit gateway dependencies
+        run: pip-audit -r deploy/http-gateway/requirements.txt

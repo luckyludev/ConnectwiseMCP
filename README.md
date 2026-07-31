@@ -46,6 +46,34 @@ ConnectWise MCP server migrating from the legacy Docker/FastAPI gateway to a sec
                                                                             └──────────────────────┘
 ```
 
+## Legacy rollback safety boundary
+
+The Docker/FastAPI gateway under `deploy/` is retained only as a controlled emergency rollback path while Worker v2 completes live acceptance. Its OAuth boundary is hardened to:
+
+- return a generated client secret only once during bounded dynamic registration;
+- cap registration bodies at 16 KiB, redirect lists at 10 entries, individual redirects at 2,048 characters, names at 128 characters, caller state at 512 characters, Azure subject IDs at 256 characters, and each process-local client/auth-request/auth-code store at 1,000 entries;
+- expire newly registered clients after 24 hours and evict expired entries before admitting more registrations;
+- expose no unauthenticated client-registration readback or management URI;
+- reject unknown clients instead of authorization-time auto-provisioning;
+- allow only `client_secret_post`, authorization-code grants, `code` responses, bounded allowlisted scopes, and S256 PKCE;
+- require strict absolute HTTPS callback URIs and literal redirect/resource binding;
+- consume callback state and authorization codes once;
+- sanitize upstream OAuth failures and Azure verification logs;
+- require signed RS256 Entra tokens with exact issuer/audience, mandatory `exp`/`iat`, time validation, and rate-limited JWKS refresh on key rotation;
+- require at least 32 ASCII bytes for the local JWT signing secret and static bearer token.
+
+It still has material legacy limitations:
+
+- dynamic registration remains unauthenticated, has no redirect allowlist or application-level rate limit, and therefore requires perimeter access control;
+- clients, callback state, and authorization codes are process-local; client registrations expire after 24 hours, and all state disappears on restart;
+- locally issued access tokens expire after one hour and the gateway has no refresh-token grant;
+- one deployment-wide ConnectWise credential set and static bearer token remain available;
+- OAuth scope claims do not provide per-tool authorization;
+- it does not provide Worker v2's immutable six-user identity mapping, request-scoped profile secrets, narrow tool authorization, or structured audit model;
+- broad legacy MCP tools remain present.
+
+Do not treat this gateway as the production target or leave it generally exposed after v2 cutover. Any rollback must be time-bounded, access-controlled, monitored, and reversed after the incident. Never commit `.env` or registration responses, and never copy real client, Entra, ConnectWise, Cloudflare, or JWT secrets into logs or issue reports.
+
 ## Docker setup (gateway + tunnel)
 
 The Docker setup lives in `deploy/http-gateway/docker-compose.yml` and runs:
