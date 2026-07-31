@@ -106,7 +106,7 @@ Before production cutover:
 3. Run concurrent calls for at least two mapped users and confirm their tenant/object/profile fields remain isolated.
 4. Inspect exported events and confirm no tool arguments, ticket content, tokens, headers, credentials, URLs, or upstream bodies appear.
 5. Configure alerts for sustained `failure`/`denied` increases and for an unexpected absence of audit events during known test traffic. Alert payloads must use only the allowlisted schema.
-6. Record the staging evidence and approved retention/access settings in the deployment checklist. Local unit tests and Wrangler dry-run do not satisfy these live gates.
+6. Record the staging evidence and approved retention/access settings in [`v2-staging-acceptance-checklist.md`](v2-staging-acceptance-checklist.md). Local unit tests and Wrangler dry-run do not satisfy these live gates.
 
 ## Verification
 
