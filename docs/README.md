@@ -7,6 +7,7 @@
 - [`v2-foundation.md`](v2-foundation.md) - implemented Worker V2 security boundary and configuration reference
 - [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md) - explicit V2 migration decisions for the legacy MCP tool surface
 - [`v2-staging-acceptance-checklist.md`](v2-staging-acceptance-checklist.md) - human-operated, non-secret staging and cutover gates
+- [`cloudflare-workers-staging-howto.md`](cloudflare-workers-staging-howto.md) - safe Cloudflare Workers staging operator procedure and approval boundaries
 
 ## Legacy rollback client/deployment guides
 
