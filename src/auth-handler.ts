@@ -77,6 +77,12 @@ function base64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
+function oauthUserId(tenantId: string, objectId: string): string {
+  // workers-oauth-provider uses ':' as the authorization-code field delimiter,
+  // so the subject itself must not contain that character.
+  return base64Url(new TextEncoder().encode(`${tenantId}:${objectId}`));
+}
+
 async function createPkce(): Promise<{ verifier: string; challenge: string }> {
   const bytes = crypto.getRandomValues(new Uint8Array(64));
   const verifier = base64Url(bytes);
@@ -130,7 +136,11 @@ async function beginAuthorization(
   try {
     oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
   } catch {
-    return new Response("Invalid authorization request", { status: 400 });
+    console.log("[auth] stage=authorize_parse fail (parseAuthRequest threw)");
+    return new Response("Invalid authorization request", {
+      status: 400,
+      headers: { "X-Auth-Stage": "authorize_parse" },
+    });
   }
 
   if (oauthRequest.resource !== env.MCP_CANONICAL_URL) {
@@ -168,6 +178,8 @@ async function beginAuthorization(
     scopes: oauthRequest.scope,
     signedState,
     csrfToken,
+    origin,
+    clientRedirectUri: oauthRequest.redirectUri,
   });
   const headers = new Headers(response.headers);
   headers.append("Set-Cookie", cookie("__Host-CW_CSRF", csrfToken));
@@ -195,7 +207,15 @@ async function continueAuthorization(
     !csrfFromCookie ||
     !(await equalTokens(csrfFromForm, csrfFromCookie))
   ) {
-    return new Response("Invalid authorization request", { status: 400 });
+    console.log("[auth] stage=authorize_consent fail", {
+      has_flow_state: typeof signedConsent === "string",
+      has_form_csrf: typeof csrfFromForm === "string",
+      has_cookie_csrf: !!csrfFromCookie,
+    });
+    return new Response("Invalid authorization request", {
+      status: 400,
+      headers: { "X-Auth-Stage": "authorize_consent" },
+    });
   }
 
   const origin = new URL(env.MCP_CANONICAL_URL).origin;
@@ -208,8 +228,12 @@ async function continueAuthorization(
       origin,
     );
   } catch {
+    console.log(
+      "[auth] stage=authorize_consent fail flow_state_verify (tampered/expired/missing claims)",
+    );
     return new Response("Invalid or expired authorization request", {
       status: 400,
+      headers: { "X-Auth-Stage": "authorize_consent_state" },
     });
   }
 
@@ -284,7 +308,15 @@ async function completeEntraCallback(
   const code = url.searchParams.get("code");
   const signedState = url.searchParams.get("state");
   if (url.searchParams.has("error") || !code || !signedState) {
-    return new Response("Authentication failed", { status: 400 });
+    console.log("[auth] stage=callback fail", {
+      ms_returned_error: url.searchParams.has("error"),
+      has_code: !!code,
+      has_state: !!signedState,
+    });
+    return new Response("Authentication failed", {
+      status: 400,
+      headers: { "X-Auth-Stage": "callback_error_param" },
+    });
   }
 
   const origin = new URL(env.MCP_CANONICAL_URL).origin;
@@ -297,8 +329,12 @@ async function completeEntraCallback(
       origin,
     );
   } catch {
+    console.log(
+      "[auth] stage=callback fail state_verify (signed state invalid/expired)",
+    );
     return new Response("Invalid or expired authentication state", {
       status: 400,
+      headers: { "X-Auth-Stage": "callback_state" },
     });
   }
   const cookieNonce = readCookie(request, "__Host-CW_ENTRA_STATE");
@@ -308,7 +344,20 @@ async function completeEntraCallback(
     !state.pkceVerifier ||
     !state.oidcNonce
   ) {
-    return new Response("Invalid authentication session", { status: 400 });
+    console.log(
+      "[auth] stage=callback fail session_cookie (nonce/pkce/oidc presence)",
+      {
+        has_cookie: !!cookieNonce,
+        cookie_match:
+          !!cookieNonce && (await equalTokens(cookieNonce, state.browserNonce)),
+        has_pkce: !!state.pkceVerifier,
+        has_oidc_nonce: !!state.oidcNonce,
+      },
+    );
+    return new Response("Invalid authentication session", {
+      status: 400,
+      headers: { "X-Auth-Stage": "callback_session" },
+    });
   }
 
   const oauthConfig = {
@@ -350,7 +399,7 @@ async function completeEntraCallback(
     };
     const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
       request: state.oauthRequest,
-      userId: `${profile.tenantId}:${profile.objectId}`,
+      userId: oauthUserId(profile.tenantId, profile.objectId),
       metadata: { label: profile.profileAlias },
       scope: state.oauthRequest.scope.filter((scope) => scope === "mcp:read"),
       props,
@@ -361,10 +410,16 @@ async function completeEntraCallback(
     });
     headers.append("Set-Cookie", cookie("__Host-CW_ENTRA_STATE", "", 0));
     return new Response(null, { status: 302, headers });
-  } catch {
+  } catch (error) {
+    console.log("[auth] stage=callback fail exchange_or_policy", {
+      error_name: error instanceof Error ? error.name : typeof error,
+    });
     return new Response("Authentication or authorization failed", {
       status: 403,
-      headers: { "Cache-Control": "no-store" },
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "callback_exchange",
+      },
     });
   }
 }
