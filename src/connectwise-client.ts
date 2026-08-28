@@ -66,6 +66,14 @@ export type ConnectWiseClient = {
       issueNote: boolean;
     },
   ): Promise<unknown>;
+  attachImageToTicket(
+    ticketId: number,
+    input: { filename: string; base64: string; mimeType: string },
+  ): Promise<unknown>;
+  attachImageToTimeEntry(
+    timeEntryId: number,
+    input: { filename: string; base64: string; mimeType: string },
+  ): Promise<unknown>;
   searchServiceTickets(searchText: string, pageSize: number): Promise<unknown>;
   getAgreement(agreementId: number): Promise<unknown>;
   getAgreementAdditions(
@@ -106,6 +114,46 @@ function boundedPageSize(value: number): void {
   if (!Number.isSafeInteger(value) || value < 1 || value > 50) {
     throw new Error("Invalid page size");
   }
+}
+
+const ATTACHMENT_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+
+const MAX_ATTACHMENT_BASE64_CHARS = Math.ceil((10_000_000 / 3) * 4);
+
+function attachmentPayload(input: {
+  filename: string;
+  base64: string;
+  mimeType: string;
+}): { filename: string; fileContents: string; fileType: string } {
+  if (!ATTACHMENT_MIME_TYPES.has(input.mimeType)) {
+    throw new Error("Unsupported image type");
+  }
+  if (
+    typeof input.base64 !== "string" ||
+    input.base64.length === 0 ||
+    input.base64.length > MAX_ATTACHMENT_BASE64_CHARS ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)
+  ) {
+    throw new Error("Invalid image contents");
+  }
+  if (
+    typeof input.filename !== "string" ||
+    input.filename.length < 1 ||
+    input.filename.length > 200 ||
+    !/^[A-Za-z0-9][A-Za-z0-9 ._()\-]*\.[A-Za-z0-9]{1,10}$/.test(input.filename)
+  ) {
+    throw new Error("Invalid attachment filename");
+  }
+  return {
+    filename: input.filename,
+    fileContents: input.base64,
+    fileType: input.mimeType,
+  };
 }
 
 function conditionString(value: string): string {
@@ -288,6 +336,42 @@ export function createConnectWiseClient(
           payload,
         );
       }
+    },
+
+    async attachImageToTicket(ticketId, input): Promise<unknown> {
+      positiveId(ticketId, "service ticket ID");
+      const payload = attachmentPayload(input);
+      try {
+        return await requestJson(
+          "POST",
+          `/service/tickets/${ticketId}/attachments`,
+          undefined,
+          payload,
+        );
+      } catch (error) {
+        if (
+          !(error instanceof ConnectWiseRequestError) ||
+          error.status !== 404
+        ) {
+          throw error;
+        }
+        return requestJson(
+          "POST",
+          `/project/tickets/${ticketId}/attachments`,
+          undefined,
+          payload,
+        );
+      }
+    },
+
+    async attachImageToTimeEntry(timeEntryId, input): Promise<unknown> {
+      positiveId(timeEntryId, "time entry ID");
+      return requestJson(
+        "POST",
+        `/timeentries/${timeEntryId}/attachments`,
+        undefined,
+        attachmentPayload(input),
+      );
     },
 
     async searchServiceTickets(

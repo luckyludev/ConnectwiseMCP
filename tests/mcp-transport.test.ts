@@ -33,6 +33,8 @@ function businessClient(
     getTicketTasks: unused,
     getTicketTimeEntries: unused,
     createTicketNote: unused,
+    attachImageToTicket: unused,
+    attachImageToTimeEntry: unused,
     searchServiceTickets: unused,
     getAgreement: unused,
     getAgreementAdditions: unused,
@@ -41,6 +43,10 @@ function businessClient(
     ...overrides,
   };
 }
+
+const tinyPng =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+const tinyPngDataUri = `data:image/png;base64,${tinyPng}`;
 
 describe("authenticated MCP transport", () => {
   it("advertises the complete bounded business-tool catalog", async () => {
@@ -77,6 +83,8 @@ describe("authenticated MCP transport", () => {
       "get_ticket_attachments_with_details",
       "get_complete_ticket_content",
       "create_ticket_note",
+      "attach_image_to_ticket",
+      "attach_image_to_time_entry",
       "get_agreement_additions",
       "get_agreement_additions_summary",
       "create_agreement_addition",
@@ -176,6 +184,259 @@ describe("authenticated MCP transport", () => {
     });
     expect(auditMessages[0]).not.toContain("Approved staging note");
     expect(auditMessages[0]).not.toContain("77");
+  });
+
+  it("attaches a chat image to a ticket with only the authenticated user's profile", async () => {
+    let received:
+      { companyId: string; ticketId: number; attachment: object } | undefined;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async attachImageToTicket(ticketId, attachment) {
+                received = {
+                  companyId: credentials.companyId,
+                  ticketId,
+                  attachment,
+                };
+                return {
+                  id: 55,
+                  url: "https://na.myconnectwise.net/documents/55/contents",
+                  size: 68,
+                };
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: {
+            name: "attach_image_to_ticket",
+            arguments: {
+              ticketId: 77,
+              image: tinyPngDataUri,
+              filename: "shot.png",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(received).toEqual({
+      companyId: "company-luis",
+      ticketId: 77,
+      attachment: {
+        filename: "shot.png",
+        base64: tinyPng,
+        mimeType: "image/png",
+      },
+    });
+    expect(body).toContain('\\"id\\":55');
+    expect(body).toContain('\\"filename\\":\\"shot.png\\"');
+  });
+
+  it("attaches a chat image to a time entry and falls back to a generated filename", async () => {
+    let received:
+      | { companyId: string; timeEntryId: number; attachment: object }
+      | undefined;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async attachImageToTimeEntry(timeEntryId, attachment) {
+                received = {
+                  companyId: credentials.companyId,
+                  timeEntryId,
+                  attachment,
+                };
+                return {
+                  id: 66,
+                  url: "https://na.myconnectwise.net/documents/66/contents",
+                };
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "MAYA", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 4,
+          method: "tools/call",
+          params: {
+            name: "attach_image_to_time_entry",
+            arguments: {
+              timeEntryId: 42,
+              image: tinyPngDataUri,
+              filename: "../../etc/passwd",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(received).toEqual({
+      companyId: "company-maya",
+      timeEntryId: 42,
+      attachment: {
+        filename: "image.png",
+        base64: tinyPng,
+        mimeType: "image/png",
+      },
+    });
+    expect(body).toContain('\\"id\\":66');
+    expect(body).not.toContain("passwd");
+  });
+
+  it("inlines a chat image in a ticket note after attaching it to the ticket", async () => {
+    const calls: string[] = [];
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async attachImageToTicket(_ticketId, _attachment) {
+                calls.push(`attach:${credentials.companyId}`);
+                return {
+                  id: 71,
+                  url: "https://na.myconnectwise.net/documents/71/contents?token=abc&x=1",
+                };
+              },
+              async createTicketNote(ticketId, note) {
+                calls.push(`note:${ticketId}:${note.text}`);
+                return { id: 92 };
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 5,
+          method: "tools/call",
+          params: {
+            name: "create_ticket_note",
+            arguments: {
+              ticketId: 77,
+              text: "See the screenshot below.",
+              image: tinyPngDataUri,
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(calls[0]).toBe("attach:company-luis");
+    expect(calls[1]).toBe(
+      'note:77:See the screenshot below.\n<img src="https://na.myconnectwise.net/documents/71/contents?token=abc&amp;x=1">',
+    );
+    expect(body).toContain('\\"id\\":92');
+    expect(body).toContain('imageAttached\\":true');
+  });
+
+  it("rejects non-image and oversized image payloads before any ConnectWise call", async () => {
+    let attachCalls = 0;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () =>
+            businessClient({
+              async attachImageToTicket() {
+                attachCalls += 1;
+                return { id: 1 };
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const post = async (id: number, imageValue: string) => {
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            method: "tools/call",
+            params: {
+              name: "attach_image_to_ticket",
+              arguments: { ticketId: 77, image: imageValue },
+            },
+          }),
+        }),
+      );
+      return { status: response.status, body: await response.text() };
+    };
+
+    const badType = await post(6, "data:text/plain;base64,SGVsbG8=");
+    const oversized = await post(
+      7,
+      `data:image/png;base64,${"A".repeat(14_000_000)}`,
+    );
+    expect(badType.body).toContain("image data URI");
+    expect(oversized.body).toContain("image data URI");
+    expect(badType.body).not.toContain('\\"id\\":1');
+    expect(attachCalls).toBe(0);
   });
 
   it("isolates concurrent profile contexts from hostile headers and arguments", async () => {
