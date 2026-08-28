@@ -15,6 +15,7 @@ import {
   getAuditStartTime,
   type ToolAuditDependencies,
 } from "./audit";
+import { registerConnectWiseBusinessTools } from "./connectwise-business-tools";
 
 export type AuditedToolDependencies = {
   audit?: ToolAuditDependencies;
@@ -28,7 +29,7 @@ export function whoamiResult(
   if (!props?.scopes?.includes("mcp:read")) {
     emitToolAudit(
       {
-        props: props as unknown as Record<string, unknown> | undefined,
+        props,
         tool: "whoami",
         outcome: "denied",
         reason: "insufficient_scope",
@@ -44,7 +45,7 @@ export function whoamiResult(
   if (!props.profileAlias) {
     emitToolAudit(
       {
-        props: props as unknown as Record<string, unknown>,
+        props,
         tool: "whoami",
         outcome: "denied",
         reason: "profile_unavailable",
@@ -59,7 +60,7 @@ export function whoamiResult(
   }
   emitToolAudit(
     {
-      props: props as unknown as Record<string, unknown>,
+      props,
       tool: "whoami",
       outcome: "success",
       reason: "ok",
@@ -83,7 +84,12 @@ const serviceTicketSchema = z.object({
 });
 
 export type ServiceTicketDependencies = AuditedToolDependencies & {
-  createClient?: (credentials: ConnectWiseCredentials) => ConnectWiseClient;
+  createClient?: (
+    credentials: ConnectWiseCredentials,
+  ) => Pick<ConnectWiseClient, "getServiceTicket">;
+  createBusinessClient?: (
+    credentials: ConnectWiseCredentials,
+  ) => ConnectWiseClient;
 };
 
 export async function getServiceTicketResult(
@@ -96,7 +102,7 @@ export async function getServiceTicketResult(
   if (!props?.scopes?.includes("mcp:read")) {
     emitToolAudit(
       {
-        props: props as unknown as Record<string, unknown> | undefined,
+        props,
         tool: "get_service_ticket",
         outcome: "denied",
         reason: "insufficient_scope",
@@ -112,7 +118,7 @@ export async function getServiceTicketResult(
   if (!props.profileAlias) {
     emitToolAudit(
       {
-        props: props as unknown as Record<string, unknown>,
+        props,
         tool: "get_service_ticket",
         outcome: "denied",
         reason: "profile_unavailable",
@@ -136,7 +142,7 @@ export async function getServiceTicketResult(
     );
     emitToolAudit(
       {
-        props: props as unknown as Record<string, unknown>,
+        props,
         tool: "get_service_ticket",
         outcome: "success",
         reason: "ok",
@@ -158,7 +164,7 @@ export async function getServiceTicketResult(
   } catch {
     emitToolAudit(
       {
-        props: props as unknown as Record<string, unknown>,
+        props,
         tool: "get_service_ticket",
         outcome: "failure",
         reason: "lookup_failed",
@@ -212,6 +218,19 @@ export function createMcpServer(
       const props = getMcpAuthContext()?.props as
         Partial<EntraAccessTokenProps> | undefined;
       return getServiceTicketResult(props, env, ticketId, dependencies);
+    },
+  );
+
+  registerConnectWiseBusinessTools(
+    server,
+    env,
+    () =>
+      getMcpAuthContext()?.props as Partial<EntraAccessTokenProps> | undefined,
+    {
+      ...(dependencies.audit ? { audit: dependencies.audit } : {}),
+      ...(dependencies.createBusinessClient
+        ? { createClient: dependencies.createBusinessClient }
+        : {}),
     },
   );
 

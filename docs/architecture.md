@@ -1,6 +1,6 @@
 # ConnectWise MCP v2 Architecture
 
-> **Status:** Worker V2 security/authentication is implemented in `src/`, including `whoami` and one narrow request-scoped read-only `get_service_ticket` tool that returns only ticket ID and status metadata. Additional reads, all writes, and live staging validation remain gated. The existing Docker deployment stays available for rollback until the required acceptance gates pass.
+> **Status:** Worker V2 security/authentication and the bounded business read/write catalog are implemented in `src/`. Entra selects one immutable profile mapping, while the mapped ConnectWise API member remains the final permission authority. Live staging validation remains required. The existing Docker deployment stays available for rollback until the acceptance gates pass.
 
 ## Recommendation
 
@@ -117,11 +117,11 @@ main
 Recommended delivery sequence:
 
 1. **Completed:** documentation, threat model, secret contract, and migration records.
-2. **Completed:** Worker foundation, OAuth provider mechanics, CI, and no write tools.
+2. **Completed:** Worker foundation, OAuth provider mechanics, CI, and sanitized per-tool audit events.
 3. **Completed:** Entra validation and tested `tid:oid` profile resolution.
-4. **Completed:** one fixed-route, metadata-only read tool with request-scoped ConnectWise credentials; the remaining legacy surface is classified in [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md).
+4. **Completed:** fixed-route bounded business reads and explicit non-idempotent writes with request-scoped ConnectWise credentials; the legacy surface is classified in [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md).
 5. **Pending:** live staging with six test profiles, MCP conformance, ConnectWise permission, isolation, audit, and rollback acceptance as defined in [`v2-staging-acceptance-checklist.md`](v2-staging-acceptance-checklist.md).
-6. **Future, separately authorized:** guarded write tools with explicit policy, confirmation, idempotency, least-privilege tests, and audit controls.
+6. **Completed:** ticket-note and agreement-addition writes use fixed payloads, strict validation, no automatic write retry, ConnectWise role enforcement, and sanitized receipts/audits.
 7. **After acceptance:** approved production cutover, monitoring, and eventual retirement of the Docker rollback path.
 
 ## Security requirements

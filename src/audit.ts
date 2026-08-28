@@ -1,14 +1,33 @@
 export type ToolAuditOutcome = "success" | "denied" | "failure";
 export type ToolAuditReason =
-  "ok" | "insufficient_scope" | "profile_unavailable" | "lookup_failed";
+  | "ok"
+  | "insufficient_scope"
+  | "profile_unavailable"
+  | "lookup_failed"
+  | "connectwise_denied"
+  | "operation_failed";
+
+export type ToolAuditName =
+  | "whoami"
+  | "get_service_ticket"
+  | "search_tickets_by_content"
+  | "get_ticket_notes_with_content"
+  | "get_ticket_attachments_with_details"
+  | "get_complete_ticket_content"
+  | "create_ticket_note"
+  | "get_agreement_additions"
+  | "get_agreement_additions_summary"
+  | "create_agreement_addition"
+  | "search_agreement_additions"
+  | "get_agreement_billing_summary";
 
 const entraIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const profileAliasPattern = /^[A-Z][A-Z0-9_]{0,31}$/;
 
 export type ToolAuditInput = {
-  props: Record<string, unknown> | undefined;
-  tool: "whoami" | "get_service_ticket";
+  props: unknown;
+  tool: ToolAuditName;
   outcome: ToolAuditOutcome;
   reason: ToolAuditReason;
   startedAtMs: number;
@@ -46,7 +65,10 @@ export function emitToolAudit(
     ) {
       return;
     }
-    const props = input.props ?? {};
+    const props =
+      input.props !== null && typeof input.props === "object"
+        ? (input.props as Record<string, unknown>)
+        : {};
     const event = {
       version: 1,
       event: "mcp_tool_invocation",

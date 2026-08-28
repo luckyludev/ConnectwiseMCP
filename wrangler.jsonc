@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "connectwise-mcp-v2",
   "main": "src/index.ts",
-  "compatibility_date": "2026-07-29",
+  "compatibility_date": "2026-08-28",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "kv_namespaces": [
     {
@@ -30,15 +30,6 @@
           "preview_id": "d6b692ce6a9142e39928d65ecf7db115",
         },
       ],
-      "vars": {
-        "MCP_CANONICAL_URL": "https://connectwise-mcp-v2-staging.funcshun.workers.dev/mcp",
-        "ENTRA_TENANT_ID": "REPLACE_WITH_STAGING_TENANT_ID",
-        "ENTRA_CLIENT_ID": "REPLACE_WITH_STAGING_CLIENT_ID",
-        "ALLOWED_GROUP_IDS": "[]",
-        "ALLOWED_APP_ROLES": "[]",
-        "ALLOWED_CLIENT_REDIRECT_URIS": "[]",
-        "CONNECTWISE_ALLOWED_ORIGINS": "[]",
-      },
     },
   },
   "observability": {

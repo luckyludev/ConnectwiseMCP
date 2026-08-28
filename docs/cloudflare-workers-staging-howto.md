@@ -2,6 +2,8 @@
 
 > **Purpose:** safely prepare and validate a Cloudflare Workers staging environment for ConnectWise MCP V2. This is an operator procedure, not production cutover authorization. It never authorizes secret disclosure, live ConnectWise access, DNS changes, or production deployment.
 
+> **Remote variable source of truth:** staging policy variables are managed remotely. The `env.staging` block intentionally omits `vars`; deploy staging with `--keep-vars` so Wrangler preserves the approved remote values. Never add placeholder staging values to `wrangler.jsonc`, because explicitly configured values replace the live policy bindings.
+
 ## Boundaries and prerequisites
 
 - Use an approved Cloudflare account and a staging-only Worker/KV target. Never reuse production KV namespaces or Worker secrets in staging.
@@ -64,7 +66,7 @@ Add the resulting identifier only to a reviewed staging binding, separate from t
 }
 ```
 
-Worker environments do **not** inherit KV bindings or `vars`; define every required non-secret binding and variable in the `staging` block. Keep production placeholders and production bindings separate.
+Worker environments do **not** inherit KV bindings or `vars`. Keep the staging KV binding in the `staging` block, but keep the approved staging policy-variable values in the remote Worker configuration and deploy with `--keep-vars`. Keep production placeholders and production bindings separate.
 
 ## 3. Establish the literal canonical staging resource
 
@@ -74,23 +76,9 @@ For a Workers.dev staging Worker named `connectwise-mcp-v2-staging`, the canonic
 https://connectwise-mcp-v2-staging.<workers-dev-subdomain>.workers.dev/mcp
 ```
 
-The value must be literal and canonical: HTTPS only; `/mcp` path included; no redirect, credentials, query, fragment, port, or trailing-slash variation. Set it as `env.staging.vars.MCP_CANONICAL_URL` before first publish. The Worker validates this URL during startup, so a non-URL placeholder prevents deployment.
+The value must be literal and canonical: HTTPS only; `/mcp` path included; no redirect, credentials, query, fragment, port, or trailing-slash variation. Set the remote staging `MCP_CANONICAL_URL` before first publish. The Worker validates this URL during startup, so a non-URL placeholder prevents deployment.
 
-Keep the rest of the staging non-secret configuration deliberately incomplete until the approved Entra and ConnectWise settings are available:
-
-```jsonc
-{
-  "vars": {
-    "MCP_CANONICAL_URL": "https://connectwise-mcp-v2-staging.<workers-dev-subdomain>.workers.dev/mcp",
-    "ENTRA_TENANT_ID": "REPLACE_WITH_STAGING_TENANT_ID",
-    "ENTRA_CLIENT_ID": "REPLACE_WITH_STAGING_CLIENT_ID",
-    "ALLOWED_GROUP_IDS": "[]",
-    "ALLOWED_APP_ROLES": "[]",
-    "ALLOWED_CLIENT_REDIRECT_URIS": "[]",
-    "CONNECTWISE_ALLOWED_ORIGINS": "[]",
-  },
-}
-```
+Configure these non-secret keys remotely through the approved Cloudflare workflow: `MCP_CANONICAL_URL`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ALLOWED_GROUP_IDS`, `ALLOWED_APP_ROLES`, `ALLOWED_CLIENT_REDIRECT_URIS`, and `CONNECTWISE_ALLOWED_ORIGINS`. Do not copy their live values into the repository.
 
 Empty eligibility lists and absent secrets must remain fail-closed. Do not deploy an Entra/ConnectWise-capable service until the separate approvals below are complete.
 
@@ -99,7 +87,7 @@ Empty eligibility lists and absent secrets must remain fail-closed. Do not deplo
 A configuration change requires the normal repository review and CI process. Once the target release is merged and an authorized operator explicitly approves deployment, publish only the staging environment:
 
 ```bash
-npx wrangler deploy --env staging
+npx wrangler deploy --env staging --keep-vars
 ```
 
 This creates or updates the staging Worker and its Workers.dev endpoint. It does not create a custom-domain route, but it is an external deployment and must be recorded in the secure operations record.

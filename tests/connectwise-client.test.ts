@@ -231,4 +231,80 @@ describe("ConnectWiseClient", () => {
     expect(cancellations).toBe(2);
     expect(delays).toEqual([100]);
   });
+
+  it("escapes ticket-search conditions and enforces the result bound", async () => {
+    let capturedUrl = "";
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        capturedUrl = String(input);
+        return Response.json([]);
+      },
+    });
+
+    await client.searchServiceTickets("Luis's laptop", 12);
+    const url = new URL(capturedUrl);
+    expect(url.pathname).toBe("/v4_6_release/apis/3.0/service/tickets");
+    expect(url.searchParams.get("conditions")).toBe(
+      "summary contains 'Luis''s laptop'",
+    );
+    expect(url.searchParams.get("pageSize")).toBe("12");
+    await expect(client.searchServiceTickets("x", 51)).rejects.toThrow(
+      "Invalid page size",
+    );
+  });
+
+  it("does not retry a ticket-note write after an ambiguous fetch failure", async () => {
+    let attempts = 0;
+    const client = createConnectWiseClient(credentials, {
+      sleep: async () => undefined,
+      fetcher: async () => {
+        attempts += 1;
+        throw new Error("ambiguous network failure");
+      },
+    });
+
+    await expect(
+      client.createTicketNote(123, {
+        text: "Customer called",
+        internalOnly: true,
+        resolutionNote: false,
+        issueNote: false,
+      }),
+    ).rejects.toThrow("ConnectWise request unavailable");
+    expect(attempts).toBe(1);
+  });
+
+  it("sends a fixed agreement-addition payload without caller-selected paths", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        capturedUrl = String(input);
+        capturedInit = init;
+        return Response.json({ id: 44 });
+      },
+    });
+
+    await client.createAgreementAddition(7, {
+      productId: 8,
+      quantity: 2,
+      unitPrice: 15.5,
+      effectiveDate: "2026-08-28",
+      description: "Managed service",
+      billableOption: "Billable",
+    });
+
+    expect(capturedUrl).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/finance/agreements/7/additions",
+    );
+    expect(capturedInit?.method).toBe("POST");
+    expect(JSON.parse(String(capturedInit?.body))).toEqual({
+      product: { id: 8 },
+      quantity: 2,
+      unitPrice: 15.5,
+      effectiveDate: "2026-08-28",
+      billableOption: "Billable",
+      description: "Managed service",
+    });
+  });
 });
