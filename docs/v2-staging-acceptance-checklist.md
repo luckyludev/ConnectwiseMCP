@@ -33,7 +33,7 @@
 - [ ] Provision a unique high-entropy `OAUTH_STATE_SECRET` of at least 32 random bytes.
 - [ ] Provision the Entra client secret and confirm it is valid for the staging application without recording its value.
 - [ ] Create `IDENTITY_PROFILE_MAP` using immutable Entra `<tid>:<oid>` keys only. Verify exactly the approved six test identities map to approved aliases; do not use names or emails as keys.
-- [ ] Provision exactly one `CW_PROFILE_<ALIAS>` secret for each mapped alias. Verify each profile uses a dedicated ConnectWise API member/security role and least-privilege read permissions.
+- [ ] Provision exactly one `CW_PROFILE_<ALIAS>` secret for each mapped alias. Verify each profile uses a dedicated ConnectWise API member/security role whose read/write permissions match that user's approved duties.
 - [ ] Have an independent operator inspect binding names/counts and mapping coverage without exposing secret values. Confirm no unmapped identity can resolve a profile.
 
 ## 4. Entra/OAuth protocol acceptance
@@ -54,16 +54,19 @@ Perform these tests using approved staging identities and test clients; retain o
 - [ ] Use MCP Inspector or another approved MCP client against staging; verify protocol discovery and OAuth interaction succeed over the canonical HTTPS URL.
 - [ ] With each mapped test identity, call `whoami` and verify it returns only the expected profile alias.
 - [ ] With each mapped test identity, call `get_service_ticket` only against an approved test ticket. Verify the response contains only numeric `id` and bounded `status`; it must not contain summary/description text, notes, attachments, metadata, URLs, credentials, or arbitrary upstream fields.
+- [ ] Verify the twelve-tool catalog exactly matches [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md). Confirm there is no generic API/path/method/body tool, debug/permission probe, memory/filesystem tool, attachment download, or caller-selected profile/host.
+- [ ] Exercise each bounded ticket and agreement read against approved staging records. Confirm caps, projections, note visibility filters, attachment-metadata-only behavior, and commercial fields match the documented schemas.
+- [ ] With an approved test ticket, create one clearly marked staging note and verify the receipt does not echo note text. Confirm no retry occurs after a simulated ambiguous write failure.
+- [ ] With an approved non-production agreement/product, create one reversible test addition during the authorized change window. Independently verify the ConnectWise record and confirm the MCP receipt contains only allowlisted scalar fields.
 - [ ] Attempt malformed, zero, negative, non-integer, and excessively large tool arguments. Confirm schema rejection or sanitized failure; do not add a generic endpoint, condition, or raw request tool to diagnose errors.
 - [ ] Send hostile profile/credential headers and MCP arguments while calling `get_service_ticket`. Confirm they cannot select another profile or alter the upstream host/client.
 - [ ] Run simultaneous calls from at least two mapped identities to distinct approved test tickets. Confirm each invocation uses only its own ConnectWise API member and cannot observe the other user's profile-specific data.
-- [ ] Use a ConnectWise API member lacking the test ticket permission. Confirm ConnectWise remains the final data-authorization boundary and the Worker returns only its sanitized lookup failure.
-- [ ] Confirm only `whoami` and `get_service_ticket` are exposed. Verify the exclusions in [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md): no raw API, generic conditions, notes, attachments, downloads, memory/debug/filesystem, or write tools.
+- [ ] Use ConnectWise API members that separately lack a tested read and write permission. Confirm ConnectWise remains the final business-authorization boundary and the Worker returns a sanitized permission denial without broadening the role.
 
 ## 6. Audit and operations acceptance
 
 - [ ] Restrict Cloudflare log access/export to approved operators. Record the approved retention period and review cadence in the secure operations record.
-- [ ] Verify exactly one allowlisted audit event for each successful `whoami` and `get_service_ticket` staging invocation, plus sanitized `denied` events for scope/profile denial cases.
+- [ ] Verify exactly one allowlisted audit event for every exercised tool invocation, plus sanitized `denied` events for MCP scope/profile and ConnectWise permission-denial cases.
 - [ ] Inspect exported staging audit events. Confirm they contain no tool arguments, ticket IDs, ticket text/status values, tokens, headers, cookies, OAuth state, secrets, profile JSON, ConnectWise URLs, raw upstream bodies, or exception text.
 - [ ] Configure alerts for sustained increases in `failure` or `denied` outcomes and for unexpected absence of audit events during known staging traffic. Alert payloads must remain limited to the audit allowlist.
 - [ ] Record an incident contact, escalation path, and a tested procedure to disable access by removing a mapping/role and rotating the affected ConnectWise credential.

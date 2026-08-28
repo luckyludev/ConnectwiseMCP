@@ -3,6 +3,8 @@ export type ConsentPageOptions = {
   scopes: string[];
   signedState: string;
   csrfToken: string;
+  origin: string;
+  clientRedirectUri: string;
 };
 
 function escapeHtml(value: string): string {
@@ -19,6 +21,26 @@ function escapeHtml(value: string): string {
   );
 }
 
+function isLoopback(hostname: string): boolean {
+  return (
+    hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "localhost"
+  );
+}
+
+function formActionOrigin(value: string): string {
+  const url = new URL(value);
+  if (
+    url.username ||
+    url.password ||
+    url.origin === "null" ||
+    (url.protocol !== "https:" &&
+      !(url.protocol === "http:" && isLoopback(url.hostname)))
+  ) {
+    throw new TypeError("Invalid form-action origin");
+  }
+  return url.origin;
+}
+
 export function renderConsentPage(options: ConsentPageOptions): Response {
   const clientName = escapeHtml(options.clientName);
   const scopes = options.scopes
@@ -26,6 +48,13 @@ export function renderConsentPage(options: ConsentPageOptions): Response {
     .join("");
   const signedState = escapeHtml(options.signedState);
   const csrfToken = escapeHtml(options.csrfToken);
+  const formActionOrigins = [
+    ...new Set([
+      formActionOrigin(options.origin),
+      "https://login.microsoftonline.com",
+      formActionOrigin(options.clientRedirectUri),
+    ]),
+  ];
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Authorize ConnectWise MCP</title>
@@ -37,8 +66,10 @@ export function renderConsentPage(options: ConsentPageOptions): Response {
   return new Response(html, {
     headers: {
       "Cache-Control": "no-store",
-      "Content-Security-Policy":
-        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      // The Worker and client origins come only from canonical URLs that the
+      // authorization handler has already validated. URL.origin serialization
+      // prevents paths or metacharacters from becoming CSP syntax.
+      "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${formActionOrigins.join(" ")}; base-uri 'none'; frame-ancestors 'none'`,
       "Content-Type": "text/html; charset=utf-8",
       "Referrer-Policy": "no-referrer",
       "X-Content-Type-Options": "nosniff",

@@ -158,6 +158,9 @@ describe("Entra auth handler", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Set-Cookie")).toContain("__Host-CW_CSRF=");
+    expect(response.headers.get("Content-Security-Policy")).toContain(
+      "http://127.0.0.1:49152",
+    );
   });
 
   it("renders consent only after provider client validation and sets a secure CSRF cookie", async () => {
@@ -207,6 +210,10 @@ describe("Entra auth handler", () => {
     expect(response.headers.get("Set-Cookie")).toContain("__Host-CW_CSRF=");
     expect(response.headers.get("Set-Cookie")).toContain("HttpOnly");
     expect(response.headers.get("Set-Cookie")).toContain("Secure");
+    expect(response.headers.get("Content-Security-Policy")).toContain(
+      "https://client.example.com",
+    );
+    expect(response.headers.get("Content-Security-Policy")).not.toContain("*");
   });
 
   it("starts Entra login only after CSRF validation and binds callback state to the browser", async () => {
@@ -399,7 +406,9 @@ describe("Entra auth handler", () => {
     expect(
       new URLSearchParams(tokenRequestBody).get("code_verifier"),
     ).toBeTruthy();
-    expect(completed?.userId).toBe("tenant-a:user-1");
+    // The OAuth provider reserves ':' as the authorization-code delimiter.
+    expect(completed?.userId).toBe("dGVuYW50LWE6dXNlci0x");
+    expect(String(completed?.userId)).not.toContain(":");
     expect(completed?.props).toMatchObject({
       tenantId: "tenant-a",
       objectId: "user-1",

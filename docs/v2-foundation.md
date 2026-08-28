@@ -1,6 +1,6 @@
 # v2 secure Worker foundation
 
-> **Status:** secure foundation plus the first request-scoped read-only ConnectWise slice; not production deployment instructions. The Docker/FastAPI implementation remains available for rollback until the Worker passes staging and ConnectWise integration gates.
+> **Status:** secure foundation plus a bounded request-scoped ConnectWise read/write business catalog; not production deployment instructions. The Docker/FastAPI implementation remains available for rollback until the Worker passes staging and ConnectWise integration gates.
 
 ## Included in foundation
 
@@ -12,10 +12,10 @@
 - Fail-closed group/app-role eligibility and exact `<tid>:<oid> → profile alias` mapping.
 - Browser-bound signed state, local consent, and secure cookie attributes.
 - CIMD support and allowlisted dynamic client redirect origins.
-- Stateless MCP transport with `whoami` and a deliberately limited read-only `get_service_ticket` tool that returns only ticket ID and status metadata—never ticket-authored text.
+- Stateless MCP transport with twelve purpose-built identity, ticket, note, attachment-metadata, agreement, and billing tools. The two writes are ticket-note creation and agreement-addition creation.
 - Per-request ConnectWise client creation from exactly one validated `CW_PROFILE_<ALIAS>` secret; no caller-supplied profile or credential headers and no shared fallback.
-- Fixed ConnectWise endpoint construction, bounded timeout/retry/response size, strict metadata-only ticket projection, and sanitized errors.
-- Structured best-effort audit events for both MCP tools with allowlisted identity, tool, outcome, correlation, and latency fields; tool inputs, credentials, tokens, URLs, headers, upstream bodies, and exception text are never included.
+- Fixed ConnectWise endpoint construction, strict input/result bounds, allowlisted response projections, GET-only retries, no automatic write retry, and sanitized errors.
+- Structured best-effort audit events for every MCP tool with allowlisted identity, tool, outcome, correlation, and latency fields; tool inputs, credentials, tokens, URLs, headers, upstream bodies, and exception text are never included.
 - Blocking tests, typecheck, formatting, npm audit, and Wrangler dry-run bundle in CI.
 
 ## Configuration
@@ -77,23 +77,23 @@ Request `openid profile offline_access`. Configure group claims or app roles in 
 
 ## Audit events and production observability
 
-Every completed `whoami` or `get_service_ticket` invocation attempts to emit one single-line JSON event through the Worker logger. Audit delivery is best-effort: logger or serialization failures never alter the MCP response and are not recursively logged.
+Every completed tool invocation attempts to emit one single-line JSON event through the Worker logger. Audit delivery is best-effort: logger or serialization failures never alter the MCP response and are not recursively logged.
 
 The event schema is allowlist-only:
 
-| Field           | Meaning                                                                                       |
-| --------------- | --------------------------------------------------------------------------------------------- |
-| `version`       | Schema version `1`                                                                            |
-| `event`         | Fixed value `mcp_tool_invocation`                                                             |
-| `timestamp`     | UTC ISO-8601 event completion time                                                            |
-| `correlationId` | Server-generated UUID                                                                         |
-| `tenantId`      | Validated Entra tenant GUID when available                                                    |
-| `objectId`      | Validated Entra object GUID when available                                                    |
-| `profileAlias`  | Validated server-selected profile alias when available                                        |
-| `tool`          | Fixed `whoami` or `get_service_ticket` value                                                  |
-| `outcome`       | `success`, `denied`, or `failure`                                                             |
-| `reason`        | Fixed sanitized reason: `ok`, `insufficient_scope`, `profile_unavailable`, or `lookup_failed` |
-| `durationMs`    | Nonnegative integer latency, defensively capped at 300,000 ms                                 |
+| Field           | Meaning                                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `version`       | Schema version `1`                                                                                                            |
+| `event`         | Fixed value `mcp_tool_invocation`                                                                                             |
+| `timestamp`     | UTC ISO-8601 event completion time                                                                                            |
+| `correlationId` | Server-generated UUID                                                                                                         |
+| `tenantId`      | Validated Entra tenant GUID when available                                                                                    |
+| `objectId`      | Validated Entra object GUID when available                                                                                    |
+| `profileAlias`  | Validated server-selected profile alias when available                                                                        |
+| `tool`          | Fixed name from the registered twelve-tool catalog                                                                            |
+| `outcome`       | `success`, `denied`, or `failure`                                                                                             |
+| `reason`        | Fixed sanitized reason such as `ok`, `insufficient_scope`, `profile_unavailable`, `connectwise_denied`, or `operation_failed` |
+| `durationMs`    | Nonnegative integer latency, defensively capped at 300,000 ms                                                                 |
 
 Malformed identity/profile fields are omitted. Malformed core correlation or clock fields suppress the event. The emitter never copies arbitrary properties from authentication context or exceptions.
 
@@ -102,7 +102,7 @@ Audit events deliberately exclude MCP arguments, ticket IDs, scopes, access or r
 Before production cutover:
 
 1. Restrict Cloudflare log access to approved operators and document the selected retention period; the Worker code assumes no retention duration.
-2. Verify one event per successful staging call for both tools and verify `denied` events for scope/profile failures.
+2. Verify one event per successful staging call for every exercised tool and verify `denied` events for MCP scope/profile and ConnectWise permission failures.
 3. Run concurrent calls for at least two mapped users and confirm their tenant/object/profile fields remain isolated.
 4. Inspect exported events and confirm no tool arguments, ticket content, tokens, headers, credentials, URLs, or upstream bodies appear.
 5. Configure alerts for sustained `failure`/`denied` increases and for an unexpected absence of audit events during known test traffic. Alert payloads must use only the allowlisted schema.
@@ -119,7 +119,6 @@ npm run check
 
 ## Next stages
 
-1. Treat [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md) as the V2 migration decision record. Expand the read-only tool set only after a demonstrated requirement and a separate policy/schema review; do not add ticket text, notes, attachments, attachment metadata, generic endpoints, caller-defined conditions, or downloads by default.
-2. Add guarded write tools with explicit OAuth/tool policy and destructive-operation controls.
-3. Run Entra, MCP Inspector, staging ConnectWise, and six-user isolation tests.
-4. Remove legacy Docker/FastAPI code only after rollback and cutover acceptance.
+1. Treat [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md) as the V2 migration decision record. Do not add generic endpoints, caller-defined conditions, raw request bodies, or attachment downloads.
+2. Run Entra, MCP Inspector, staging ConnectWise read/write, denial, and six-user isolation tests.
+3. Remove legacy Docker/FastAPI code only after rollback and cutover acceptance.
