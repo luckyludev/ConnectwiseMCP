@@ -26,6 +26,13 @@ function businessClient(
   const unused = async (): Promise<unknown> => {
     throw new Error("unexpected client operation");
   };
+  const unusedDownload = async (): Promise<{
+    base64: string;
+    mimeType: string;
+    byteLength: number;
+  }> => {
+    throw new Error("unexpected client operation");
+  };
   return {
     getServiceTicket: unused,
     getTicketNotes: unused,
@@ -33,6 +40,23 @@ function businessClient(
     getTicketTasks: unused,
     getTicketTimeEntries: unused,
     createTicketNote: unused,
+    getServiceBoards: unused,
+    getBoardStatuses: unused,
+    getBoardTypes: unused,
+    listBoardTickets: unused,
+    getServiceStatuses: unused,
+    getServicePriorities: unused,
+    getServiceSources: unused,
+    getMyMember: unused,
+    listMembers: unused,
+    searchCompanies: unused,
+    searchContacts: unused,
+    listTimeEntries: unused,
+    listScheduleEntries: unused,
+    getTimeSheets: unused,
+    getDocument: unused,
+    downloadDocument: unusedDownload,
+    catalogGet: unused,
     searchServiceTickets: unused,
     getAgreement: unused,
     getAgreementAdditions: unused,
@@ -82,6 +106,22 @@ describe("authenticated MCP transport", () => {
       "create_agreement_addition",
       "search_agreement_additions",
       "get_agreement_billing_summary",
+      "get_service_boards",
+      "get_board_options",
+      "list_board_tickets",
+      "get_service_statuses",
+      "get_service_priorities",
+      "get_service_sources",
+      "get_my_member",
+      "list_members",
+      "search_companies",
+      "search_contacts",
+      "list_time_entries",
+      "list_schedule_entries",
+      "get_time_sheets",
+      "get_document",
+      "download_document",
+      "call_connectwise",
     ]) {
       expect(body).toContain(`"name":"${name}"`);
     }
@@ -287,5 +327,391 @@ describe("authenticated MCP transport", () => {
     expect(auditMessages.join("\n")).not.toContain("hostile");
     expect(auditMessages.join("\n")).not.toContain("company-luis");
     expect(auditMessages.join("\n")).not.toContain("company-maya");
+  });
+
+  it("lists service boards with bounded projections", async () => {
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async getServiceBoards() {
+                return [
+                  {
+                    id: 32,
+                    name: "Triage",
+                    description: "New intake queue",
+                    type: { id: 4, name: "Technical" },
+                  },
+                  {
+                    id: 33,
+                    name: "In Progress",
+                    extra: { nested: "should-not-appear" },
+                  },
+                ];
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 50,
+          method: "tools/call",
+          params: { name: "get_service_boards", arguments: {} },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(body).toContain('\\"id\\":32');
+    expect(body).toContain('\\"name\\":\\"Triage\\"');
+    expect(body).toContain('\\"type\\":{\\"id\\":4');
+    expect(body).not.toContain("should-not-appear");
+  });
+
+  it("lists board tickets for the authenticated profile only", async () => {
+    let received: { companyId: string; boardId: number } | undefined;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async listBoardTickets(boardId) {
+                received = { companyId: credentials.companyId, boardId };
+                return [
+                  {
+                    id: 910,
+                    summary: "Printer on fire",
+                    board: { id: 32, name: "Triage" },
+                    status: { id: 547, name: "New" },
+                    company: { id: 250, name: "FUNCSHUN" },
+                  },
+                ];
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 51,
+          method: "tools/call",
+          params: {
+            name: "list_board_tickets",
+            arguments: { boardId: 32 },
+          },
+        }),
+      }),
+    );
+    expect(received).toEqual({ companyId: "company-luis", boardId: 32 });
+    const body = await response.text();
+    expect(body).toContain('\\"id\\":910');
+    expect(body).toContain('\\"board\\":{\\"id\\":32');
+  });
+
+  it("runs the read-only catalog with allowlisted routes and parameters", async () => {
+    const calls: Array<{ route: string; params: Record<string, unknown> }> = [];
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async catalogGet(route, params) {
+                calls.push({ route, params });
+                if (route === "service.tickets.byStatus") {
+                  return [
+                    {
+                      id: 911,
+                      summary: "Router dead",
+                      status: { id: 547, name: "New" },
+                    },
+                  ];
+                }
+                return [
+                  {
+                    id: 400,
+                    title: "Onsite Log.pdf",
+                    fileName: "Onsite Log.pdf",
+                    size: 123456,
+                  },
+                ];
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const first = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 52,
+          method: "tools/call",
+          params: {
+            name: "call_connectwise",
+            arguments: { route: "service.tickets.byStatus", statusId: 547 },
+          },
+        }),
+      }),
+    );
+    const firstBody = await first.text();
+    expect(calls[0]).toEqual({
+      route: "service.tickets.byStatus",
+      params: { pageSize: 20, statusId: 547 },
+    });
+    expect(firstBody).toContain('\\"id\\":911');
+
+    const second = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 53,
+          method: "tools/call",
+          params: {
+            name: "call_connectwise",
+            arguments: {
+              route: "system.documents",
+              recordType: "Ticket",
+              recordId: 77,
+            },
+          },
+        }),
+      }),
+    );
+    const secondBody = await second.text();
+    expect(calls[1]?.params).toEqual(
+      expect.objectContaining({
+        recordType: "Ticket",
+        recordId: 77,
+      }),
+    );
+    expect(secondBody).toContain('\\"fileName\\":\\"Onsite Log.pdf\\"');
+  });
+
+  it("downloads a document as bounded base64", async () => {
+    let received: { companyId: string; documentId: number } | undefined;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async downloadDocument(documentId) {
+                received = { companyId: credentials.companyId, documentId };
+                return {
+                  base64: "QUJD",
+                  mimeType: "application/pdf",
+                  byteLength: 3,
+                };
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 54,
+          method: "tools/call",
+          params: {
+            name: "download_document",
+            arguments: { documentId: 400 },
+          },
+        }),
+      }),
+    );
+    expect(received).toEqual({ companyId: "company-luis", documentId: 400 });
+    const body = await response.text();
+    expect(body).toContain('\\"base64\\":\\"QUJD\\"');
+    expect(body).toContain('\\"mimeType\\":\\"application/pdf\\"');
+  });
+
+  it("searches companies and contacts with bounded projections", async () => {
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async searchCompanies(query, pageSize) {
+                return [{ id: 250, name: "FUNCSHUN", phone: "555-0100" }];
+              },
+              async searchContacts(query, pageSize) {
+                return [
+                  {
+                    id: 81,
+                    name: "Luis Rivera",
+                    email: "luis@funcshun.com",
+                    company: { id: 250, name: "FUNCSHUN" },
+                  },
+                ];
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const companies = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 55,
+          method: "tools/call",
+          params: {
+            name: "search_companies",
+            arguments: { query: "FUNC" },
+          },
+        }),
+      }),
+    );
+    const companyBody = await companies.text();
+    expect(companyBody).toContain('\\"id\\":250');
+    expect(companyBody).toContain('\\"name\\":\\"FUNCSHUN\\"');
+
+    const contacts = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 56,
+          method: "tools/call",
+          params: {
+            name: "search_contacts",
+            arguments: { query: "luis" },
+          },
+        }),
+      }),
+    );
+    const contactBody = await contacts.text();
+    expect(contactBody).toContain('\\"id\\":81');
+  });
+
+  it("returns the authenticated member record for get_my_member", async () => {
+    let received: { companyId: string } | undefined;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) => {
+            received = { companyId: credentials.companyId };
+            return businessClient({
+              async getMyMember() {
+                return {
+                  id: 149,
+                  firstName: "Luis",
+                  lastName: "Rivera",
+                  email: "luis@funcshun.com",
+                  status: { id: 1, name: "Active" },
+                };
+              },
+            });
+          },
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 57,
+          method: "tools/call",
+          params: { name: "get_my_member", arguments: {} },
+        }),
+      }),
+    );
+    expect(received).toEqual({ companyId: "company-luis" });
+    const body = await response.text();
+    expect(body).toContain('\\"id\\":149');
   });
 });
