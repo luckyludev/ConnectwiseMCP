@@ -414,6 +414,58 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow("Missing boardId");
   });
 
+  it("bounds schedule.entries.byMember with an optional date range", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.catalogGet("schedule.entries.byMember", {
+      memberId: 149,
+      startDate: "2026-08-01",
+      endDate: "2026-08-15",
+      pageSize: 20,
+    });
+    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
+      "member/id=149 and start >= '2026-08-01' and start <= '2026-08-15T23:59:59'",
+    );
+
+    await client.catalogGet("schedule.entries.byMember", {
+      memberId: 149,
+      startDate: "2026-08-01",
+      pageSize: 20,
+    });
+    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
+      "member/id=149 and start >= '2026-08-01'",
+    );
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-08-15",
+        endDate: "2026-08-01",
+      }),
+    ).rejects.toThrow("endDate must be on or after startDate");
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-08-01",
+        endDate: "2026-09-30",
+      }),
+    ).rejects.toThrow("Date range must be 31 days or less");
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "08/01/2026",
+      }),
+    ).rejects.toThrow("Invalid startDate");
+  });
+
   it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>

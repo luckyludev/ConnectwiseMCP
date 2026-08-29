@@ -34,7 +34,7 @@ const BASE_URL = (
 ).replace(/\/+$/, "");
 const EXPECT_MEMBER_ID = Number(process.env.SMOKE_EXPECT_MEMBER_ID ?? "149");
 const BOARD_ID = Number(process.env.SMOKE_BOARD_ID ?? "32");
-const LOGIN_TIMEOUT_MS = 240_000;
+const LOGIN_TIMEOUT_MS = Number(process.env.SMOKE_LOGIN_TIMEOUT_MS ?? 420_000);
 
 const log = (...parts) => console.log("[smoke]", ...parts);
 
@@ -121,7 +121,13 @@ const verifier = base64url(randomBytes(32));
 const challenge = base64url(createHash("sha256").update(verifier).digest());
 const state = base64url(randomBytes(16));
 
-// 5. Consent page (captures flow_state + CSRF cookie).
+// 5. Open the consent page IN THE BROWSER.
+//
+// The worker's /callback requires the session cookie that the worker sets
+// while the browser itself walks /authorize -> POST /authorize -> Entra.
+// Driving those steps from Node (and opening only the Entra URL) drops the
+// cookie and fails with 400, so the browser must perform the full worker
+// leg, exactly like a real MCP client (Claude, ChatGPT) would.
 const authorizeUrl = new URL(`${BASE_URL}/authorize`);
 authorizeUrl.searchParams.set("client_id", registration.client_id);
 authorizeUrl.searchParams.set("redirect_uri", loopbackRedirectUri);
@@ -131,48 +137,17 @@ authorizeUrl.searchParams.set("code_challenge", challenge);
 authorizeUrl.searchParams.set("code_challenge_method", "S256");
 authorizeUrl.searchParams.set("resource", canonicalResource);
 
-const consentResponse = await fetch(authorizeUrl, { redirect: "manual" });
-if (!consentResponse.ok) {
-  fail(`consent page failed (${consentResponse.status})`, await consentResponse.text());
-}
-const consentHtml = await consentResponse.text();
-const flowState =
-  consentHtml.match(/name="flow_state"\s+value="([^"]+)"/)?.[1] ?? null;
-const csrfToken =
-  consentHtml.match(/name="csrf_token"\s+value="([^"]+)"/)?.[1] ?? null;
-if (!flowState || !csrfToken) {
-  fail("consent page missing flow_state or csrf_token");
-}
-const csrfCookie = (consentResponse.headers.get("set-cookie") ?? "")
-  .split(";")[0] ?? "";
-
-// 6. Approve consent -> 302 to Microsoft.
-const approveResponse = await fetch(`${BASE_URL}/authorize`, {
-  method: "POST",
-  redirect: "manual",
-  headers: {
-    "Content-Type": "application/x-www-form-urlencoded",
-    ...(csrfCookie ? { Cookie: csrfCookie } : {}),
-  },
-  body: `flow_state=${encodeURIComponent(flowState)}&csrf_token=${encodeURIComponent(csrfToken)}`,
-});
-const entraUrl = approveResponse.headers.get("location");
-if (
-  !(approveResponse.status === 302 || approveResponse.status === 303) ||
-  !entraUrl
-) {
-  fail(
-    `consent approval did not redirect (${approveResponse.status})`,
-    await approveResponse.text(),
-  );
-}
-log("Microsoft consent URL ready.");
+log("Opening the ConnectWise consent page in your browser.");
+log("Click 'Continue with Microsoft' and complete sign-in.");
 if (process.env.SMOKE_NO_BROWSER) {
-  log(`Open this URL in a browser: ${entraUrl}`);
+  log(`Open this URL in a browser: ${authorizeUrl}`);
 } else {
-  const opener = spawn("open", [entraUrl], { stdio: "ignore" });
-  opener.on("error", () => log(`Open this URL in a browser: ${entraUrl}`));
-  log("Opened Microsoft sign-in in your browser.");
+  const opener = spawn("open", [authorizeUrl.toString()], { stdio: "ignore" });
+  opener.on("error", () => log(`Open this URL in a browser: ${authorizeUrl}`));
+  // Bring the default browser to the foreground so the consent page is visible.
+  spawn("osascript", ["-e", "tell application \"Brave Browser\" to activate"], {
+    stdio: "ignore",
+  }).on("error", () => {});
 }
 
 // 7. Wait for the loopback callback.

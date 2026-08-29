@@ -346,13 +346,56 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "schedule.entries.byMember": {
     path: () => "/schedule/entries",
     query: (p) => ({
-      conditions: `member/id=${p.memberId}`,
+      conditions: [
+        `member/id=${p.memberId}`,
+        ...scheduleDateConditions(p),
+      ].join(" and "),
       orderBy: "start asc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["memberId"],
   },
 };
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isoDateToUtcMs(value: string): number {
+  const [year, month, day] = value.split("-").map(Number);
+  if (year === undefined || month === undefined || day === undefined) {
+    throw new Error("Invalid date (expected YYYY-MM-DD)");
+  }
+  return Date.UTC(year, month - 1, day);
+}
+
+function scheduleDateConditions(
+  p: Readonly<Record<string, unknown>>,
+): string[] {
+  const clauses: string[] = [];
+  for (const [key, operator] of [
+    ["startDate", ">="],
+    ["endDate", "<="],
+  ] as const) {
+    const value = p[key];
+    if (value === undefined) continue;
+    if (typeof value !== "string" || !ISO_DATE.test(value)) {
+      throw new Error(`Invalid ${key} (expected YYYY-MM-DD)`);
+    }
+    clauses.push(
+      `start ${operator} '${value}${operator === "<=" ? "T23:59:59" : ""}'`,
+    );
+  }
+  if (clauses.length === 2) {
+    const startMs = isoDateToUtcMs(String(p.startDate));
+    const endMs = isoDateToUtcMs(String(p.endDate));
+    if (endMs < startMs) {
+      throw new Error("endDate must be on or after startDate");
+    }
+    if (endMs - startMs > 31 * 86_400_000) {
+      throw new Error("Date range must be 31 days or less");
+    }
+  }
+  return clauses;
+}
 
 function positiveId(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) {
