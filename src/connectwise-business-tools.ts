@@ -1140,7 +1140,7 @@ export function registerConnectWiseBusinessTools(
       description:
         "Read-only ConnectWise catalog lookup. Pick a route ID and provide its required parameters. Routes: " +
         CATALOG_ROUTE_IDS.join(", ") +
-        ". All routes are GET-only with allowlisted parameters and bounded output.",
+        ". schedule.entries.byMember accepts optional startDate/endDate (YYYY-MM-DD, at most a 31-day span). All routes are GET-only with allowlisted parameters and bounded output.",
       inputSchema: {
         route: z.enum(CATALOG_ROUTE_IDS),
         boardId: positiveId.optional(),
@@ -1159,6 +1159,14 @@ export function registerConnectWiseBusinessTools(
           .optional(),
         name: z.string().trim().min(1).max(100).optional(),
         query: z.string().trim().min(1).max(100).optional(),
+        startDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+        endDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
         pageSize: pageSize,
       },
       annotations: readAnnotations,
@@ -1172,6 +1180,8 @@ export function registerConnectWiseBusinessTools(
       recordType,
       name,
       query,
+      startDate,
+      endDate,
       pageSize,
     }) =>
       runBusinessTool(
@@ -1187,6 +1197,8 @@ export function registerConnectWiseBusinessTools(
           if (recordType !== undefined) params.recordType = recordType;
           if (name !== undefined) params.name = name;
           if (query !== undefined) params.query = query;
+          if (startDate !== undefined) params.startDate = startDate;
+          if (endDate !== undefined) params.endDate = endDate;
           return list(await client.catalogGet(route, params), pageSize).map(
             catalogItem,
           );
