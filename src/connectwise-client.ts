@@ -455,7 +455,9 @@ export function createConnectWiseClient(
       try {
         response = await fetcher(url, {
           method,
-          redirect: "error",
+          // Workers only supports "follow" | "manual"; "error" throws
+          // synchronously there, so redirects are refused explicitly below.
+          redirect: "manual",
           headers: {
             Accept: "application/json",
             Authorization: `Basic ${authorization}`,
@@ -493,6 +495,22 @@ export function createConnectWiseClient(
           }),
         );
         throw new Error("ConnectWise request unavailable");
+      }
+      if (response.status >= 300 && response.status < 400) {
+        await cancelResponseBody(response);
+        log(
+          JSON.stringify({
+            event: "cw_request",
+            method,
+            url: url.toString(),
+            status: response.status,
+            latencyMs: Date.now() - startedAtMs,
+            failure: "redirect_refused",
+          }),
+        );
+        throw new Error(
+          `ConnectWise redirected the request (${response.status}); redirects are not followed`,
+        );
       }
       if (
         method === "GET" &&
@@ -759,7 +777,7 @@ export function createConnectWiseClient(
       try {
         response = await fetcher(url, {
           method: "GET",
-          redirect: "error",
+          redirect: "manual",
           headers: {
             Accept: "application/octet-stream",
             Authorization: `Basic ${authorization}`,
@@ -769,6 +787,12 @@ export function createConnectWiseClient(
         });
       } catch {
         throw new Error("ConnectWise request unavailable");
+      }
+      if (response.status >= 300 && response.status < 400) {
+        await cancelResponseBody(response);
+        throw new Error(
+          `ConnectWise redirected the download (${response.status}); redirects are not followed`,
+        );
       }
       if (!response.ok) {
         await cancelResponseBody(response);

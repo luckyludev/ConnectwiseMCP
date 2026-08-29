@@ -32,7 +32,9 @@ describe("ConnectWiseClient", () => {
       "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/123",
     );
     expect(capturedInit?.method).toBe("GET");
-    expect(capturedInit?.redirect).toBe("error");
+    // Workers does not implement redirect:"error" (throws synchronously);
+    // 3xx responses are refused explicitly by the client instead.
+    expect(capturedInit?.redirect).toBe("manual");
     const headers = new Headers(capturedInit?.headers);
     expect(headers.get("Authorization")).toBe(
       `Basic ${btoa("acme+public-key:private-key")}`,
@@ -238,6 +240,28 @@ describe("ConnectWiseClient", () => {
     expect(attempts).toBe(2);
     expect(cancellations).toBe(2);
     expect(delays).toEqual([100]);
+  });
+
+  it("uses a Workers-supported redirect mode and refuses 3xx responses", async () => {
+    let attempts = 0;
+    let redirectMode: string | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        attempts += 1;
+        redirectMode = (init as { redirect?: string } | undefined)?.redirect;
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "https://evil.example/" },
+        });
+      },
+      sleep: async () => undefined,
+    });
+
+    await expect(client.getServiceTicket(123)).rejects.toThrow(
+      /redirected the request \(302\)/,
+    );
+    expect(redirectMode).toBe("manual");
+    expect(attempts).toBe(1);
   });
 
   it("escapes ticket-search conditions and enforces the result bound", async () => {
