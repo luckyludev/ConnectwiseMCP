@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createConnectWiseClient } from "../src/connectwise-client";
+import {
+  ConnectWiseRequestError,
+  createConnectWiseClient,
+} from "../src/connectwise-client";
 import type { ConnectWiseCredentials } from "../src/connectwise-profile";
 
 const credentials: ConnectWiseCredentials = {
@@ -53,7 +56,7 @@ describe("ConnectWiseClient", () => {
     expect(requests).toBe(0);
   });
 
-  it("does not expose an upstream error body", async () => {
+  it("surfaces a bounded, scrubbed error body preview without hanging", async () => {
     let attempts = 0;
     let cancelled = false;
     const client = createConnectWiseClient(credentials, {
@@ -64,9 +67,10 @@ describe("ConnectWiseClient", () => {
             start(controller) {
               controller.enqueue(
                 new TextEncoder().encode(
-                  "credential=[REDACTED]; sensitive customer response",
+                  '{"code":"Forbidden","message":"Access denied","authorization":"Basic dXNlcjpwYXNzInZhbHVl"}',
                 ),
               );
+              // Deliberately never closes: the preview must not hang.
             },
             cancel() {
               cancelled = true;
@@ -83,11 +87,15 @@ describe("ConnectWiseClient", () => {
     } catch (caught) {
       error = caught;
     }
-    expect(error).toBeInstanceOf(Error);
-    if (!(error instanceof Error)) throw new Error("Expected client error");
-    expect(error.message).toBe("ConnectWise request failed (401)");
-    expect(error.message).not.toContain("sensitive customer response");
-    expect(error.message).not.toContain("credential=");
+    expect(error).toBeInstanceOf(ConnectWiseRequestError);
+    if (!(error instanceof ConnectWiseRequestError)) {
+      throw new Error("Expected client error");
+    }
+    expect(error.message).toContain("ConnectWise request failed (401)");
+    expect(error.message).toContain("at GET /service/tickets/123");
+    expect(error.message).toContain("Forbidden");
+    expect(error.message).toContain("Access denied");
+    expect(error.message).not.toContain("dXNlcjpwYXNzInZhbHVl");
     expect(attempts).toBe(1);
     expect(cancelled).toBe(true);
   });

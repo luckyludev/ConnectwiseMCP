@@ -86,15 +86,40 @@ export function resolveConnectWiseCredentials(
 
   const raw = bindings[`CW_PROFILE_${profileAlias}`];
   if (typeof raw !== "string") {
-    throw new Error("ConnectWise profile configuration unavailable");
+    throw new Error(
+      `ConnectWise profile configuration unavailable (binding CW_PROFILE_${profileAlias} is missing or not a string)`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("ConnectWise profile configuration is not valid JSON");
   }
   try {
-    const credentials = credentialsSchema.parse(JSON.parse(raw));
-    if (!allowedOrigins.includes(new URL(credentials.apiBaseUrl).origin)) {
-      throw new Error();
+    const credentials = credentialsSchema.parse(parsed);
+    const profileOrigin = new URL(credentials.apiBaseUrl).origin;
+    if (!allowedOrigins.includes(profileOrigin)) {
+      throw new Error(
+        `ConnectWise profile origin not allowed (profile origin: ${profileOrigin}; allowlist entries: ${allowedOrigins.length})`,
+      );
     }
     return credentials;
-  } catch {
-    throw new Error("Invalid ConnectWise profile configuration");
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith("ConnectWise profile origin not allowed")
+    ) {
+      throw error;
+    }
+    const issue = (
+      error as { issues?: Array<{ path?: Array<string | number> }> }
+    )?.issues?.[0];
+    const issuePath = issue?.path?.length
+      ? ` (field: ${issue.path.join(".")})`
+      : "";
+    throw new Error(
+      `ConnectWise profile configuration failed validation${issuePath}`,
+    );
   }
 }

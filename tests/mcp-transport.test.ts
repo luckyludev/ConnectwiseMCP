@@ -215,7 +215,7 @@ describe("authenticated MCP transport", () => {
       reason: "ok",
     });
     expect(auditMessages[0]).not.toContain("Approved staging note");
-    expect(auditMessages[0]).not.toContain("77");
+    expect(auditMessages[0]).not.toContain('"ticketId"');
   });
 
   it("isolates concurrent profile contexts from hostile headers and arguments", async () => {

@@ -2,6 +2,7 @@ import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   CATALOG_ROUTE_IDS,
+  ConnectWiseDownloadError,
   ConnectWiseRequestError,
   createConnectWiseClient,
   type ConnectWiseClient,
@@ -21,6 +22,7 @@ import {
 type BusinessToolDependencies = {
   audit?: ToolAuditDependencies;
   createClient?: (credentials: ConnectWiseCredentials) => ConnectWiseClient;
+  requestLog?: (message: string) => void;
 };
 
 type AuthProps = Partial<EntraAccessTokenProps> | undefined;
@@ -215,10 +217,28 @@ function output(value: unknown): CallToolResult {
 
 function failureMessage(error: unknown): string {
   if (error instanceof ConnectWiseRequestError) {
-    if (error.status === 401 || error.status === 403) {
-      return `ConnectWise denied this operation (${error.status})`;
+    const diagnostics = error.diagnostics;
+    const where = diagnostics
+      ? ` at ${diagnostics.method} ${diagnostics.path}`
+      : "";
+    if (diagnostics?.bodyPreview) {
+      return `ConnectWise request failed (${error.status})${where}: ${diagnostics.bodyPreview.slice(0, 300)}`;
     }
-    if (error.status === 404) return "ConnectWise record not found";
+    if (error.status === 401 || error.status === 403) {
+      return `ConnectWise denied this operation (${error.status})${where}`;
+    }
+    if (error.status === 404) return `ConnectWise record not found${where}`;
+    return `ConnectWise request failed (${error.status})${where}`;
+  }
+  if (error instanceof ConnectWiseDownloadError) {
+    return `ConnectWise download failed (${error.status})`;
+  }
+  if (
+    error instanceof Error &&
+    typeof error.message === "string" &&
+    error.message.length > 0
+  ) {
+    return `ConnectWise operation failed: ${error.message.slice(0, 200)}`;
   }
   return "ConnectWise operation failed";
 }
@@ -264,10 +284,28 @@ async function runBusinessTool(
     };
   }
   try {
+    const requestLog = dependencies.requestLog ?? ((message: string) => {});
     const credentials = resolveConnectWiseCredentials(env, props.profileAlias);
-    const client = (dependencies.createClient ?? createConnectWiseClient)(
-      credentials,
-    );
+    try {
+      requestLog(
+        JSON.stringify({
+          event: "cw_credentials",
+          profileAlias: props.profileAlias,
+          companyIdLength: credentials.companyId.length,
+          publicKeyLength: credentials.publicKey.length,
+          privateKeyLength: credentials.privateKey.length,
+          clientIdLength: credentials.clientId.length,
+          apiBaseOrigin: new URL(credentials.apiBaseUrl).origin,
+        }),
+      );
+    } catch {
+      // Diagnostics are best-effort and must not alter the MCP result.
+    }
+    const clientFactory =
+      dependencies.createClient ??
+      ((c: ConnectWiseCredentials) =>
+        createConnectWiseClient(c, { log: requestLog }));
+    const client = clientFactory(credentials);
     const result = await operation(client);
     emitToolAudit(
       {
