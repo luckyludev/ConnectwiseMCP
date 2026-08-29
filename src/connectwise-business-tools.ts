@@ -1,6 +1,7 @@
 import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
+  CATALOG_ROUTE_IDS,
   ConnectWiseRequestError,
   createConnectWiseClient,
   type ConnectWiseClient,
@@ -670,6 +671,487 @@ export function registerConnectWiseBusinessTools(
             additions: additionsSummary(rawAdditions),
             recentInvoices: list(invoiceValues, 5).map(invoice),
           };
+        },
+        dependencies,
+      ),
+  );
+
+  const lookupItem = (value: Record<string, unknown>) =>
+    compact({
+      id: id(value.id),
+      name: text(value.name, 200),
+      description: text(value.description, 500),
+      rank: number(value.rank),
+    });
+
+  const boardItem = (value: Record<string, unknown>) =>
+    compact({
+      id: id(value.id),
+      name: text(value.name, 200),
+      description: text(value.description, 500),
+      type: reference(value.type),
+      owner: reference(value.owner),
+    });
+
+  const memberItem = (value: Record<string, unknown>) =>
+    compact({
+      id: id(value.id),
+      name: text(value.name, 200),
+      firstName: text(value.firstName, 100),
+      lastName: text(value.lastName, 100),
+      email: text(value.email, 200),
+      phone: text(value.phone, 100),
+      status: reference(value.status),
+    });
+
+  const companyItem = (value: Record<string, unknown>) =>
+    compact({
+      id: id(value.id),
+      name: text(value.name, 300),
+      phone: text(value.phone, 100),
+      email: text(value.email, 200),
+      address: text(value.address, 300),
+      status: reference(value.status),
+    });
+
+  const contactItem = (value: Record<string, unknown>) =>
+    compact({
+      id: id(value.id),
+      name: text(value.name, 200),
+      firstName: text(value.firstName, 100),
+      lastName: text(value.lastName, 100),
+      title: text(value.title, 200),
+      phone: text(value.phone, 100),
+      cellPhone: text(value.cellPhone, 100),
+      email: text(value.email, 200),
+      company: reference(value.company),
+    });
+
+  const timeEntryRead = (value: Record<string, unknown>) =>
+    compact({
+      ...timeEntry(value),
+      date: text(value.date, 100),
+      chargeToType: text(value.chargeToType, 100),
+    });
+
+  const scheduleEntryItem = (value: Record<string, unknown>) =>
+    compact({
+      id: id(value.id),
+      member: reference(value.member),
+      start: text(value.start, 100),
+      end: text(value.end, 100),
+      description: text(value.description, 300),
+      type: reference(value.type),
+      status: reference(value.status),
+    });
+
+  const timeSheetItem = (value: Record<string, unknown>) =>
+    compact({
+      id: id(value.id),
+      member: reference(value.member),
+      startDate: text(value.startDate, 100),
+      endDate: text(value.endDate, 100),
+      status: reference(value.status),
+    });
+
+  const catalogItem = (value: Record<string, unknown>) => {
+    const kept: Record<string, unknown> = {};
+    for (const [key, raw] of Object.entries(value)) {
+      if (Object.keys(kept).length >= 10) break;
+      if (typeof raw === "string" && raw.length > 0 && raw.length <= 300) {
+        kept[key] = raw;
+      } else if (typeof raw === "number" && Number.isFinite(raw)) {
+        kept[key] = raw;
+      } else if (typeof raw === "boolean") {
+        kept[key] = raw;
+      }
+    }
+    return kept;
+  };
+
+  server.registerTool(
+    "get_service_boards",
+    {
+      description:
+        "List service ticket boards. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: {},
+      annotations: readAnnotations,
+    },
+    () =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "get_service_boards",
+        (client) =>
+          Promise.resolve(client.getServiceBoards()).then((value) =>
+            list(value, 50).map(boardItem),
+          ),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "get_board_options",
+    {
+      description:
+        "Get the statuses and ticket types available on one service board.",
+      inputSchema: { boardId: positiveId },
+      annotations: readAnnotations,
+    },
+    ({ boardId }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "get_board_options",
+        async (client) => ({
+          statuses: list(await client.getBoardStatuses(boardId), 50).map(
+            lookupItem,
+          ),
+          types: list(await client.getBoardTypes(boardId), 50).map(lookupItem),
+        }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "list_board_tickets",
+    {
+      description:
+        "List the most recent tickets on a service board. Results are limited by the authenticated user's ConnectWise API member.",
+      inputSchema: { boardId: positiveId, maxResults: pageSize },
+      annotations: readAnnotations,
+    },
+    ({ boardId, maxResults }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "list_board_tickets",
+        async (client) =>
+          list(
+            await client.listBoardTickets(boardId, maxResults),
+            maxResults,
+          ).map(ticket),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "get_service_statuses",
+    {
+      description:
+        "List service ticket statuses. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: {},
+      annotations: readAnnotations,
+    },
+    () =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "get_service_statuses",
+        (client) =>
+          Promise.resolve(client.getServiceStatuses()).then((value) =>
+            list(value, 50).map(lookupItem),
+          ),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "get_service_priorities",
+    {
+      description:
+        "List service ticket priorities. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: {},
+      annotations: readAnnotations,
+    },
+    () =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "get_service_priorities",
+        (client) =>
+          Promise.resolve(client.getServicePriorities()).then((value) =>
+            list(value, 50).map(lookupItem),
+          ),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "get_service_sources",
+    {
+      description:
+        "List service ticket sources. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: {},
+      annotations: readAnnotations,
+    },
+    () =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "get_service_sources",
+        (client) =>
+          Promise.resolve(client.getServiceSources()).then((value) =>
+            list(value, 50).map(lookupItem),
+          ),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "get_my_member",
+    {
+      description:
+        "Get the authenticated user's ConnectWise member record, including ID, name, and contact details.",
+      inputSchema: {},
+      annotations: readAnnotations,
+    },
+    () =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "get_my_member",
+        (client) =>
+          Promise.resolve(client.getMyMember()).then((value) => {
+            const member = object(value);
+            return member
+              ? memberItem(member)
+              : { message: "Member not found" };
+          }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "list_members",
+    {
+      description:
+        "List ConnectWise team members. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: { maxResults: pageSize },
+      annotations: readAnnotations,
+    },
+    ({ maxResults }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "list_members",
+        async (client) =>
+          list(await client.listMembers(maxResults), maxResults).map(
+            memberItem,
+          ),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "search_companies",
+    {
+      description:
+        "Search ConnectWise companies by name. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: {
+        query: z.string().trim().min(1).max(100),
+        maxResults: pageSize,
+      },
+      annotations: readAnnotations,
+    },
+    ({ query, maxResults }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "search_companies",
+        async (client) =>
+          list(await client.searchCompanies(query, maxResults), maxResults)
+            .map(companyItem)
+            .filter((entry) => entry.id !== undefined || entry.name),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "search_contacts",
+    {
+      description:
+        "Search ConnectWise contacts by name or email. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: {
+        query: z.string().trim().min(1).max(100),
+        maxResults: pageSize,
+      },
+      annotations: readAnnotations,
+    },
+    ({ query, maxResults }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "search_contacts",
+        async (client) =>
+          list(await client.searchContacts(query, maxResults), maxResults)
+            .map(contactItem)
+            .filter((entry) => entry.id !== undefined || entry.name),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "list_time_entries",
+    {
+      description:
+        "List the most recent time entries. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: { maxResults: pageSize },
+      annotations: readAnnotations,
+    },
+    ({ maxResults }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "list_time_entries",
+        async (client) =>
+          list(await client.listTimeEntries(maxResults), maxResults).map(
+            timeEntryRead,
+          ),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "list_schedule_entries",
+    {
+      description:
+        "List the most recent schedule entries. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: { maxResults: pageSize },
+      annotations: readAnnotations,
+    },
+    ({ maxResults }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "list_schedule_entries",
+        async (client) =>
+          list(await client.listScheduleEntries(maxResults), maxResults).map(
+            scheduleEntryItem,
+          ),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "get_time_sheets",
+    {
+      description:
+        "List the most recent timesheets. Access is limited by the authenticated user's ConnectWise API member.",
+      inputSchema: { maxResults: pageSize },
+      annotations: readAnnotations,
+    },
+    ({ maxResults }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "get_time_sheets",
+        async (client) =>
+          list(await client.getTimeSheets(maxResults), maxResults).map(
+            timeSheetItem,
+          ),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "get_document",
+    {
+      description:
+        "Get metadata for a ConnectWise document by ID. Use the catalog route 'system.documents' to list documents for a record.",
+      inputSchema: { documentId: positiveId },
+      annotations: readAnnotations,
+    },
+    ({ documentId }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "get_document",
+        (client) =>
+          Promise.resolve(client.getDocument(documentId)).then((value) => {
+            const document = object(value);
+            return document
+              ? attachment(document)
+              : { message: "Document not found" };
+          }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "download_document",
+    {
+      description:
+        "Download a ConnectWise document as base64 (8 MB maximum). Returns base64 content, MIME type, and byte length.",
+      inputSchema: { documentId: positiveId },
+      annotations: readAnnotations,
+    },
+    ({ documentId }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "download_document",
+        (client) => client.downloadDocument(documentId),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "call_connectwise",
+    {
+      description:
+        "Read-only ConnectWise catalog lookup. Pick a route ID and provide its required parameters. Routes: " +
+        CATALOG_ROUTE_IDS.join(", ") +
+        ". All routes are GET-only with allowlisted parameters and bounded output.",
+      inputSchema: {
+        route: z.enum(CATALOG_ROUTE_IDS),
+        boardId: positiveId.optional(),
+        statusId: positiveId.optional(),
+        memberId: positiveId.optional(),
+        recordId: positiveId.optional(),
+        recordType: z
+          .enum([
+            "Ticket",
+            "Project",
+            "Agreement",
+            "Company",
+            "Contact",
+            "Vendor",
+          ])
+          .optional(),
+        name: z.string().trim().min(1).max(100).optional(),
+        query: z.string().trim().min(1).max(100).optional(),
+        pageSize: pageSize,
+      },
+      annotations: readAnnotations,
+    },
+    ({
+      route,
+      boardId,
+      statusId,
+      memberId,
+      recordId,
+      recordType,
+      name,
+      query,
+      pageSize,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "call_connectwise",
+        async (client) => {
+          const params: Record<string, string | number> = { pageSize };
+          if (boardId !== undefined) params.boardId = boardId;
+          if (statusId !== undefined) params.statusId = statusId;
+          if (memberId !== undefined) params.memberId = memberId;
+          if (recordId !== undefined) params.recordId = recordId;
+          if (recordType !== undefined) params.recordType = recordType;
+          if (name !== undefined) params.name = name;
+          if (query !== undefined) params.query = query;
+          return list(await client.catalogGet(route, params), pageSize).map(
+            catalogItem,
+          );
         },
         dependencies,
       ),
