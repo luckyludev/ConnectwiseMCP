@@ -49,6 +49,7 @@ export type ConnectWiseClientDependencies = {
   fetcher?: typeof fetch;
   timeoutMs?: number;
   sleep?: (milliseconds: number) => Promise<void>;
+  log?: (message: string) => void;
 };
 
 export type ConnectWiseClient = {
@@ -113,10 +114,86 @@ export type ConnectWiseClient = {
   ): Promise<unknown>;
 };
 
+export type ConnectWiseRequestDiagnostics = {
+  method: string;
+  path: string;
+  bodyPreview?: string;
+};
+
 export class ConnectWiseRequestError extends Error {
-  constructor(readonly status: number) {
-    super(`ConnectWise request failed (${status})`);
+  constructor(
+    readonly status: number,
+    readonly diagnostics?: ConnectWiseRequestDiagnostics,
+  ) {
+    super(
+      `ConnectWise request failed (${status})${diagnostics ? ` at ${diagnostics.method} ${diagnostics.path}` : ""}${diagnostics?.bodyPreview ? `: ${diagnostics.bodyPreview}` : ""}`,
+    );
     this.name = "ConnectWiseRequestError";
+  }
+}
+
+const SECRET_KEY_PATTERN = [
+  "authorization",
+  "client_secret",
+  "clientSecret",
+  "private_key",
+  "privateKey",
+  "api_key",
+  "apiKey",
+  "access_token",
+  "accessToken",
+  "refresh_token",
+  "credential",
+  "password",
+  "token",
+].join("|");
+
+function scrubSecrets(value: string): string {
+  return value
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/g, "$1 [REDACTED]")
+    .replace(
+      new RegExp(
+        `["']?(?:${SECRET_KEY_PATTERN})["']?\\s*[:=]\\s*["']?[A-Za-z0-9._~+/=-]{8,}`,
+        "g",
+      ),
+      "[REDACTED]",
+    );
+}
+
+async function readErrorBodyPreview(
+  response: Response,
+  timeoutMs: number = 1_000,
+): Promise<string | undefined> {
+  try {
+    if (!response.body) return undefined;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const remainingMs = Math.max(1, deadline - Date.now());
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race<ReadableStreamReadResult<Uint8Array>>([
+        reader.read(),
+        new Promise((resolve) => {
+          timer = setTimeout(
+            () => resolve({ done: true, value: undefined }),
+            remainingMs,
+          );
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+      if (result.done) break;
+      text += decoder.decode(result.value, { stream: true });
+      if (text.length >= 600) break;
+    }
+    await cancelReader(reader);
+    const cleaned = scrubSecrets(
+      text.replace(/[\u0000-\u001F\u007F]/g, " ").trim(),
+    );
+    return cleaned.length > 0 ? cleaned.slice(0, 500) : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -309,6 +386,7 @@ export function createConnectWiseClient(
     dependencies.sleep ??
     ((milliseconds: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const log = dependencies.log ?? (() => {});
   const timeoutMs = dependencies.timeoutMs ?? 8_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) {
     throw new Error("Invalid ConnectWise timeout configuration");
@@ -330,6 +408,7 @@ export function createConnectWiseClient(
     const maxAttempts = method === "GET" ? 2 : 1;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       let response: Response;
+      const startedAtMs = Date.now();
       try {
         response = await fetcher(url, {
           method,
@@ -347,9 +426,29 @@ export function createConnectWiseClient(
         });
       } catch {
         if (attempt + 1 < maxAttempts) {
+          log(
+            JSON.stringify({
+              event: "cw_request",
+              method,
+              url: url.toString(),
+              status: null,
+              latencyMs: Date.now() - startedAtMs,
+              failure: "unavailable",
+            }),
+          );
           await sleep(100);
           continue;
         }
+        log(
+          JSON.stringify({
+            event: "cw_request",
+            method,
+            url: url.toString(),
+            status: null,
+            latencyMs: Date.now() - startedAtMs,
+            failure: "unavailable",
+          }),
+        );
         throw new Error("ConnectWise request unavailable");
       }
       if (
@@ -362,9 +461,32 @@ export function createConnectWiseClient(
         continue;
       }
       if (!response.ok) {
-        await cancelResponseBody(response);
-        throw new ConnectWiseRequestError(response.status);
+        const bodyPreview = await readErrorBodyPreview(response);
+        log(
+          JSON.stringify({
+            event: "cw_request",
+            method,
+            url: url.toString(),
+            status: response.status,
+            latencyMs: Date.now() - startedAtMs,
+            ...(bodyPreview ? { bodyPreview } : {}),
+          }),
+        );
+        throw new ConnectWiseRequestError(response.status, {
+          method,
+          path,
+          ...(bodyPreview ? { bodyPreview } : {}),
+        });
       }
+      log(
+        JSON.stringify({
+          event: "cw_request",
+          method,
+          url: url.toString(),
+          status: response.status,
+          latencyMs: Date.now() - startedAtMs,
+        }),
+      );
       const responseText = await readBoundedResponse(response);
       if (!responseText) return null;
       try {

@@ -94,7 +94,7 @@ describe("resolveConnectWiseCredentials", () => {
     };
 
     expect(() => resolveConnectWiseCredentials(env, "LUIS")).toThrow(
-      "Invalid ConnectWise profile configuration",
+      "ConnectWise profile configuration failed validation",
     );
   });
 
@@ -113,7 +113,7 @@ describe("resolveConnectWiseCredentials", () => {
     };
 
     expect(() => resolveConnectWiseCredentials(env, "LUIS")).toThrow(
-      "Invalid ConnectWise profile configuration",
+      "ConnectWise profile configuration failed validation",
     );
   });
 
@@ -133,7 +133,7 @@ describe("resolveConnectWiseCredentials", () => {
     };
 
     expect(() => resolveConnectWiseCredentials(env, "LUIS")).toThrow(
-      "Invalid ConnectWise profile configuration",
+      "ConnectWise profile configuration failed validation",
     );
   });
 
@@ -153,7 +153,7 @@ describe("resolveConnectWiseCredentials", () => {
     };
 
     expect(() => resolveConnectWiseCredentials(env, "LUIS")).toThrow(
-      "Invalid ConnectWise profile configuration",
+      "ConnectWise profile configuration failed validation",
     );
   });
 
@@ -172,7 +172,7 @@ describe("resolveConnectWiseCredentials", () => {
     };
 
     expect(() => resolveConnectWiseCredentials(env, "LUIS")).toThrow(
-      "Invalid ConnectWise profile configuration",
+      "ConnectWise profile configuration failed validation",
     );
   });
 
@@ -191,7 +191,7 @@ describe("resolveConnectWiseCredentials", () => {
     };
 
     expect(() => resolveConnectWiseCredentials(env, "LUIS")).toThrow(
-      "Invalid ConnectWise profile configuration",
+      "ConnectWise profile origin not allowed (profile origin: https://evil.example; allowlist entries: 1)",
     );
   });
 
@@ -211,7 +211,7 @@ describe("resolveConnectWiseCredentials", () => {
     };
 
     expect(() => resolveConnectWiseCredentials(env, "LUIS")).toThrow(
-      "Invalid ConnectWise profile configuration",
+      "ConnectWise profile configuration failed validation",
     );
   });
 
@@ -230,7 +230,7 @@ describe("resolveConnectWiseCredentials", () => {
     };
 
     expect(() => resolveConnectWiseCredentials(env, "LUIS")).toThrow(
-      "Invalid ConnectWise profile configuration",
+      "ConnectWise profile configuration failed validation",
     );
   });
 
@@ -249,7 +249,7 @@ describe("resolveConnectWiseCredentials", () => {
     };
 
     expect(() => resolveConnectWiseCredentials(env, "LUIS")).toThrow(
-      "Invalid ConnectWise profile configuration",
+      "ConnectWise profile configuration failed validation",
     );
   });
 });
