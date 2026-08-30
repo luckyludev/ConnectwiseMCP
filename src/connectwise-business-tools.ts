@@ -2,8 +2,10 @@ import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   CATALOG_ROUTE_IDS,
+  CONNECTWISE_IMAGE_MIME_TYPES,
   ConnectWiseDownloadError,
   ConnectWiseRequestError,
+  MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
   type ConnectWiseClient,
 } from "./connectwise-client";
@@ -18,6 +20,11 @@ import {
   type ToolAuditDependencies,
   type ToolAuditName,
 } from "./audit";
+import { ATTACHMENT_UPLOADER_HTML } from "./generated/attachment-uploader-html";
+
+const ATTACHMENT_UPLOADER_RESOURCE_URI =
+  "ui://connectwise/attachment-uploader.html";
+const ATTACHMENT_UPLOADER_MIME_TYPE = "text/html;profile=mcp-app";
 
 type BusinessToolDependencies = {
   audit?: ToolAuditDependencies;
@@ -384,6 +391,124 @@ export function registerConnectWiseBusinessTools(
     ...writeAnnotations,
     destructiveHint: true,
   } as const;
+
+  server.registerResource(
+    "ConnectWise attachment uploader",
+    ATTACHMENT_UPLOADER_RESOURCE_URI,
+    {
+      title: "ConnectWise image uploader",
+      description:
+        "Paste, drop, or choose an image and attach it to a ConnectWise ticket or time entry.",
+      mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
+          text: ATTACHMENT_UPLOADER_HTML,
+          _meta: {
+            ui: {
+              csp: {
+                connectDomains: [],
+                resourceDomains: [],
+              },
+            },
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerTool(
+    "open_attachment_uploader",
+    {
+      title: "Attach an image to ConnectWise",
+      description:
+        "Open a secure inline uploader for pasting, dropping, or choosing an image. The image can be attached to a ticket (with an optional ticket note) or an existing time entry.",
+      inputSchema: {
+        recordType: z.enum(["Ticket", "TimeEntry"]).default("Ticket"),
+        recordId: positiveId.optional(),
+      },
+      annotations: readAnnotations,
+      _meta: {
+        ui: { resourceUri: ATTACHMENT_UPLOADER_RESOURCE_URI },
+      },
+    },
+    ({ recordType, recordId }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "open_attachment_uploader",
+        async () => ({
+          recordType,
+          recordId: recordId ?? null,
+          maxImageBytes: MAX_IMAGE_UPLOAD_BYTES,
+          allowedMimeTypes: CONNECTWISE_IMAGE_MIME_TYPES,
+        }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "upload_connectwise_image",
+    {
+      title: "Upload a ConnectWise image",
+      description:
+        "App-only image upload used by the inline ConnectWise attachment uploader.",
+      inputSchema: {
+        recordType: z.enum(["Ticket", "TimeEntry"]),
+        recordId: positiveId,
+        fileName: z.string().trim().min(1).max(128),
+        mimeType: z.enum(CONNECTWISE_IMAGE_MIME_TYPES),
+        base64: z
+          .string()
+          .min(4)
+          .max(4 * Math.ceil(MAX_IMAGE_UPLOAD_BYTES / 3)),
+        title: z.string().trim().min(1).max(200).optional(),
+        privateFlag: z.boolean().default(true),
+      },
+      annotations: writeAnnotations,
+      _meta: {
+        ui: { visibility: ["app"] },
+      },
+    },
+    ({
+      recordType,
+      recordId,
+      fileName,
+      mimeType,
+      base64,
+      title,
+      privateFlag,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "upload_connectwise_image",
+        async (client) => {
+          const created = object(
+            await client.uploadImageDocument(recordType, recordId, {
+              fileName,
+              mimeType,
+              base64,
+              ...(title === undefined ? {} : { title }),
+              privateFlag,
+            }),
+          );
+          const document = created ? attachment(created) : {};
+          if (document.id === undefined) {
+            throw new Error("Invalid ConnectWise upload response");
+          }
+          return {
+            recordType,
+            recordId,
+            document,
+          };
+        },
+        dependencies,
+      ),
+  );
 
   server.registerTool(
     "search_tickets_by_content",

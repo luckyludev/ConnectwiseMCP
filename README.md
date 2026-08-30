@@ -2,7 +2,7 @@
 
 ConnectWise MCP server migrating from the legacy Docker/FastAPI gateway to a secure Cloudflare Worker v2.
 
-> **Migration status:** v2 is implemented in `src/` with Entra OAuth, rotating refresh, immutable identity mapping, structured sanitized tool audit events, and a bounded purpose-built ConnectWise business catalog. Every invocation resolves exactly one `CW_PROFILE_<ALIAS>` Worker secret, requires its origin in `CONNECTWISE_ALLOWED_ORIGINS`, rejects redirects, and creates a fresh request-scoped client. The mapped user's ConnectWise API-member Security Role remains the final authority for both reads and writes. Generic raw API/debug tools and attachment downloads remain excluded. The legacy deployment under `deploy/` remains available for rollback until v2 passes staging, isolation, observability, and rollback acceptance. See [`docs/v2-foundation.md`](docs/v2-foundation.md).
+> **Migration status:** v2 is implemented in `src/` with Entra OAuth, rotating refresh, immutable identity mapping, structured sanitized tool audit events, and a bounded purpose-built ConnectWise business catalog. Every invocation resolves exactly one `CW_PROFILE_<ALIAS>` Worker secret, requires its origin in `CONNECTWISE_ALLOWED_ORIGINS`, rejects redirects, and creates a fresh request-scoped client. The mapped user's ConnectWise API-member Security Role remains the final authority for both reads and writes. Generic raw API/debug tools remain excluded. Document downloads are capped at 8 MB; image uploads use an inline MCP App, client-side resizing, a 1 MB server cap, fixed Ticket/TimeEntry targets, MIME-signature verification, and non-retried multipart writes. The legacy deployment under `deploy/` remains available for rollback until v2 passes staging, isolation, observability, and rollback acceptance. See [`docs/v2-foundation.md`](docs/v2-foundation.md).
 
 ## Structure
 
@@ -10,6 +10,8 @@ ConnectWise MCP server migrating from the legacy Docker/FastAPI gateway to a sec
 .
 ├── src/                       # Cloudflare Worker v2 foundation
 ├── tests/                     # v2 security and OAuth tests
+├── ui/                        # bundled inline MCP attachment uploader
+├── scripts/                   # staging smoke and deterministic UI embedding
 ├── package.json               # exact v2 dependency versions and checks
 ├── wrangler.jsonc             # non-secret Worker configuration
 ├── deploy/                    # legacy Docker/FastAPI rollback path

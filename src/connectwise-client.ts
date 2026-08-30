@@ -1,6 +1,17 @@
 import type { ConnectWiseCredentials } from "./connectwise-profile";
 
 const MAX_RESPONSE_BYTES = 1_000_000;
+export const MAX_IMAGE_UPLOAD_BYTES = 1_000_000;
+export const CONNECTWISE_IMAGE_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+] as const;
+
+export type ConnectWiseImageMimeType =
+  (typeof CONNECTWISE_IMAGE_MIME_TYPES)[number];
+export type ConnectWiseDocumentRecordType = "Ticket" | "TimeEntry";
 
 async function cancelResponseBody(response: Response): Promise<void> {
   try {
@@ -87,6 +98,17 @@ export type ConnectWiseClient = {
     mimeType: string;
     byteLength: number;
   }>;
+  uploadImageDocument(
+    recordType: ConnectWiseDocumentRecordType,
+    recordId: number,
+    input: {
+      fileName: string;
+      mimeType: ConnectWiseImageMimeType;
+      base64: string;
+      title?: string;
+      privateFlag: boolean;
+    },
+  ): Promise<unknown>;
   catalogGet(
     route: string,
     params: Record<string, string | number>,
@@ -245,6 +267,114 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(binary);
+}
+
+const IMAGE_FILE_EXTENSIONS: Record<
+  ConnectWiseImageMimeType,
+  readonly string[]
+> = {
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/gif": [".gif"],
+  "image/webp": [".webp"],
+};
+
+function isConnectWiseImageMimeType(
+  value: string,
+): value is ConnectWiseImageMimeType {
+  return (CONNECTWISE_IMAGE_MIME_TYPES as readonly string[]).includes(value);
+}
+
+function imageFileName(
+  value: string,
+  mimeType: ConnectWiseImageMimeType,
+): string {
+  const trimmed = value.trim();
+  if (
+    trimmed.length < 1 ||
+    trimmed.length > 128 ||
+    /[\u0000-\u001F\u007F/\\]/.test(trimmed) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._ ()-]*$/.test(trimmed)
+  ) {
+    throw new Error("Invalid image file name");
+  }
+  const lower = trimmed.toLowerCase();
+  if (!IMAGE_FILE_EXTENSIONS[mimeType].some((ext) => lower.endsWith(ext))) {
+    throw new Error("Image file extension does not match MIME type");
+  }
+  return trimmed;
+}
+
+function imageTitle(value: string | undefined, fallback: string): string {
+  if (value === undefined) return fallback;
+  const trimmed = value.trim();
+  if (
+    trimmed.length < 1 ||
+    trimmed.length > 200 ||
+    /[\u0000-\u001F\u007F]/.test(trimmed)
+  ) {
+    throw new Error("Invalid image title");
+  }
+  return trimmed;
+}
+
+function hasImageSignature(
+  bytes: Uint8Array,
+  mimeType: ConnectWiseImageMimeType,
+): boolean {
+  const startsWith = (...values: number[]) =>
+    values.every((value, index) => bytes[index] === value);
+  if (mimeType === "image/jpeg") {
+    return startsWith(0xff, 0xd8, 0xff);
+  }
+  if (mimeType === "image/png") {
+    return startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+  }
+  if (mimeType === "image/gif") {
+    return (
+      startsWith(0x47, 0x49, 0x46, 0x38, 0x37, 0x61) ||
+      startsWith(0x47, 0x49, 0x46, 0x38, 0x39, 0x61)
+    );
+  }
+  return (
+    startsWith(0x52, 0x49, 0x46, 0x46) &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  );
+}
+
+function decodeImageBase64(
+  value: string,
+  mimeType: ConnectWiseImageMimeType,
+): Uint8Array {
+  const maxEncodedLength = 4 * Math.ceil(MAX_IMAGE_UPLOAD_BYTES / 3);
+  if (
+    value.length < 4 ||
+    value.length > maxEncodedLength ||
+    value.length % 4 !== 0 ||
+    /\s/.test(value)
+  ) {
+    throw new Error("Invalid or oversized image data");
+  }
+  let binary: string;
+  try {
+    binary = atob(value);
+  } catch {
+    throw new Error("Invalid image data");
+  }
+  if (binary.length < 1 || binary.length > MAX_IMAGE_UPLOAD_BYTES) {
+    throw new Error("Invalid or oversized image data");
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  if (bytesToBase64(bytes) !== value || !hasImageSignature(bytes, mimeType)) {
+    throw new Error("Image data does not match the declared MIME type");
+  }
+  return bytes;
 }
 
 type CatalogRoute = {
@@ -835,6 +965,112 @@ export function createConnectWiseClient(
         mimeType,
         byteLength: bytes.byteLength,
       };
+    },
+
+    async uploadImageDocument(recordType, recordId, input): Promise<unknown> {
+      positiveId(recordId, recordType + " record ID");
+      if (recordType !== "Ticket" && recordType !== "TimeEntry") {
+        throw new Error("Unsupported document record type");
+      }
+      if (!isConnectWiseImageMimeType(input.mimeType)) {
+        throw new Error("Unsupported image MIME type");
+      }
+      const fileName = imageFileName(input.fileName, input.mimeType);
+      const title = imageTitle(input.title, fileName);
+      const bytes = decodeImageBase64(input.base64, input.mimeType);
+      const body = new FormData();
+      const fileBytes = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(fileBytes).set(bytes);
+      body.append(
+        "file",
+        new Blob([fileBytes], { type: input.mimeType }),
+        fileName,
+      );
+      body.append("recordId", String(recordId));
+      body.append("recordType", recordType);
+      body.append("title", title);
+      body.append("privateFlag", String(input.privateFlag));
+
+      const url = new URL(credentials.apiBaseUrl + "/system/documents");
+      const startedAtMs = Date.now();
+      let response: Response;
+      try {
+        response = await fetcher(url, {
+          method: "POST",
+          redirect: "manual",
+          headers: {
+            Accept: "application/json",
+            Authorization: "Basic " + authorization,
+            clientId: credentials.clientId,
+          },
+          body,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch {
+        log(
+          JSON.stringify({
+            event: "cw_request",
+            method: "POST",
+            url: url.toString(),
+            status: null,
+            latencyMs: Date.now() - startedAtMs,
+            failure: "unavailable",
+          }),
+        );
+        throw new Error("ConnectWise request unavailable");
+      }
+      if (response.status >= 300 && response.status < 400) {
+        await cancelResponseBody(response);
+        log(
+          JSON.stringify({
+            event: "cw_request",
+            method: "POST",
+            url: url.toString(),
+            status: response.status,
+            latencyMs: Date.now() - startedAtMs,
+            failure: "redirect_refused",
+          }),
+        );
+        throw new Error(
+          "ConnectWise redirected the request (" +
+            String(response.status) +
+            "); redirects are not followed",
+        );
+      }
+      if (!response.ok) {
+        const bodyPreview = await readErrorBodyPreview(response);
+        log(
+          JSON.stringify({
+            event: "cw_request",
+            method: "POST",
+            url: url.toString(),
+            status: response.status,
+            latencyMs: Date.now() - startedAtMs,
+            ...(bodyPreview ? { bodyPreview } : {}),
+          }),
+        );
+        throw new ConnectWiseRequestError(response.status, {
+          method: "POST",
+          path: "/system/documents",
+          ...(bodyPreview ? { bodyPreview } : {}),
+        });
+      }
+      log(
+        JSON.stringify({
+          event: "cw_request",
+          method: "POST",
+          url: url.toString(),
+          status: response.status,
+          latencyMs: Date.now() - startedAtMs,
+        }),
+      );
+      const responseText = await readBoundedResponse(response);
+      if (!responseText) return null;
+      try {
+        return JSON.parse(responseText) as unknown;
+      } catch {
+        throw new Error("Invalid ConnectWise response");
+      }
     },
 
     async catalogGet(

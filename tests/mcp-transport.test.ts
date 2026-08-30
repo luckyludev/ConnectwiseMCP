@@ -56,6 +56,7 @@ function businessClient(
     getTimeSheets: unused,
     getDocument: unused,
     downloadDocument: unusedDownload,
+    uploadImageDocument: unused,
     catalogGet: unused,
     searchServiceTickets: unused,
     getAgreement: unused,
@@ -121,12 +122,16 @@ describe("authenticated MCP transport", () => {
       "get_time_sheets",
       "get_document",
       "download_document",
+      "open_attachment_uploader",
+      "upload_connectwise_image",
       "call_connectwise",
     ]) {
       expect(body).toContain(`"name":"${name}"`);
     }
     expect(body).toContain('"readOnlyHint":false');
     expect(body).toContain('"idempotentHint":false');
+    expect(body).toContain("ui://connectwise/attachment-uploader.html");
+    expect(body).toContain('"visibility":["app"]');
   });
 
   it("executes a write with only the authenticated user's ConnectWise profile", async () => {
@@ -216,6 +221,137 @@ describe("authenticated MCP transport", () => {
     });
     expect(auditMessages[0]).not.toContain("Approved staging note");
     expect(auditMessages[0]).not.toContain('"ticketId"');
+  });
+
+  it("uploads an image through the app-only tool without echoing its bytes", async () => {
+    const auditMessages: string[] = [];
+    let received:
+      | {
+          companyId: string;
+          recordType: string;
+          recordId: number;
+          fileName: string;
+          privateFlag: boolean;
+        }
+      | undefined;
+    const imageBase64 = btoa(
+      String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
+    );
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          audit: { logger: (message) => auditMessages.push(message) },
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async uploadImageDocument(recordType, recordId, input) {
+                received = {
+                  companyId: credentials.companyId,
+                  recordType,
+                  recordId,
+                  fileName: input.fileName,
+                  privateFlag: input.privateFlag,
+                };
+                return {
+                  id: 902,
+                  title: input.title,
+                  fileName: input.fileName,
+                  imageFlag: true,
+                  publicFlag: !input.privateFlag,
+                  size: 8,
+                };
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 21,
+          method: "tools/call",
+          params: {
+            name: "upload_connectwise_image",
+            arguments: {
+              recordType: "TimeEntry",
+              recordId: 88,
+              fileName: "onsite.png",
+              mimeType: "image/png",
+              base64: imageBase64,
+              title: "Onsite photo",
+              privateFlag: true,
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(received).toEqual({
+      companyId: "company-luis",
+      recordType: "TimeEntry",
+      recordId: 88,
+      fileName: "onsite.png",
+      privateFlag: true,
+    });
+    expect(body).toContain('\\"id\\":902');
+    expect(body).toContain('\\"recordType\\":\\"TimeEntry\\"');
+    expect(body).not.toContain(imageBase64);
+    expect(auditMessages).toHaveLength(1);
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      profileAlias: "LUIS",
+      tool: "upload_connectwise_image",
+      outcome: "success",
+      reason: "ok",
+    });
+    expect(auditMessages[0]).not.toContain(imageBase64);
+    expect(auditMessages[0]).not.toContain("onsite.png");
+  });
+
+  it("serves the inline attachment uploader as an MCP App resource", async () => {
+    const handler = createMcpHandler(() => createMcpServer(env), {
+      route: "/mcp",
+      corsOptions: false,
+      authContext: {
+        props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+      },
+    });
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 22,
+          method: "resources/read",
+          params: {
+            uri: "ui://connectwise/attachment-uploader.html",
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(body).toContain("text/html;profile=mcp-app");
+    expect(body).toContain("Drop or paste an image here");
+    expect(body).toContain("upload_connectwise_image");
+    expect(body).not.toContain("private-key");
   });
 
   it("isolates concurrent profile contexts from hostile headers and arguments", async () => {
