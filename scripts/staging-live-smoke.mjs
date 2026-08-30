@@ -50,7 +50,10 @@ function fail(message, detail) {
   log("FAIL", message);
   if (detail !== undefined) {
     try {
-      log("detail:", typeof detail === "string" ? detail : JSON.stringify(detail, null, 2));
+      log(
+        "detail:",
+        typeof detail === "string" ? detail : JSON.stringify(detail, null, 2),
+      );
     } catch {
       log("detail:", String(detail));
     }
@@ -95,113 +98,147 @@ const resourceMeta = await resourceResponse.json().catch(() => ({}));
 const canonicalResource =
   typeof resourceMeta?.resource === "string" ? resourceMeta.resource : BASE_URL;
 
-// 3. Dynamic client registration (loopback).
-const registerResponse = await fetch(`${BASE_URL}/oauth/register`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    client_name: "staging-live-smoke",
-    redirect_uris: [loopbackRedirectUri],
-    grant_types: ["authorization_code"],
-    response_types: ["code"],
-    token_endpoint_auth_method: "client_secret_basic",
-  }),
-});
-if (!registerResponse.ok) {
-  fail(`DCR rejected (${registerResponse.status})`, await registerResponse.text());
-}
-const registration = await registerResponse.json();
-if (!registration.client_id || !registration.client_secret) {
-  fail("DCR response missing client_id/client_secret", registration);
-}
-log(`DCR ok (client_id length ${registration.client_id.length})`);
-
-// 4. PKCE.
-const verifier = base64url(randomBytes(32));
-const challenge = base64url(createHash("sha256").update(verifier).digest());
-const state = base64url(randomBytes(16));
-
-// 5. Open the consent page IN THE BROWSER.
+// 3. Token acquisition.
 //
-// The worker's /callback requires the session cookie that the worker sets
-// while the browser itself walks /authorize -> POST /authorize -> Entra.
-// Driving those steps from Node (and opening only the Entra URL) drops the
-// cookie and fails with 400, so the browser must perform the full worker
-// leg, exactly like a real MCP client (Claude, ChatGPT) would.
-const authorizeUrl = new URL(`${BASE_URL}/authorize`);
-authorizeUrl.searchParams.set("client_id", registration.client_id);
-authorizeUrl.searchParams.set("redirect_uri", loopbackRedirectUri);
-authorizeUrl.searchParams.set("scope", "mcp:read");
-authorizeUrl.searchParams.set("state", state);
-authorizeUrl.searchParams.set("code_challenge", challenge);
-authorizeUrl.searchParams.set("code_challenge_method", "S256");
-authorizeUrl.searchParams.set("resource", canonicalResource);
-
-log("Opening the ConnectWise consent page in your browser.");
-log("Click 'Continue with Microsoft' and complete sign-in.");
-if (process.env.SMOKE_NO_BROWSER) {
-  log(`Open this URL in a browser: ${authorizeUrl}`);
+// Fast path: when SMOKE_ACCESS_TOKEN is set (CI / no-browser runs), reuse it
+// directly and skip the DCR + consent flow below.
+let token;
+if (process.env.SMOKE_ACCESS_TOKEN) {
+  token = {
+    access_token: process.env.SMOKE_ACCESS_TOKEN,
+    scope: "mcp:read",
+  };
+  log(
+    `using SMOKE_ACCESS_TOKEN (length ${token.access_token.length}) - skipping DCR/consent`,
+  );
 } else {
-  const opener = spawn("open", [authorizeUrl.toString()], { stdio: "ignore" });
-  opener.on("error", () => log(`Open this URL in a browser: ${authorizeUrl}`));
-  // Bring the default browser to the foreground so the consent page is visible.
-  spawn("osascript", ["-e", "tell application \"Brave Browser\" to activate"], {
-    stdio: "ignore",
-  }).on("error", () => {});
-}
-
-// 7. Wait for the loopback callback.
-log(`Waiting up to ${Math.round(LOGIN_TIMEOUT_MS / 1000)}s for you to sign in...`);
-const deadline = Date.now() + LOGIN_TIMEOUT_MS;
-while (!callbackSeen && Date.now() < deadline) {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-}
-if (!callbackSeen || !callbackSeen.code) {
-  fail("timed out waiting for the Microsoft login callback");
-}
-if (callbackSeen.state !== state) {
-  fail("callback state mismatch");
-}
-log("Authorization code received (value not printed).");
-
-// 8. Exchange the code for a token (PKCE + client secret).
-async function tokenRequest(headers) {
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    code: callbackSeen.code,
-    code_verifier: verifier,
-    client_id: registration.client_id,
-    redirect_uri: loopbackRedirectUri,
-  });
-  return fetch(`${BASE_URL}/oauth/token`, {
+  // 3a. Dynamic client registration (loopback).
+  const registerResponse = await fetch(`${BASE_URL}/oauth/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", ...headers },
-    body: body.toString(),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_name: "staging-live-smoke",
+      redirect_uris: [loopbackRedirectUri],
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "client_secret_basic",
+    }),
   });
-}
-let tokenResponse = await tokenRequest({
-  Authorization: `Basic ${Buffer.from(
-    `${registration.client_id}:${registration.client_secret}`,
-  ).toString("base64")}`,
-});
-if (!tokenResponse.ok) {
-  const firstBody = await tokenResponse.text();
-  tokenResponse = await tokenRequest({});
-  if (!tokenResponse.ok) {
+  if (!registerResponse.ok) {
     fail(
-      `token exchange failed (${tokenResponse.status})`,
-      firstBody.length < 500 ? firstBody : `${tokenResponse.status}`,
+      `DCR rejected (${registerResponse.status})`,
+      await registerResponse.text(),
     );
   }
-}
-const token = await tokenResponse.json();
-if (!token.access_token) {
-  fail("token response missing access_token", {
-    error: token.error,
-    error_description: token.error_description,
+  const registration = await registerResponse.json();
+  if (!registration.client_id || !registration.client_secret) {
+    fail("DCR response missing client_id/client_secret", registration);
+  }
+  log(`DCR ok (client_id length ${registration.client_id.length})`);
+
+  // 4. PKCE.
+  const verifier = base64url(randomBytes(32));
+  const challenge = base64url(createHash("sha256").update(verifier).digest());
+  const state = base64url(randomBytes(16));
+
+  // 5. Open the consent page IN THE BROWSER.
+  //
+  // The worker's /callback requires the session cookie that the worker sets
+  // while the browser itself walks /authorize -> POST /authorize -> Entra.
+  // Driving those steps from Node (and opening only the Entra URL) drops the
+  // cookie and fails with 400, so the browser must perform the full worker
+  // leg, exactly like a real MCP client (Claude, ChatGPT) would.
+  const authorizeUrl = new URL(`${BASE_URL}/authorize`);
+  authorizeUrl.searchParams.set("client_id", registration.client_id);
+  authorizeUrl.searchParams.set("redirect_uri", loopbackRedirectUri);
+  authorizeUrl.searchParams.set("scope", "mcp:read");
+  authorizeUrl.searchParams.set("state", state);
+  authorizeUrl.searchParams.set("code_challenge", challenge);
+  authorizeUrl.searchParams.set("code_challenge_method", "S256");
+  authorizeUrl.searchParams.set("resource", canonicalResource);
+
+  log("Opening the ConnectWise consent page in your browser.");
+  log("Click 'Continue with Microsoft' and complete sign-in.");
+  if (process.env.SMOKE_NO_BROWSER) {
+    log(`Open this URL in a browser: ${authorizeUrl}`);
+  } else {
+    const opener = spawn("open", [authorizeUrl.toString()], {
+      stdio: "ignore",
+    });
+    opener.on("error", () =>
+      log(`Open this URL in a browser: ${authorizeUrl}`),
+    );
+    // Bring the default browser to the foreground so the consent page is visible.
+    spawn("osascript", ["-e", 'tell application "Brave Browser" to activate'], {
+      stdio: "ignore",
+    }).on("error", () => {});
+  }
+
+  // 7. Wait for the loopback callback.
+  log(
+    `Waiting up to ${Math.round(LOGIN_TIMEOUT_MS / 1000)}s for you to sign in...`,
+  );
+  const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+  while (!callbackSeen && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (!callbackSeen || !callbackSeen.code) {
+    fail("timed out waiting for the Microsoft login callback");
+  }
+  if (callbackSeen.state !== state) {
+    fail("callback state mismatch");
+  }
+  log("Authorization code received (value not printed).");
+
+  // 8. Exchange the code for a token (PKCE + client secret).
+  async function tokenRequest(headers) {
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: callbackSeen.code,
+      code_verifier: verifier,
+      client_id: registration.client_id,
+      redirect_uri: loopbackRedirectUri,
+    });
+    return fetch(`${BASE_URL}/oauth/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...headers,
+      },
+      body: body.toString(),
+    });
+  }
+  let tokenResponse = await tokenRequest({
+    Authorization: `Basic ${Buffer.from(
+      `${registration.client_id}:${registration.client_secret}`,
+    ).toString("base64")}`,
   });
+  if (!tokenResponse.ok) {
+    const firstBody = await tokenResponse.text();
+    tokenResponse = await tokenRequest({});
+    if (!tokenResponse.ok) {
+      fail(
+        `token exchange failed (${tokenResponse.status})`,
+        firstBody.length < 500 ? firstBody : `${tokenResponse.status}`,
+      );
+    }
+  }
+  const token = await tokenResponse.json();
+  if (!token.access_token) {
+    fail("token response missing access_token", {
+      error: token.error,
+      error_description: token.error_description,
+    });
+  }
+  log(
+    `token ok (length ${token.access_token.length}, scopes: ${(token.scope ?? "").split(" ").join(",")})`,
+  );
 }
-log(`token ok (length ${token.access_token.length}, scopes: ${(token.scope ?? "").split(" ").join(",")})`);
+if (!token?.access_token) {
+  fail(
+    "no access token available (set SMOKE_ACCESS_TOKEN or complete the consent flow)",
+  );
+}
 
 // 9. MCP streamable-HTTP session.
 const mcpHeaders = (extra = {}) => ({
@@ -264,7 +301,10 @@ if (init.status !== 200 || !init.parsed?.result) {
 }
 log(`MCP session established (server: ${init.parsed.result.serverInfo?.name})`);
 
-await mcpCall({ jsonrpc: "2.0", method: "notifications/initialized" }, init.sessionId);
+await mcpCall(
+  { jsonrpc: "2.0", method: "notifications/initialized" },
+  init.sessionId,
+);
 
 async function callTool(name, args) {
   const result = await mcpCall(
@@ -277,7 +317,10 @@ async function callTool(name, args) {
     init.sessionId,
   );
   if (result.status !== 200) {
-    return { ok: false, detail: `HTTP ${result.status}: ${result.raw.slice(0, 400)}` };
+    return {
+      ok: false,
+      detail: `HTTP ${result.status}: ${result.raw.slice(0, 400)}`,
+    };
   }
   const payload = result.parsed;
   if (payload?.error) {
@@ -298,7 +341,9 @@ async function callTool(name, args) {
     ok: !toolResult?.isError,
     text,
     data,
-    detail: toolResult?.isError ? (text ?? JSON.stringify(toolResult)) : undefined,
+    detail: toolResult?.isError
+      ? (text ?? JSON.stringify(toolResult))
+      : undefined,
   };
 }
 
@@ -309,13 +354,20 @@ if (!member.ok) {
   fail("get_my_member failed", member.detail);
 }
 const memberId = member.data?.member?.id ?? member.data?.id;
-log(`myMember ok (id=${memberId}, name=${member.data?.member?.firstName} ${member.data?.member?.lastName ?? ""})`.trim());
+log(
+  `myMember ok (id=${memberId}, name=${member.data?.member?.firstName} ${member.data?.member?.lastName ?? ""})`.trim(),
+);
 if (memberId !== EXPECT_MEMBER_ID) {
-  fail(`get_my_member returned id ${memberId}, expected ${EXPECT_MEMBER_ID}`, member.text);
+  fail(
+    `get_my_member returned id ${memberId}, expected ${EXPECT_MEMBER_ID}`,
+    member.text,
+  );
 }
 
 // 11. Gate 2: board statuses via the catalog tool.
-log(`calling call_connectwise service.boards.statuses (boardId ${BOARD_ID}) ...`);
+log(
+  `calling call_connectwise service.boards.statuses (boardId ${BOARD_ID}) ...`,
+);
 const statuses = await callTool("call_connectwise", {
   route: "service.boards.statuses",
   boardId: BOARD_ID,
@@ -334,7 +386,102 @@ if (!Array.isArray(statusList) || statusList.length === 0) {
 }
 log(`board ${BOARD_ID} statuses ok (${statusList.length} statuses)`);
 
-// 12. Done.
+// 12. Gates 3-7: execute_api_call hatch + schedule catalog date range.
+log("calling execute_api_call /system/myMembers ...");
+const myMembers = await callTool("execute_api_call", {
+  path: "/system/myMembers",
+});
+if (!myMembers.ok || typeof myMembers.data?.id !== "number") {
+  fail(
+    "execute_api_call /system/myMembers failed",
+    myMembers.detail ?? myMembers.text,
+  );
+}
+log(`myMembers ok (id=${myMembers.data.id})`);
+
+log("calling execute_api_call /service/boards/32/statuses ...");
+const hatchStatuses = await callTool("execute_api_call", {
+  path: "/service/boards/32/statuses",
+});
+if (
+  !hatchStatuses.ok ||
+  !Array.isArray(hatchStatuses.data) ||
+  hatchStatuses.data.length === 0
+) {
+  fail(
+    "execute_api_call /service/boards/32/statuses failed",
+    hatchStatuses.detail ?? hatchStatuses.text,
+  );
+}
+log(`hatch statuses ok (${hatchStatuses.data.length})`);
+
+log(
+  "calling execute_api_call /service/tickets with fields id,summary,status ...",
+);
+const hatchTickets = await callTool("execute_api_call", {
+  path: "/service/tickets",
+  conditions: `board/id=${BOARD_ID}`,
+  pageSize: 5,
+  fields: "id,summary,status",
+});
+if (!hatchTickets.ok) {
+  fail(
+    "execute_api_call /service/tickets failed",
+    hatchTickets.detail ?? hatchTickets.text,
+  );
+}
+const tickets = Array.isArray(hatchTickets.data)
+  ? hatchTickets.data
+  : (hatchTickets.data?.slice?.(0) ?? []);
+if (tickets.length > 5) {
+  fail(
+    `execute_api_call tickets returned ${tickets.length} records (> pageSize 5)`,
+  );
+}
+for (const item of tickets) {
+  const keys = Object.keys(item).sort();
+  const allowed = ["id", "summary", "status", "_info"];
+  if (keys.some((k) => !allowed.includes(k))) {
+    fail(`execute_api_call tickets returned extra fields: ${keys.join(",")}`);
+  }
+}
+log(
+  `hatch tickets ok (${tickets.length} records, fields id/summary/status only)`,
+);
+
+log("calling execute_api_call /service/tickets countOnly ...");
+const hatchCount = await callTool("execute_api_call", {
+  path: "/service/tickets",
+  conditions: `board/id=${BOARD_ID}`,
+  countOnly: true,
+});
+if (!hatchCount.ok || typeof hatchCount.data?.count !== "number") {
+  fail(
+    "execute_api_call countOnly failed",
+    hatchCount.detail ?? hatchCount.text,
+  );
+}
+log(`hatch count ok (${hatchCount.data.count} tickets on board ${BOARD_ID})`);
+
+log("calling call_connectwise schedule.entries.byMember (date range) ...");
+const schedule = await callTool("call_connectwise", {
+  route: "schedule.entries.byMember",
+  memberId: EXPECT_MEMBER_ID,
+  startDate: "2026-08-31",
+  endDate: "2026-09-06",
+});
+const scheduleList = Array.isArray(schedule.data)
+  ? schedule.data
+  : (schedule.data?.slice?.(0) ?? []);
+if (!schedule.ok || scheduleList.length === 0) {
+  fail(
+    "schedule.entries.byMember failed (InvalidOrderBy?)",
+    schedule.detail ?? schedule.text,
+  );
+}
+log(`schedule.entries.byMember ok (${scheduleList.length} entries)`);
+
+// 13. Done.
 server.close();
 log("PASS: staging worker is fully operational (auth + ConnectWise data).");
 process.exit(0);
