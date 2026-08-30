@@ -95,6 +95,9 @@ function ticket(value: unknown): Record<string, unknown> {
     type: reference(parsed.type),
     owner: reference(parsed.owner),
     contact: reference(parsed.contact),
+    closedFlag: boolean(parsed.closedFlag),
+    closedDate: text(parsed.closedDate, 100),
+    dateResolved: text(parsed.dateResolved, 100),
     created: text(info?.dateEntered, 100),
     updated: text(info?.lastUpdated, 100),
   });
@@ -772,13 +775,16 @@ export function registerConnectWiseBusinessTools(
       chargeToType: text(value.chargeToType, 100),
     });
 
+  // CW schedule entries use dateStart/dateEnd and name (live-verified).
   const scheduleEntryItem = (value: Record<string, unknown>) =>
     compact({
       id: id(value.id),
       member: reference(value.member),
-      start: text(value.start, 100),
-      end: text(value.end, 100),
-      description: text(value.description, 300),
+      start: text(value.dateStart, 100),
+      end: text(value.dateEnd, 100),
+      name: text(value.name, 300),
+      hours: number(value.hours),
+      done: boolean(value.doneFlag),
       type: reference(value.type),
       status: reference(value.status),
     });
@@ -1140,7 +1146,7 @@ export function registerConnectWiseBusinessTools(
       description:
         "Read-only ConnectWise catalog lookup. Pick a route ID and provide its required parameters. Routes: " +
         CATALOG_ROUTE_IDS.join(", ") +
-        ". schedule.entries.byMember accepts optional startDate/endDate (YYYY-MM-DD, at most a 31-day span). All routes are GET-only with allowlisted parameters and bounded output.",
+        ". schedule.entries.byMember accepts optional startDate/endDate (YYYY-MM-DD, at most a 31-day span) and returns entries ordered by dateStart. service.tickets.byOwner filters on ticket OWNER (owner/id), not assigned resources; it returns open tickets by default (closedFlag=false) — pass includeClosed:'true' to include closed ones, and returns status, board, priority, owner, contact, closedDate and dateResolved. All routes are GET-only with allowlisted parameters and bounded output.",
       inputSchema: {
         route: z.enum(CATALOG_ROUTE_IDS),
         boardId: positiveId.optional(),
@@ -1167,6 +1173,7 @@ export function registerConnectWiseBusinessTools(
           .string()
           .regex(/^\d{4}-\d{2}-\d{2}$/)
           .optional(),
+        includeClosed: z.enum(["true", "false"]).optional(),
         pageSize: pageSize,
       },
       annotations: readAnnotations,
@@ -1182,6 +1189,7 @@ export function registerConnectWiseBusinessTools(
       query,
       startDate,
       endDate,
+      includeClosed,
       pageSize,
     }) =>
       runBusinessTool(
@@ -1199,8 +1207,20 @@ export function registerConnectWiseBusinessTools(
           if (query !== undefined) params.query = query;
           if (startDate !== undefined) params.startDate = startDate;
           if (endDate !== undefined) params.endDate = endDate;
+          if (includeClosed !== undefined) {
+            params.includeClosed = includeClosed;
+          }
+          const project =
+            route === "service.tickets.byOwner" ||
+            route === "service.tickets.byStatus"
+              ? ticket
+              : route === "schedule.entries.byMember"
+                ? scheduleEntryItem
+                : route === "time.entries.byMember"
+                  ? timeEntryRead
+                  : catalogItem;
           return list(await client.catalogGet(route, params), pageSize).map(
-            catalogItem,
+            project,
           );
         },
         dependencies,

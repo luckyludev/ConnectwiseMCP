@@ -539,6 +539,49 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
+  it("filters byOwner on owner with open-only default and explicit fields", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.catalogGet("service.tickets.byOwner", { memberId: 149 });
+    const first = new URL(urls[0]!);
+    expect(first.searchParams.get("conditions")).toBe(
+      "owner/id=149 and closedFlag=false",
+    );
+    expect(first.searchParams.get("fields")?.split(",")).toEqual(
+      expect.arrayContaining([
+        "status",
+        "board",
+        "priority",
+        "owner",
+        "closedFlag",
+        "closedDate",
+        "dateResolved",
+      ]),
+    );
+    expect(first.searchParams.has("orderBy")).toBe(false);
+
+    await client.catalogGet("service.tickets.byOwner", {
+      memberId: 149,
+      includeClosed: "true",
+    });
+    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
+      "owner/id=149",
+    );
+
+    await expect(
+      client.catalogGet("service.tickets.byOwner", {
+        memberId: 149,
+        includeClosed: "yes",
+      }),
+    ).rejects.toThrow("includeClosed must be 'true' or 'false'");
+  });
+
   it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
