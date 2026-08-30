@@ -1416,4 +1416,161 @@ export function registerConnectWiseBusinessTools(
         dependencies,
       ),
   );
+
+  server.registerTool(
+    "create_schedule_entry",
+    {
+      description:
+        "Create a schedule entry on a member's calendar. memberId is always explicit — never defaulted. dateStart/dateEnd must be ISO 8601 WITH an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00); bare local or bare UTC times are rejected and converted to UTC server-side, so what lands on the calendar is always unambiguous. objectId is the ticket/record the entry attaches to and is required for service entries (objectType 4). allowConflicts defaults to false and sends allowScheduleConflictsFlag only when true (verified working on this instance). Returns the created entry with its stored UTC times.",
+      inputSchema: {
+        memberId: positiveId,
+        dateStart: z.string(),
+        dateEnd: z.string(),
+        objectId: positiveId.optional(),
+        objectType: z.number().int().min(1).max(100).optional(),
+        statusId: positiveId.optional(),
+        allowConflicts: z.boolean().optional(),
+        doneFlag: z.boolean().optional(),
+        name: z.string().trim().min(1).max(500).optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      memberId,
+      dateStart,
+      dateEnd,
+      objectId,
+      objectType,
+      statusId,
+      allowConflicts,
+      doneFlag,
+      name,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "create_schedule_entry",
+        (client) =>
+          client.createScheduleEntry({
+            memberId,
+            dateStart,
+            dateEnd,
+            ...(objectId !== undefined ? { objectId } : {}),
+            ...(objectType !== undefined ? { objectType } : {}),
+            ...(statusId !== undefined ? { statusId } : {}),
+            ...(allowConflicts !== undefined ? { allowConflicts } : {}),
+            ...(doneFlag !== undefined ? { doneFlag } : {}),
+            ...(name !== undefined ? { name } : {}),
+          }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "update_schedule_entry",
+    {
+      description:
+        "Update an existing schedule entry. Only the fields you pass change: the client GETs the entry first, merges, then PUTs the merged record — unpassed fields (member, objectId, type, notes) survive unchanged instead of being blanked. dateStart/dateEnd require an explicit timezone offset like create_schedule_entry. Returns the updated entry.",
+      inputSchema: {
+        entryId: positiveId,
+        dateStart: z.string().optional(),
+        dateEnd: z.string().optional(),
+        statusId: positiveId.optional(),
+        doneFlag: z.boolean().optional(),
+        name: z.string().trim().min(1).max(500).optional(),
+        allowConflicts: z.boolean().optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      entryId,
+      dateStart,
+      dateEnd,
+      statusId,
+      doneFlag,
+      name,
+      allowConflicts,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "update_schedule_entry",
+        (client) =>
+          client.updateScheduleEntry(entryId, {
+            ...(dateStart !== undefined ? { dateStart } : {}),
+            ...(dateEnd !== undefined ? { dateEnd } : {}),
+            ...(statusId !== undefined ? { statusId } : {}),
+            ...(doneFlag !== undefined ? { doneFlag } : {}),
+            ...(name !== undefined ? { name } : {}),
+            ...(allowConflicts !== undefined ? { allowConflicts } : {}),
+          }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "delete_schedule_entry",
+    {
+      description:
+        "Permanently delete a schedule entry by ID. Use for ghost entries left by failed UI/PUT operations. This is destructive and cannot be undone.",
+      inputSchema: { entryId: positiveId },
+      annotations: financialWriteAnnotations,
+    },
+    ({ entryId }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "delete_schedule_entry",
+        (client) => client.deleteScheduleEntry(entryId),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "create_time_entry",
+    {
+      description:
+        "Create a time entry for a member. timeStart/timeEnd must be ISO 8601 WITH an explicit timezone offset (converted to UTC server-side). If a timesheet is pending approval the write is refused with a clear instruction to recall/approve it first. Known charge mappings: Unprofitable chargeTo 13/workType 25/DoNotBill; Vacation chargeTo 2/workType 7/NoCharge; Sick chargeTo 7/workType 6/NoCharge. Returns the created entry.",
+      inputSchema: {
+        memberId: positiveId,
+        timeStart: z.string(),
+        timeEnd: z.string(),
+        notes: z.string().trim().min(1).max(2000).optional(),
+        ticketId: positiveId.optional(),
+        chargeToId: positiveId.optional(),
+        workTypeId: positiveId.optional(),
+        billableOption: z
+          .enum(["Billable", "DoNotBill", "NoCharge"])
+          .optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      memberId,
+      timeStart,
+      timeEnd,
+      notes,
+      ticketId,
+      chargeToId,
+      workTypeId,
+      billableOption,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "create_time_entry",
+        (client) =>
+          client.createTimeEntry({
+            memberId,
+            timeStart,
+            timeEnd,
+            ...(notes !== undefined ? { notes } : {}),
+            ...(ticketId !== undefined ? { ticketId } : {}),
+            ...(chargeToId !== undefined ? { chargeToId } : {}),
+            ...(workTypeId !== undefined ? { workTypeId } : {}),
+            ...(billableOption !== undefined ? { billableOption } : {}),
+          }),
+        dependencies,
+      ),
+  );
 }
