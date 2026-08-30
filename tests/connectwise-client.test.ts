@@ -701,6 +701,26 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow(/objectId is required/);
   });
 
+  it("logs the scrubbed write payload in cw_request", async () => {
+    const logs: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json({}),
+      log: (message) => logs.push(message),
+    });
+    await client.createScheduleEntry({
+      memberId: 149,
+      objectId: 1892065,
+      objectType: 4,
+      dateStart: "2026-08-31T08:30:00-04:00",
+      dateEnd: "2026-08-31T17:00:00-04:00",
+      name: "Sync test",
+    });
+    const logLine = logs.find((l) => l.includes("cw_request"))!;
+    expect(logLine).toContain('"requestBody"');
+    expect(logLine).toContain("2026-08-31T12:30:00Z");
+    expect(logLine).not.toContain("public-key");
+  });
+
   it("updates a schedule entry via GET-then-merge PUT, preserving unpassed fields", async () => {
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
     const client = createConnectWiseClient(credentials, {
