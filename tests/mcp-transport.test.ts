@@ -457,6 +457,18 @@ describe("authenticated MCP transport", () => {
                     },
                   ];
                 }
+                if (route === "service.tickets.byOwner") {
+                  return [
+                    {
+                      id: 912,
+                      summary: "Closed router ticket",
+                      owner: { id: 149, name: "Luis" },
+                      closedFlag: true,
+                      closedDate: "2026-08-29T18:00:00Z",
+                      dateResolved: "2026-08-29T17:45:00Z",
+                    },
+                  ];
+                }
                 return [
                   {
                     id: 400,
@@ -535,6 +547,40 @@ describe("authenticated MCP transport", () => {
       }),
     );
     expect(secondBody).toContain('\\"fileName\\":\\"Onsite Log.pdf\\"');
+
+    const third = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 531,
+          method: "tools/call",
+          params: {
+            name: "call_connectwise",
+            arguments: {
+              route: "service.tickets.byOwner",
+              memberId: 149,
+              includeClosed: "true",
+            },
+          },
+        }),
+      }),
+    );
+    const thirdBody = await third.text();
+    expect(calls[2]).toEqual({
+      route: "service.tickets.byOwner",
+      params: { pageSize: 20, memberId: 149, includeClosed: "true" },
+    });
+    expect(thirdBody).toContain('\\"closedFlag\\":true');
+    expect(thirdBody).toContain(
+      '\\"dateResolved\\":\\"2026-08-29T17:45:00Z\\"',
+    );
   });
 
   it("downloads a document as bounded base64", async () => {

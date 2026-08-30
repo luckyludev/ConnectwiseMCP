@@ -310,11 +310,25 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   },
   "service.tickets.byOwner": {
     path: () => "/service/tickets",
-    query: (p) => ({
-      conditions: `owner/id=${p.memberId}`,
-      orderBy: "dateEntered desc",
-      pageSize: p.pageSize ?? 20,
-    }),
+    // Filters on ticket OWNER (member/id) — not assigned resources.
+    query: (p) => {
+      if (
+        p.includeClosed !== undefined &&
+        p.includeClosed !== "true" &&
+        p.includeClosed !== "false"
+      ) {
+        throw new Error("includeClosed must be 'true' or 'false'");
+      }
+      return {
+        conditions: [
+          `owner/id=${p.memberId}`,
+          ...(p.includeClosed === "true" ? [] : ["closedFlag=false"]),
+        ].join(" and "),
+        fields:
+          "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus",
+        pageSize: p.pageSize ?? 20,
+      };
+    },
     required: ["memberId"],
   },
   "company.configurations": {
