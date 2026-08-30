@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ConnectWiseRequestError,
+  MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
 } from "../src/connectwise-client";
 import type { ConnectWiseCredentials } from "../src/connectwise-profile";
@@ -617,5 +618,143 @@ describe("ConnectWiseClient", () => {
     await expect(oversized.downloadDocument(400)).rejects.toThrow(
       "ConnectWise download too large",
     );
+  });
+
+  it("uploads a bounded image document with multipart fields and no manual content type", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        capturedUrl = String(input);
+        capturedInit = init;
+        return Response.json(
+          {
+            id: 901,
+            title: "Router photo",
+            fileName: "router.png",
+            imageFlag: true,
+            size: 8,
+          },
+          { status: 201 },
+        );
+      },
+    });
+    const pngSignature = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    let binary = "";
+    for (const byte of pngSignature) binary += String.fromCharCode(byte);
+
+    await expect(
+      client.uploadImageDocument("Ticket", 77, {
+        fileName: "router.png",
+        mimeType: "image/png",
+        base64: btoa(binary),
+        title: "Router photo",
+        privateFlag: true,
+      }),
+    ).resolves.toMatchObject({ id: 901, fileName: "router.png" });
+
+    expect(capturedUrl).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/system/documents",
+    );
+    expect(capturedInit?.method).toBe("POST");
+    expect(capturedInit?.redirect).toBe("manual");
+    const headers = new Headers(capturedInit?.headers);
+    expect(headers.has("Content-Type")).toBe(false);
+    const body = capturedInit?.body;
+    expect(body).toBeInstanceOf(FormData);
+    if (!(body instanceof FormData)) throw new Error("Expected multipart body");
+    expect(body.get("recordType")).toBe("Ticket");
+    expect(body.get("recordId")).toBe("77");
+    expect(body.get("title")).toBe("Router photo");
+    expect(body.get("privateFlag")).toBe("true");
+    const file = body.get("file");
+    expect(file).toBeInstanceOf(File);
+    if (!(file instanceof File)) throw new Error("Expected image file");
+    expect(file.name).toBe("router.png");
+    expect(file.type).toBe("image/png");
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(pngSignature);
+  });
+
+  it("rejects spoofed, mismatched, and oversized image uploads before fetch", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => {
+        requests += 1;
+        return Response.json({}, { status: 201 });
+      },
+    });
+
+    await expect(
+      client.uploadImageDocument("TimeEntry", 88, {
+        fileName: "spoof.png",
+        mimeType: "image/png",
+        base64: btoa("not a png"),
+        privateFlag: true,
+      }),
+    ).rejects.toThrow("does not match the declared MIME type");
+
+    const pngSignature = String.fromCharCode(
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    );
+    await expect(
+      client.uploadImageDocument("Ticket", 77, {
+        fileName: "wrong.jpg",
+        mimeType: "image/png",
+        base64: btoa(pngSignature),
+        privateFlag: true,
+      }),
+    ).rejects.toThrow("extension does not match MIME type");
+
+    await expect(
+      client.uploadImageDocument("Ticket", 77, {
+        fileName: "huge.png",
+        mimeType: "image/png",
+        base64: "A".repeat(4 * Math.ceil(MAX_IMAGE_UPLOAD_BYTES / 3) + 4),
+        privateFlag: true,
+      }),
+    ).rejects.toThrow("Invalid or oversized image data");
+    expect(requests).toBe(0);
+  });
+
+  it("refuses an image-upload redirect without retrying the POST", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => {
+        requests += 1;
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "https://example.invalid/redirect" },
+        });
+      },
+    });
+    const pngSignature = String.fromCharCode(
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    );
+
+    await expect(
+      client.uploadImageDocument("Ticket", 77, {
+        fileName: "router.png",
+        mimeType: "image/png",
+        base64: btoa(pngSignature),
+        privateFlag: true,
+      }),
+    ).rejects.toThrow("redirects are not followed");
+    expect(requests).toBe(1);
   });
 });

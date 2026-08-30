@@ -1,6 +1,30 @@
-# Claude Setup (MCP Connector) — legacy rollback gateway
+# Claude Setup (MCP Connector)
 
-> **Legacy-only:** this guide configures the Docker/FastAPI rollback gateway, including its static bearer-token option. It is not a Cloudflare Worker V2 setup guide and must not be used for V2 deployment or client onboarding. Follow the non-secret [V2 staging acceptance checklist](v2-staging-acceptance-checklist.md) with authorized operators before any V2 client configuration.
+## Cloudflare Worker V2
+
+Add the canonical Worker `/mcp` URL in Claude under **Customize → Connectors → Add custom connector**, then complete Microsoft Entra sign-in. Do not enter ConnectWise or Cloudflare secrets in Claude; the Worker resolves the authenticated identity's server-side `CW_PROFILE_<ALIAS>` secret.
+
+The connector exposes bounded reads and writes. Entra controls who can reach the connector and selects the immutable profile mapping; the selected ConnectWise API member's Security Role is the final authority for every business operation. The retained `mcp:read` OAuth scope is server access, not a grant of ConnectWise write permission.
+
+### Attach an image from chat
+
+Ask Claude to “open the ConnectWise attachment uploader for ticket 123” or call `open_attachment_uploader` directly. The inline app lets the user:
+
+- paste an image from the clipboard;
+- drag and drop an image;
+- choose a PNG, JPEG, GIF, or WebP file;
+- select a Ticket or existing TimeEntry and choose internal/private or customer-visible attachment visibility;
+- optionally create a ticket note after the ticket attachment succeeds.
+
+Standard MCP tool arguments are JSON and do not automatically carry the original bytes of an image already attached to a chat message. Paste or drop that image into the inline uploader. Images over 1 MB are resized locally; the Worker independently enforces the 1 MB cap, validates MIME type, signature, extension, and fixed record type, never fetches an image URL, and never echoes image bytes into the result or audit log.
+
+The attachment and optional ticket note are separate ConnectWise writes. If the attachment succeeds and the note fails, the app reports the document ID as partial success.
+
+Follow the non-secret [V2 staging acceptance checklist](v2-staging-acceptance-checklist.md) before production onboarding.
+
+## Legacy rollback gateway
+
+> This remaining section configures the Docker/FastAPI rollback gateway, including its static bearer-token option. It is not the V2 deployment path.
 
 This guide connects Claude to the ConnectwiseMCP HTTP gateway.
 

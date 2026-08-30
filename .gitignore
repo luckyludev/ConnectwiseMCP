@@ -10,6 +10,7 @@
 /dist/
 /.wrangler/
 /coverage/
+/.attachment-app-dist/
 /dev.vars
 /.dev.vars
 /deploy/cwm-mcp/venv/

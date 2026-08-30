@@ -30,6 +30,8 @@ export type ToolAuditName =
   | "get_time_sheets"
   | "get_document"
   | "download_document"
+  | "open_attachment_uploader"
+  | "upload_connectwise_image"
   | "call_connectwise"
   | "get_agreement_additions"
   | "get_agreement_additions_summary"

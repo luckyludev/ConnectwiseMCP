@@ -12,9 +12,11 @@
 - Fail-closed group/app-role eligibility and exact `<tid>:<oid> → profile alias` mapping.
 - Browser-bound signed state, local consent, and secure cookie attributes.
 - CIMD support and allowlisted dynamic client redirect origins.
-- Stateless MCP transport with twelve purpose-built identity, ticket, note, attachment-metadata, agreement, and billing tools. The two writes are ticket-note creation and agreement-addition creation.
+- Stateless MCP transport with a bounded purpose-built catalog: 30 registered tools, of which 29 are model-visible and one image-upload tool is app-only. Non-idempotent writes include ticket-note creation, agreement-addition creation, and the app-only document upload.
 - Per-request ConnectWise client creation from exactly one validated `CW_PROFILE_<ALIAS>` secret; no caller-supplied profile or credential headers and no shared fallback.
 - Fixed ConnectWise endpoint construction, strict input/result bounds, allowlisted response projections, GET-only retries, no automatic write retry, and sanitized errors.
+- Bounded document handling: downloads stop at 8 MB; uploads accept only PNG, JPEG, GIF, or WebP, stop at 1 MB, verify MIME signatures and file extensions, never fetch caller-supplied URLs, and use a fixed multipart `POST /system/documents` for Ticket or TimeEntry records.
+- A self-contained MCP App supported by Claude provides paste, drag/drop, and file selection. It resizes large raster images locally before invoking the app-only upload tool; an optional ticket note is a separate write so partial success is reported accurately.
 - Structured best-effort audit events for every MCP tool with allowlisted identity, tool, outcome, correlation, and latency fields; tool inputs, credentials, tokens, URLs, headers, upstream bodies, and exception text are never included.
 - Blocking tests, typecheck, formatting, npm audit, and Wrangler dry-run bundle in CI.
 
@@ -61,7 +63,7 @@ Each alias in `IDENTITY_PROFILE_MAP` must match `^[A-Z][A-Z0-9_]{0,31}$` and hav
 
 Set the non-secret `CONNECTWISE_ALLOWED_ORIGINS` Worker variable to a JSON array of the exact canonical ConnectWise origins used by these profiles, for example `["https://<connectwise-host>"]`. Origin entries must be canonical HTTPS origins with no path, credentials, query, or fragment. IP literals, localhost-class names, and `.local` names are rejected. Each profile's `apiBaseUrl` origin must match an entry literally. Keep this variable separate from profile secrets so compromise of one secret cannot redirect its Basic credentials to another host.
 
-The runtime derives the binding name only from the authenticated grant's server-side profile alias and reads only that profile secret. MCP inputs and ordinary HTTP headers cannot select a profile or supply credentials. Requests use `redirect: "error"`; redirected responses are never followed. Missing, malformed, ambiguous, or incomplete configuration fails closed. Enter real credentials only through the Wrangler secret prompt or an approved Cloudflare secret-management workflow.
+The runtime derives the binding name only from the authenticated grant's server-side profile alias and reads only that profile secret. MCP inputs and ordinary HTTP headers cannot select a profile or supply credentials. Requests use `redirect: "manual"` and explicitly reject every 3xx response because the Workers runtime does not implement `redirect: "error"`. Missing, malformed, ambiguous, or incomplete configuration fails closed. Enter real credentials only through the Wrangler secret prompt or an approved Cloudflare secret-management workflow.
 
 Create a production KV namespace and replace the placeholder binding ID. The maintained OAuth provider uses this binding for provider grants, authorization codes, client registrations, and refresh-token rotation. The upstream Entra browser state is signed, short-lived, and browser-bound rather than stored in KV.
 
@@ -90,7 +92,7 @@ The event schema is allowlist-only:
 | `tenantId`      | Validated Entra tenant GUID when available                                                                                    |
 | `objectId`      | Validated Entra object GUID when available                                                                                    |
 | `profileAlias`  | Validated server-selected profile alias when available                                                                        |
-| `tool`          | Fixed name from the registered twelve-tool catalog                                                                            |
+| `tool`          | Fixed name from the registered tool catalog                                                                                   |
 | `outcome`       | `success`, `denied`, or `failure`                                                                                             |
 | `reason`        | Fixed sanitized reason such as `ok`, `insufficient_scope`, `profile_unavailable`, `connectwise_denied`, or `operation_failed` |
 | `durationMs`    | Nonnegative integer latency, defensively capped at 300,000 ms                                                                 |
@@ -119,6 +121,6 @@ npm run check
 
 ## Next stages
 
-1. Treat [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md) as the V2 migration decision record. Do not add generic endpoints, caller-defined conditions, raw request bodies, or attachment downloads.
+1. Treat [`legacy-read-surface-classification.md`](legacy-read-surface-classification.md) as the V2 migration decision record. Do not add generic endpoints, caller-defined conditions, raw request bodies, or unbounded document transfer.
 2. Run Entra, MCP Inspector, staging ConnectWise read/write, denial, and six-user isolation tests.
 3. Remove legacy Docker/FastAPI code only after rollback and cutover acceptance.
