@@ -1418,10 +1418,122 @@ export function registerConnectWiseBusinessTools(
   );
 
   server.registerTool(
+    "create_service_ticket",
+    {
+      description:
+        "Create a ConnectWise service ticket. companyId and summary are required and never defaulted. Defaults: boardId 32 (Triage), statusId 547 (New). New tickets default to Priority 4 - Low and a placeholder type ('-CHANGE BOARD FIRST-') until they are corrected on a real board — the created ticket shows these so the caller knows to fix them. initialDescription is posted as the ticket's initial description note. Returns the full created ticket.",
+      inputSchema: {
+        companyId: positiveId,
+        summary: z.string().trim().min(1).max(100),
+        boardId: positiveId.optional(),
+        statusId: positiveId.optional(),
+        contactId: positiveId.optional(),
+        priorityId: positiveId.optional(),
+        typeId: positiveId.optional(),
+        ownerId: positiveId.optional(),
+        initialDescription: z.string().trim().min(1).max(8_000).optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      companyId,
+      summary,
+      boardId,
+      statusId,
+      contactId,
+      priorityId,
+      typeId,
+      ownerId,
+      initialDescription,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "create_service_ticket",
+        (client) =>
+          client.createServiceTicket({
+            companyId,
+            summary,
+            ...(boardId !== undefined ? { boardId } : {}),
+            ...(statusId !== undefined ? { statusId } : {}),
+            ...(contactId !== undefined ? { contactId } : {}),
+            ...(priorityId !== undefined ? { priorityId } : {}),
+            ...(typeId !== undefined ? { typeId } : {}),
+            ...(ownerId !== undefined ? { ownerId } : {}),
+            ...(initialDescription !== undefined ? { initialDescription } : {}),
+          }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "update_service_ticket",
+    {
+      description:
+        "Update an existing ConnectWise service ticket. Only the fields you pass change: the client GETs the ticket first, merges, then PUTs — unpassed fields (company, contact, dates, costs) survive. A board move auto-generates a zero-hour ghost schedule entry on the ticket; this tool detects it and removes it in the same operation (reported in the response). Status is board-scoped: a status that is not valid on the target board is rejected with the valid statuses listed.",
+      inputSchema: {
+        ticketId: positiveId,
+        ownerId: positiveId.optional(),
+        statusId: positiveId.optional(),
+        boardId: positiveId.optional(),
+        priorityId: positiveId.optional(),
+        typeId: positiveId.optional(),
+        summary: z.string().trim().min(1).max(100).optional(),
+        contactId: positiveId.optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      ticketId,
+      ownerId,
+      statusId,
+      boardId,
+      priorityId,
+      typeId,
+      summary,
+      contactId,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "update_service_ticket",
+        async (client) => {
+          // Board-scoped status validation, before any write. When a board is
+          // being set, the status must be valid there.
+          if (boardId !== undefined && statusId !== undefined) {
+            const statuses = (await client.getBoardStatuses(boardId)) as Array<{
+              id?: number;
+              name?: string;
+            }>;
+            const valid = Array.isArray(statuses) ? statuses : [];
+            if (!valid.some((s) => Number(s.id) === statusId)) {
+              const names = valid
+                .map((s) => `${s.id} ${s.name ?? ""}`.trim())
+                .join(", ");
+              throw new Error(
+                `statusId ${statusId} is not valid on board ${boardId}; valid statuses: ${names || "none"}`,
+              );
+            }
+          }
+          return client.updateServiceTicket(ticketId, {
+            ...(ownerId !== undefined ? { ownerId } : {}),
+            ...(statusId !== undefined ? { statusId } : {}),
+            ...(boardId !== undefined ? { boardId } : {}),
+            ...(priorityId !== undefined ? { priorityId } : {}),
+            ...(typeId !== undefined ? { typeId } : {}),
+            ...(summary !== undefined ? { summary } : {}),
+            ...(contactId !== undefined ? { contactId } : {}),
+          });
+        },
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
     "create_schedule_entry",
     {
       description:
-        "Create a schedule entry on a member's calendar. [BUILD-MARKER 5371fc77-2026-08-30] memberId is always explicit — never defaulted. dateStart/dateEnd must be ISO 8601 WITH an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00); bare local or bare UTC times are rejected and converted to UTC server-side, so what lands on the calendar is always unambiguous. objectId is the ticket/record the entry attaches to and is required for service entries (objectType 4). allowConflicts defaults to false and sends allowScheduleConflictsFlag only when true (verified working on this instance). Returns the created entry with its stored UTC times.",
+        "Create a schedule entry on a member's calendar. memberId is always explicit — never defaulted. dateStart/dateEnd must be ISO 8601 WITH an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00); bare local or bare UTC times are rejected and converted to UTC server-side, so what lands on the calendar is always unambiguous. objectId is the ticket/record the entry attaches to and is required for service entries (objectType 4). allowConflicts defaults to false and sends allowScheduleConflictsFlag only when true. whereId sets the location (e.g. on-site vs Remote); omit to use the member's default. Returns the created entry with its stored UTC times.",
       inputSchema: {
         memberId: positiveId,
         dateStart: z.string(),
@@ -1432,6 +1544,7 @@ export function registerConnectWiseBusinessTools(
         allowConflicts: z.boolean().optional(),
         doneFlag: z.boolean().optional(),
         name: z.string().trim().min(1).max(500).optional(),
+        whereId: positiveId.optional(),
       },
       annotations: writeAnnotations,
     },
@@ -1445,6 +1558,7 @@ export function registerConnectWiseBusinessTools(
       allowConflicts,
       doneFlag,
       name,
+      whereId,
     }) =>
       runBusinessTool(
         getProps(),
@@ -1461,6 +1575,7 @@ export function registerConnectWiseBusinessTools(
             ...(allowConflicts !== undefined ? { allowConflicts } : {}),
             ...(doneFlag !== undefined ? { doneFlag } : {}),
             ...(name !== undefined ? { name } : {}),
+            ...(whereId !== undefined ? { whereId } : {}),
           }),
         dependencies,
       ),
@@ -1479,6 +1594,7 @@ export function registerConnectWiseBusinessTools(
         doneFlag: z.boolean().optional(),
         name: z.string().trim().min(1).max(500).optional(),
         allowConflicts: z.boolean().optional(),
+        whereId: positiveId.optional(),
       },
       annotations: writeAnnotations,
     },
@@ -1490,6 +1606,7 @@ export function registerConnectWiseBusinessTools(
       doneFlag,
       name,
       allowConflicts,
+      whereId,
     }) =>
       runBusinessTool(
         getProps(),
@@ -1503,6 +1620,7 @@ export function registerConnectWiseBusinessTools(
             ...(doneFlag !== undefined ? { doneFlag } : {}),
             ...(name !== undefined ? { name } : {}),
             ...(allowConflicts !== undefined ? { allowConflicts } : {}),
+            ...(whereId !== undefined ? { whereId } : {}),
           }),
         dependencies,
       ),

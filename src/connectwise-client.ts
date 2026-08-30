@@ -229,6 +229,7 @@ export type ConnectWiseClient = {
     allowConflicts?: boolean;
     doneFlag?: boolean;
     name?: string;
+    whereId?: number;
   }): Promise<unknown>;
   updateScheduleEntry(
     entryId: number,
@@ -239,9 +240,34 @@ export type ConnectWiseClient = {
       doneFlag?: boolean;
       name?: string;
       allowConflicts?: boolean;
+      whereId?: number;
     },
   ): Promise<unknown>;
   deleteScheduleEntry(entryId: number): Promise<void>;
+  openScheduleEntriesForObject(objectId: number): Promise<unknown[]>;
+  createServiceTicket(input: {
+    companyId: number;
+    summary: string;
+    boardId?: number;
+    statusId?: number;
+    contactId?: number;
+    priorityId?: number;
+    typeId?: number;
+    ownerId?: number;
+    initialDescription?: string;
+  }): Promise<unknown>;
+  updateServiceTicket(
+    ticketId: number,
+    input: {
+      ownerId?: number;
+      statusId?: number;
+      boardId?: number;
+      priorityId?: number;
+      typeId?: number;
+      summary?: string;
+      contactId?: number;
+    },
+  ): Promise<unknown>;
   createTimeEntry(input: {
     memberId: number;
     timeStart: string;
@@ -715,6 +741,35 @@ function toUtcIso(value: string, label: string): string {
   // CW rejects fractional seconds on schedule/time entries; normalize to
   // second precision (new Date(ms).toISOString() yields .000Z).
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+// A board move auto-generates a zero-hour schedule entry on the moved ticket
+// (hours is null, dateStart == dateEnd). Returns those entries so the caller
+// can decide to delete them.
+export function ghostScheduleEntries(
+  entries: unknown[],
+): Array<{ id: number; dateStart?: string; dateEnd?: string }> {
+  return (Array.isArray(entries) ? entries : [])
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+    )
+    .filter((entry) => {
+      const hours = entry.hours;
+      const dateStart =
+        typeof entry.dateStart === "string" ? entry.dateStart : "";
+      const dateEnd = typeof entry.dateEnd === "string" ? entry.dateEnd : "";
+      const zeroHours =
+        hours === null || hours === undefined || Number(hours) === 0;
+      return zeroHours && dateStart !== "" && dateStart === dateEnd;
+    })
+    .map((entry) => ({
+      id: Number(entry.id),
+      ...(typeof entry.dateStart === "string"
+        ? { dateStart: entry.dateStart }
+        : {}),
+      ...(typeof entry.dateEnd === "string" ? { dateEnd: entry.dateEnd } : {}),
+    }));
 }
 
 export function createConnectWiseClient(
@@ -1397,6 +1452,131 @@ export function createConnectWiseClient(
       });
     },
 
+    async createServiceTicket(input): Promise<unknown> {
+      positiveId(input.companyId, "company ID");
+      const summary =
+        typeof input.summary === "string" ? input.summary.trim() : "";
+      if (summary.length < 1 || summary.length > 100) {
+        throw new Error("summary is required (max 100 chars)");
+      }
+      const boardId = input.boardId ?? 32;
+      const statusId = input.statusId ?? 547;
+      const payload: Record<string, unknown> = {
+        company: { id: input.companyId },
+        summary,
+        board: { id: boardId },
+        status: { id: statusId },
+      };
+      if (input.contactId !== undefined) {
+        positiveId(input.contactId, "contact ID");
+        payload.contact = { id: input.contactId };
+      }
+      if (input.priorityId !== undefined) {
+        positiveId(input.priorityId, "priority ID");
+        payload.priority = { id: input.priorityId };
+      }
+      if (input.typeId !== undefined) {
+        positiveId(input.typeId, "type ID");
+        payload.type = { id: input.typeId };
+      }
+      if (input.ownerId !== undefined) {
+        positiveId(input.ownerId, "owner ID");
+        payload.owner = { id: input.ownerId };
+      }
+      const created = (await requestJson(
+        "POST",
+        "/service/tickets",
+        undefined,
+        payload,
+      )) as Record<string, unknown>;
+      if (input.initialDescription !== undefined) {
+        const text = input.initialDescription.trim();
+        if (text.length > 0 && typeof created.id === "number") {
+          await requestJson(
+            "POST",
+            `/service/tickets/${created.id}/notes`,
+            undefined,
+            {
+              text,
+              detailDescriptionFlag: true,
+              internalAnalysisFlag: false,
+              resolutionFlag: false,
+              issueFlag: false,
+              externalFlag: true,
+            },
+          );
+        }
+      }
+      return created;
+    },
+
+    async updateServiceTicket(ticketId, input): Promise<unknown> {
+      positiveId(ticketId, "service ticket ID");
+      // GET first, then merge and PUT: a blind PUT blanks every unpassed
+      // field on established tickets. These are live client tickets.
+      const existing = (await requestJson(
+        "GET",
+        `/service/tickets/${ticketId}`,
+      )) as Record<string, unknown>;
+      if (!existing || typeof existing !== "object") {
+        throw new Error(`Service ticket ${ticketId} not found`);
+      }
+      const merged: Record<string, unknown> = { ...existing };
+      // Drop read-only/system fields a PUT would reject.
+      for (const field of [
+        "id",
+        "recordType",
+        "_info",
+        "dateEntered",
+        "lastUpdated",
+        "closedFlag",
+        "closedDate",
+        "dateResolved",
+        "resolvedBy",
+      ]) {
+        delete merged[field];
+      }
+      if (input.ownerId !== undefined) {
+        positiveId(input.ownerId, "owner ID");
+        merged.owner = { id: input.ownerId };
+      }
+      if (input.statusId !== undefined) {
+        positiveId(input.statusId, "status ID");
+        merged.status = { id: input.statusId };
+      }
+      if (input.boardId !== undefined) {
+        positiveId(input.boardId, "board ID");
+        // Board moves auto-generate zero-hour ghost schedule entries; the
+        // caller checks + cleans those up after the PUT.
+        merged.board = { id: input.boardId };
+      }
+      if (input.priorityId !== undefined) {
+        positiveId(input.priorityId, "priority ID");
+        merged.priority = { id: input.priorityId };
+      }
+      if (input.typeId !== undefined) {
+        positiveId(input.typeId, "type ID");
+        merged.type = { id: input.typeId };
+      }
+      if (input.summary !== undefined) {
+        const summary = input.summary.trim();
+        if (summary.length < 1 || summary.length > 100) {
+          throw new Error("summary must be 1-100 chars");
+        }
+        merged.summary = summary;
+      }
+      if (input.contactId !== undefined) {
+        positiveId(input.contactId, "contact ID");
+        merged.contact = { id: input.contactId };
+      }
+      return requestJson(
+        "PUT",
+        `/service/tickets/${ticketId}`,
+        undefined,
+        merged,
+      );
+    },
+
     async createScheduleEntry(input): Promise<unknown> {
       positiveId(input.memberId, "member ID");
       const dateStart = toUtcIso(input.dateStart, "dateStart");
@@ -1427,6 +1607,10 @@ export function createConnectWiseClient(
       if (input.name !== undefined && input.name.length > 0) {
         if (input.name.length > 500) throw new Error("name is too long");
         payload.name = input.name;
+      }
+      if (input.whereId !== undefined) {
+        positiveId(input.whereId, "where ID");
+        payload.where = { id: input.whereId };
       }
       return requestJson("POST", "/schedule/entries", undefined, payload);
     },
@@ -1461,6 +1645,10 @@ export function createConnectWiseClient(
       if (input.allowConflicts === true) {
         merged.allowScheduleConflictsFlag = true;
       }
+      if (input.whereId !== undefined) {
+        positiveId(input.whereId, "where ID");
+        merged.where = { id: input.whereId };
+      }
       return requestJson(
         "PUT",
         `/schedule/entries/${entryId}`,
@@ -1472,6 +1660,15 @@ export function createConnectWiseClient(
     async deleteScheduleEntry(entryId): Promise<void> {
       positiveId(entryId, "schedule entry ID");
       await requestJson("DELETE", `/schedule/entries/${entryId}`);
+    },
+
+    async openScheduleEntriesForObject(objectId): Promise<unknown[]> {
+      positiveId(objectId, "object ID");
+      const found = (await requestJson("GET", "/schedule/entries", {
+        conditions: `objectId=${objectId}`,
+        pageSize: 50,
+      })) as unknown[];
+      return Array.isArray(found) ? found : [];
     },
 
     async createTimeEntry(input): Promise<unknown> {

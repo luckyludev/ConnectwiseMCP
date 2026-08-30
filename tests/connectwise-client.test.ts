@@ -3,6 +3,7 @@ import {
   ConnectWiseRequestError,
   MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
+  ghostScheduleEntries,
 } from "../src/connectwise-client";
 import type { ConnectWiseCredentials } from "../src/connectwise-profile";
 
@@ -699,6 +700,36 @@ describe("ConnectWiseClient", () => {
         dateEnd: "2026-08-31T17:00:00-04:00",
       }),
     ).rejects.toThrow(/objectId is required/);
+  });
+
+  it("ghostScheduleEntries detects zero-hour same-start/end entries only", () => {
+    const ghosts = ghostScheduleEntries([
+      {
+        id: 246998,
+        dateStart: "2026-09-03T00:00:00Z",
+        dateEnd: "2026-09-03T00:00:00Z",
+        hours: null,
+      },
+      {
+        id: 1,
+        dateStart: "2026-09-03T00:00:00Z",
+        dateEnd: "2026-09-03T00:00:00Z",
+        hours: 0,
+      },
+      {
+        id: 2,
+        dateStart: "2026-09-03T00:00:00Z",
+        dateEnd: "2026-09-03T02:00:00Z",
+        hours: null,
+      },
+      {
+        id: 3,
+        dateStart: "2026-09-03T00:00:00Z",
+        dateEnd: "2026-09-03T00:00:00Z",
+        hours: 2,
+      },
+    ]);
+    expect(ghosts.map((g) => g.id)).toEqual([246998, 1]);
   });
 
   it("logs the scrubbed write payload in cw_request", async () => {

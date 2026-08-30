@@ -42,7 +42,9 @@ export type ToolAuditName =
   | "create_schedule_entry"
   | "update_schedule_entry"
   | "delete_schedule_entry"
-  | "create_time_entry";
+  | "create_time_entry"
+  | "create_service_ticket"
+  | "update_service_ticket";
 
 const entraIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
