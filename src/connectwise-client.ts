@@ -253,7 +253,20 @@ type CatalogRoute = {
     params: Record<string, string | number>,
   ) => Record<string, string | number>;
   required: (string | number)[];
+  transform?: (value: unknown) => unknown;
 };
+
+// CW rejects orderBy on schedule entries, so order them in the worker.
+function sortByDateStart(value: unknown): unknown {
+  if (!Array.isArray(value) || value.length === 0) return value;
+  const items = value as Array<Record<string, unknown>>;
+  if (!items.every((entry) => entry && typeof entry.dateStart === "string")) {
+    return value;
+  }
+  return [...items].sort((a, b) =>
+    String(a.dateStart).localeCompare(String(b.dateStart)),
+  );
+}
 
 const CATALOG_DOCUMENT_RECORD_TYPES = new Set([
   "Ticket",
@@ -291,7 +304,6 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     path: () => "/service/tickets",
     query: (p) => ({
       conditions: `status/id=${p.statusId}`,
-      orderBy: "dateEntered desc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["statusId"],
@@ -311,7 +323,6 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
       ...(p.query
         ? { conditions: `name like '%${conditionString(String(p.query))}%'` }
         : {}),
-      orderBy: "name asc",
       pageSize: p.pageSize ?? 20,
     }),
     required: [],
@@ -329,7 +340,6 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     path: () => "/finance/agreements",
     query: (p) => ({
       conditions: `name like '%${conditionString(String(p.name))}%'`,
-      orderBy: "name asc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["name"],
@@ -338,7 +348,6 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     path: () => "/time/entries",
     query: (p) => ({
       conditions: `member/id=${p.memberId}`,
-      orderBy: "dateEntered desc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["memberId"],
@@ -350,10 +359,10 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
         `member/id=${p.memberId}`,
         ...scheduleDateConditions(p),
       ].join(" and "),
-      orderBy: "start asc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["memberId"],
+    transform: sortByDateStart,
   },
 };
 
@@ -380,8 +389,9 @@ function scheduleDateConditions(
     if (typeof value !== "string" || !ISO_DATE.test(value)) {
       throw new Error(`Invalid ${key} (expected YYYY-MM-DD)`);
     }
+    // CW requires the dateStart field and square-bracket datetime literals.
     clauses.push(
-      `start ${operator} '${value}${operator === "<=" ? "T23:59:59" : ""}'`,
+      `dateStart ${operator} [${value}${operator === "<=" ? "T23:59:59" : ""}]`,
     );
   }
   if (clauses.length === 2) {
@@ -753,10 +763,8 @@ export function createConnectWiseClient(
 
     async listScheduleEntries(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
-      return requestJson("GET", "/schedule/entries", {
-        orderBy: "start asc",
-        pageSize,
-      });
+      // CW rejects orderBy on /schedule/entries; order in the caller if needed.
+      return requestJson("GET", "/schedule/entries", { pageSize });
     },
 
     async getTimeSheets(pageSize: number): Promise<unknown> {
@@ -855,7 +863,8 @@ export function createConnectWiseClient(
       const query = definition.query
         ? definition.query(params)
         : { pageSize: params.pageSize ?? 20 };
-      return requestJson("GET", path, query);
+      const result = await requestJson("GET", path, query);
+      return definition.transform ? definition.transform(result) : result;
     },
 
     async searchServiceTickets(
