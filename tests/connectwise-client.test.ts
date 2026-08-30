@@ -649,6 +649,135 @@ describe("ConnectWiseClient", () => {
     expect(result).toEqual({ data: { count: 11 }, pageSizeClamped: false });
   });
 
+  it("creates a schedule entry with UTC conversion and an explicit conflict flag", async () => {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        calls.push({
+          method: (init as { method?: string } | undefined)?.method ?? "GET",
+          url: String(input),
+          ...((init as { body?: string } | undefined)?.body
+            ? { body: JSON.parse((init as { body: string }).body) }
+            : {}),
+        });
+        return Response.json({ id: 777, dateStart: "2026-08-31T16:30:00Z" });
+      },
+    });
+
+    await client.createScheduleEntry({
+      memberId: 149,
+      objectId: 1892065,
+      objectType: 4,
+      dateStart: "2026-08-31T12:30:00-04:00",
+      dateEnd: "2026-08-31T17:00:00-04:00",
+      allowConflicts: true,
+      name: "Test from pi",
+    });
+    expect(calls[0]!.method).toBe("POST");
+    expect(new URL(calls[0]!.url).pathname).toBe(
+      "/v4_6_release/apis/3.0/schedule/entries",
+    );
+    const body = calls[0]!.body as Record<string, unknown>;
+    expect(body.dateStart).toBe("2026-08-31T16:30:00.000Z");
+    expect(body.dateEnd).toBe("2026-08-31T21:00:00.000Z");
+    expect(body.allowScheduleConflictsFlag).toBe(true);
+    expect((body.member as { id: number }).id).toBe(149);
+
+    await expect(
+      client.createScheduleEntry({
+        memberId: 149,
+        dateStart: "2026-08-31T12:30:00",
+        dateEnd: "2026-08-31T17:00:00",
+      }),
+    ).rejects.toThrow(/explicit timezone offset/);
+
+    await expect(
+      client.createScheduleEntry({
+        memberId: 149,
+        dateStart: "2026-08-31T12:30:00-04:00",
+        dateEnd: "2026-08-31T17:00:00-04:00",
+      }),
+    ).rejects.toThrow(/objectId is required/);
+  });
+
+  it("updates a schedule entry via GET-then-merge PUT, preserving unpassed fields", async () => {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        const rawBody = (init as { body?: string } | undefined)?.body;
+        calls.push({
+          method,
+          url: String(input),
+          ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+        });
+        if (method === "GET" && String(input).includes("/schedule/entries/9")) {
+          return Response.json({
+            id: 9,
+            member: { id: 149 },
+            dateStart: "2026-08-31T16:30:00Z",
+            dateEnd: "2026-08-31T21:00:00Z",
+            status: { id: 1 },
+            name: "Keep me",
+            doneFlag: false,
+          });
+        }
+        return Response.json({ id: 9 });
+      },
+    });
+
+    await client.updateScheduleEntry(9, {
+      dateStart: "2026-09-01T12:00:00-04:00",
+    });
+    const put = calls.find((c) => c.method === "PUT")!;
+    expect(put).toBeDefined();
+    const body = put.body as Record<string, unknown>;
+    expect(body.dateStart).toBe("2026-09-01T16:00:00.000Z");
+    expect(body.name).toBe("Keep me");
+    expect(body.doneFlag).toBe(false);
+    expect(body.status).toEqual({ id: 1 });
+  });
+
+  it("deletes a schedule entry with DELETE", async () => {
+    const calls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        calls.push(
+          `${
+            (init as { method?: string } | undefined)?.method ?? "GET"
+          } ${String(input)}`,
+        );
+        return new Response(null, { status: 204 });
+      },
+    });
+    await client.deleteScheduleEntry(247134);
+    expect(calls[0]).toBe(
+      "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
+    );
+  });
+
+  it("rejects createTimeEntry when a timesheet is pending approval", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const url = String(_input);
+        if (url.includes("/time/sheets")) {
+          return Response.json([
+            { id: 99, status: "PendingApproval", period: 43 },
+          ]);
+        }
+        return Response.json({ id: 1 });
+      },
+    });
+    await expect(
+      client.createTimeEntry({
+        memberId: 149,
+        timeStart: "2026-09-01T12:00:00-04:00",
+        timeEnd: "2026-09-01T13:00:00-04:00",
+      }),
+    ).rejects.toThrow(/pending approval/);
+  });
+
   it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>

@@ -219,6 +219,39 @@ export type ConnectWiseClient = {
     agreementId: number,
     pageSize: number,
   ): Promise<unknown>;
+  createScheduleEntry(input: {
+    memberId: number;
+    dateStart: string;
+    dateEnd: string;
+    objectId?: number;
+    objectType?: number;
+    statusId?: number;
+    allowConflicts?: boolean;
+    doneFlag?: boolean;
+    name?: string;
+  }): Promise<unknown>;
+  updateScheduleEntry(
+    entryId: number,
+    input: {
+      dateStart?: string;
+      dateEnd?: string;
+      statusId?: number;
+      doneFlag?: boolean;
+      name?: string;
+      allowConflicts?: boolean;
+    },
+  ): Promise<unknown>;
+  deleteScheduleEntry(entryId: number): Promise<void>;
+  createTimeEntry(input: {
+    memberId: number;
+    timeStart: string;
+    timeEnd: string;
+    notes?: string;
+    ticketId?: number;
+    chargeToId?: number;
+    workTypeId?: number;
+    billableOption?: "Billable" | "DoNotBill" | "NoCharge";
+  }): Promise<unknown>;
 };
 
 export type ConnectWiseRequestDiagnostics = {
@@ -659,6 +692,29 @@ function conditionString(value: string): string {
   return value.replaceAll("'", "''");
 }
 
+// CW stores schedule and time entries as UTC ISO strings. Accept ISO 8601
+// WITH an explicit zone offset and convert to UTC; a bare local time or bare
+// UTC lets timezone shifts slip in silently (Luis hit exactly this: a 06:30Z
+// recurring meeting landing at 2:30 AM local).
+const ISO_OFFSET_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)$/;
+
+function toUtcIso(value: string, label: string): string {
+  if (typeof value !== "string" || value.length < 10 || value.length > 40) {
+    throw new Error(`Invalid ${label}`);
+  }
+  if (!ISO_OFFSET_RE.test(value)) {
+    throw new Error(
+      `${label} must be ISO 8601 with an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00)`,
+    );
+  }
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return new Date(ms).toISOString();
+}
+
 export function createConnectWiseClient(
   credentials: ConnectWiseCredentials,
   dependencies: ConnectWiseClientDependencies = {},
@@ -678,7 +734,7 @@ export function createConnectWiseClient(
   );
 
   async function requestJson(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
     query?: Readonly<Record<string, string | number>>,
     body?: unknown,
@@ -1324,6 +1380,131 @@ export function createConnectWiseClient(
         pageSize,
         orderBy: "date desc",
       });
+    },
+
+    async createScheduleEntry(input): Promise<unknown> {
+      positiveId(input.memberId, "member ID");
+      const dateStart = toUtcIso(input.dateStart, "dateStart");
+      const dateEnd = toUtcIso(input.dateEnd, "dateEnd");
+      const objectType = input.objectType ?? 4;
+      if (input.objectId !== undefined) positiveId(input.objectId, "object ID");
+      if (input.statusId !== undefined) {
+        positiveId(input.statusId, "status ID");
+      }
+      if (objectType === 4 && input.objectId === undefined) {
+        // CW requires objectId when the entry attaches to a service ticket.
+        throw new Error(
+          "objectId is required for a service schedule entry (objectType 4)",
+        );
+      }
+      const payload: Record<string, unknown> = {
+        member: { id: input.memberId },
+        type: { id: objectType },
+        status: { id: input.statusId ?? 1 },
+        dateStart,
+        dateEnd,
+      };
+      if (input.objectId !== undefined) payload.objectId = input.objectId;
+      if (input.allowConflicts === true) {
+        payload.allowScheduleConflictsFlag = true;
+      }
+      if (input.doneFlag === true) payload.doneFlag = true;
+      if (input.name !== undefined && input.name.length > 0) {
+        if (input.name.length > 500) throw new Error("name is too long");
+        payload.name = input.name;
+      }
+      return requestJson("POST", "/schedule/entries", undefined, payload);
+    },
+
+    async updateScheduleEntry(entryId, input): Promise<unknown> {
+      positiveId(entryId, "schedule entry ID");
+      // GET first, then merge and PUT: a blind PUT blanks every field that
+      // is not passed on established records (Luis has hit this).
+      const existing = (await requestJson(
+        "GET",
+        `/schedule/entries/${entryId}`,
+      )) as Record<string, unknown>;
+      if (!existing || typeof existing !== "object") {
+        throw new Error(`Schedule entry ${entryId} not found`);
+      }
+      const merged: Record<string, unknown> = { ...existing };
+      if (input.dateStart !== undefined) {
+        merged.dateStart = toUtcIso(input.dateStart, "dateStart");
+      }
+      if (input.dateEnd !== undefined) {
+        merged.dateEnd = toUtcIso(input.dateEnd, "dateEnd");
+      }
+      if (input.statusId !== undefined) {
+        positiveId(input.statusId, "status ID");
+        merged.status = { id: input.statusId };
+      }
+      if (input.doneFlag !== undefined) merged.doneFlag = input.doneFlag;
+      if (input.name !== undefined) {
+        if (input.name.length > 500) throw new Error("name is too long");
+        merged.name = input.name;
+      }
+      if (input.allowConflicts === true) {
+        merged.allowScheduleConflictsFlag = true;
+      }
+      return requestJson(
+        "PUT",
+        `/schedule/entries/${entryId}`,
+        undefined,
+        merged,
+      );
+    },
+
+    async deleteScheduleEntry(entryId): Promise<void> {
+      positiveId(entryId, "schedule entry ID");
+      await requestJson("DELETE", `/schedule/entries/${entryId}`);
+    },
+
+    async createTimeEntry(input): Promise<unknown> {
+      positiveId(input.memberId, "member ID");
+      const timeStart = toUtcIso(input.timeStart, "timeStart");
+      const timeEnd = toUtcIso(input.timeEnd, "timeEnd");
+      if (input.ticketId !== undefined) positiveId(input.ticketId, "ticket ID");
+      if (input.chargeToId !== undefined) {
+        positiveId(input.chargeToId, "chargeTo ID");
+      }
+      if (input.workTypeId !== undefined) {
+        positiveId(input.workTypeId, "workType ID");
+      }
+      if (input.notes !== undefined && input.notes.length > 2000) {
+        throw new Error("notes are too long");
+      }
+      // Writing into a submitted timesheet fails server-side; fail fast with
+      // a clear recall instruction instead of a generic CW error.
+      const sheets = (await requestJson("GET", "/time/sheets", {
+        conditions: `member/id=${input.memberId}`,
+        pageSize: 5,
+      })) as unknown[];
+      if (Array.isArray(sheets)) {
+        for (const sheet of sheets) {
+          const status = (sheet as Record<string, unknown>)?.status;
+          if (status === "PendingApproval") {
+            throw new Error(
+              "A timesheet is pending approval; time entries cannot be written until it is approved or recalled",
+            );
+          }
+        }
+      }
+      const payload: Record<string, unknown> = {
+        member: { id: input.memberId },
+        timeStart,
+        timeEnd,
+        billableOption: input.billableOption ?? "Billable",
+      };
+      if (input.ticketId !== undefined) payload.ticket = { id: input.ticketId };
+      if (input.chargeToId !== undefined) {
+        payload.chargeToId = input.chargeToId;
+      }
+      if (input.workTypeId !== undefined)
+        payload.workType = { id: input.workTypeId };
+      if (input.notes !== undefined && input.notes.length > 0) {
+        payload.notes = input.notes;
+      }
+      return requestJson("POST", "/time/entries", undefined, payload);
     },
   };
 }
