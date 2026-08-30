@@ -706,7 +706,13 @@ export function createConnectWiseClient(
     },
 
     async getMyMember(): Promise<unknown> {
-      return requestJson("GET", "/system/myMember");
+      const memberId = credentials.memberId;
+      if (memberId === undefined) {
+        throw new Error(
+          "ConnectWise profile is missing memberId; add it to enable get_my_member",
+        );
+      }
+      return requestJson("GET", `/system/members/${memberId}`);
     },
 
     async listMembers(pageSize: number): Promise<unknown> {
