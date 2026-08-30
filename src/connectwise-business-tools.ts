@@ -7,6 +7,7 @@ import {
   ConnectWiseRequestError,
   MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
+  ghostScheduleEntries,
   type ConnectWiseClient,
   type HatchOptions,
 } from "./connectwise-client";
@@ -1515,15 +1516,35 @@ export function registerConnectWiseBusinessTools(
               );
             }
           }
-          return client.updateServiceTicket(ticketId, {
-            ...(ownerId !== undefined ? { ownerId } : {}),
-            ...(statusId !== undefined ? { statusId } : {}),
-            ...(boardId !== undefined ? { boardId } : {}),
-            ...(priorityId !== undefined ? { priorityId } : {}),
-            ...(typeId !== undefined ? { typeId } : {}),
-            ...(summary !== undefined ? { summary } : {}),
-            ...(contactId !== undefined ? { contactId } : {}),
-          });
+          return client
+            .updateServiceTicket(ticketId, {
+              ...(ownerId !== undefined ? { ownerId } : {}),
+              ...(statusId !== undefined ? { statusId } : {}),
+              ...(boardId !== undefined ? { boardId } : {}),
+              ...(priorityId !== undefined ? { priorityId } : {}),
+              ...(typeId !== undefined ? { typeId } : {}),
+              ...(summary !== undefined ? { summary } : {}),
+              ...(contactId !== undefined ? { contactId } : {}),
+            })
+            .then(async (updated) => {
+              // A board move auto-generates a zero-hour ghost schedule entry
+              // on the ticket. Detect it and remove it in the same operation.
+              if (boardId !== undefined) {
+                const entries =
+                  await client.openScheduleEntriesForObject(ticketId);
+                const ghosts = ghostScheduleEntries(entries);
+                for (const ghost of ghosts) {
+                  await client.deleteScheduleEntry(ghost.id);
+                }
+                if (ghosts.length > 0) {
+                  return {
+                    ...(updated as object),
+                    _ghostScheduleEntriesRemoved: ghosts.map((g) => g.id),
+                  };
+                }
+              }
+              return updated;
+            });
         },
         dependencies,
       ),
