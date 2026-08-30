@@ -1,7 +1,10 @@
 import { createMcpHandler } from "agents/mcp/server";
 import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/mcp-server";
-import type { ConnectWiseClient } from "../src/connectwise-client";
+import {
+  createConnectWiseClient,
+  type ConnectWiseClient,
+} from "../src/connectwise-client";
 
 const profile = (companyId: string) =>
   JSON.stringify({
@@ -900,5 +903,299 @@ describe("authenticated MCP transport", () => {
     expect(received).toEqual({ companyId: "company-luis" });
     const body = await response.text();
     expect(body).toContain('\\"id\\":149');
+  });
+
+  // Phase 2 write tools must be exercised through the MCP tool interface with
+  // the exact JSON arguments a client sends (third occurrence of the
+  // wrong-layer test: mocks/curl passed while the tool handler failed).
+  it("create_schedule_entry converts offset to second-precision UTC on the wire", async () => {
+    const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      const rawBody = (init as { body?: string } | undefined)?.body;
+      bodies.push({
+        method,
+        url: String(input),
+        ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+      });
+      return Response.json({
+        id: 9001,
+        member: { id: 149 },
+        dateStart: "2026-08-31T12:30:00Z",
+        dateEnd: "2026-08-31T21:00:00Z",
+        status: { id: 1 },
+      });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_schedule_entry",
+            arguments: {
+              memberId: 149,
+              objectId: 1892065,
+              objectType: 4,
+              statusId: 1,
+              dateStart: "2026-08-31T08:30:00-04:00",
+              dateEnd: "2026-08-31T17:00:00-04:00",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    const post = bodies.find(
+      (b) => b.method === "POST" && b.url.endsWith("/schedule/entries"),
+    )!;
+    expect(post).toBeDefined();
+    const wire = post.body as Record<string, unknown>;
+    // CW rejects fractional seconds; must be second precision on the wire.
+    expect(wire.dateStart).toBe("2026-08-31T12:30:00Z");
+    expect(wire.dateEnd).toBe("2026-08-31T21:00:00Z");
+    expect((wire.member as { id: number }).id).toBe(149);
+    expect((wire.type as { id: number }).id).toBe(4);
+    expect(text).toContain('\\"id\\":9001');
+  });
+
+  it("create_schedule_entry rejects a bare local time without a fetch", async () => {
+    let requests = 0;
+    const fetcher: typeof fetch = async (_input, _init) => {
+      requests += 1;
+      return Response.json({});
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_schedule_entry",
+            arguments: {
+              memberId: 149,
+              objectId: 1892065,
+              objectType: 4,
+              dateStart: "2026-08-31T12:30:00",
+              dateEnd: "2026-08-31T17:00:00",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    expect(text).toContain("explicit timezone offset");
+    expect(requests).toBe(0);
+  });
+
+  it("update_schedule_entry merges over GET and preserves unpassed fields", async () => {
+    const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      const rawBody = (init as { body?: string } | undefined)?.body;
+      bodies.push({
+        method,
+        url: String(input),
+        ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+      });
+      if (method === "GET" && String(input).includes("/schedule/entries/9")) {
+        return Response.json({
+          id: 9,
+          member: { id: 149 },
+          objectId: 1892065,
+          type: { id: 4 },
+          status: { id: 1 },
+          dateStart: "2026-08-31T12:30:00Z",
+          dateEnd: "2026-08-31T21:00:00Z",
+          name: "Keep me",
+          doneFlag: false,
+        });
+      }
+      return Response.json({ id: 9, dateEnd: "2026-08-31T22:00:00Z" });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "update_schedule_entry",
+            arguments: {
+              entryId: 9,
+              dateEnd: "2026-08-31T18:00:00-04:00",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    const put = bodies.find((b) => b.method === "PUT")!;
+    expect(put).toBeDefined();
+    const wire = put.body as Record<string, unknown>;
+    expect(wire.dateEnd).toBe("2026-08-31T22:00:00Z");
+    expect(wire.dateStart).toBe("2026-08-31T12:30:00Z");
+    expect(wire.name).toBe("Keep me");
+    expect((wire.member as { id: number }).id).toBe(149);
+    expect((wire.type as { id: number }).id).toBe(4);
+    expect(text).toContain('\\"dateEnd\\":\\"2026-08-31T22:00:00Z\\"');
+  });
+
+  it("delete_schedule_entry issues DELETE through the tool", async () => {
+    const calls: string[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      calls.push(
+        `${(init as { method?: string } | undefined)?.method ?? "GET"} ${String(input)}`,
+      );
+      return new Response(null, { status: 204 });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "delete_schedule_entry",
+            arguments: { entryId: 247134 },
+          },
+        }),
+      }),
+    );
+    await response.text();
+    expect(calls[0]).toBe(
+      "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
+    );
+  });
+
+  it("create_time_entry surfaces a locked timesheet message through the tool", async () => {
+    const bodies: Array<{ method: string; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      bodies.push({ method, url: String(input) });
+      if (String(input).includes("/time/sheets")) {
+        return Response.json([
+          { id: 99, status: "PendingApproval", period: 43 },
+        ]);
+      }
+      return Response.json({ id: 1 });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_time_entry",
+            arguments: {
+              memberId: 149,
+              timeStart: "2026-09-01T12:00:00-04:00",
+              timeEnd: "2026-09-01T13:00:00-04:00",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    expect(text).toContain("pending approval");
+    expect(bodies.filter((b) => b.method === "POST").length).toBe(0);
   });
 });

@@ -712,7 +712,9 @@ function toUtcIso(value: string, label: string): string {
   if (!Number.isFinite(ms)) {
     throw new Error(`Invalid ${label}`);
   }
-  return new Date(ms).toISOString();
+  // CW rejects fractional seconds on schedule/time entries; normalize to
+  // second precision (new Date(ms).toISOString() yields .000Z).
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 export function createConnectWiseClient(
@@ -742,6 +744,12 @@ export function createConnectWiseClient(
     overflowMessage?: string,
   ): Promise<unknown> {
     const url = new URL(`${credentials.apiBaseUrl}${path}`);
+    // Log the outbound payload for write calls so failures are diagnosable
+    // (the URL alone has no body). Scrubbed and bounded; never raw.
+    const requestBodyPreview =
+      body === undefined
+        ? undefined
+        : scrubSecrets(JSON.stringify(body)).slice(0, 500);
     for (const [key, value] of Object.entries(query ?? {})) {
       url.searchParams.set(key, String(value));
     }
@@ -775,6 +783,9 @@ export function createConnectWiseClient(
               url: url.toString(),
               status: null,
               latencyMs: Date.now() - startedAtMs,
+              ...(requestBodyPreview
+                ? { requestBody: requestBodyPreview }
+                : {}),
               failure: "unavailable",
             }),
           );
@@ -788,6 +799,7 @@ export function createConnectWiseClient(
             url: url.toString(),
             status: null,
             latencyMs: Date.now() - startedAtMs,
+            ...(requestBodyPreview ? { requestBody: requestBodyPreview } : {}),
             failure: "unavailable",
           }),
         );
@@ -802,6 +814,7 @@ export function createConnectWiseClient(
             url: url.toString(),
             status: response.status,
             latencyMs: Date.now() - startedAtMs,
+            ...(requestBodyPreview ? { requestBody: requestBodyPreview } : {}),
             failure: "redirect_refused",
           }),
         );
@@ -827,6 +840,7 @@ export function createConnectWiseClient(
             url: url.toString(),
             status: response.status,
             latencyMs: Date.now() - startedAtMs,
+            ...(requestBodyPreview ? { requestBody: requestBodyPreview } : {}),
             ...(bodyPreview ? { bodyPreview } : {}),
           }),
         );
@@ -843,6 +857,7 @@ export function createConnectWiseClient(
           url: url.toString(),
           status: response.status,
           latencyMs: Date.now() - startedAtMs,
+          ...(requestBodyPreview ? { requestBody: requestBodyPreview } : {}),
         }),
       );
       const responseText = await readBoundedResponse(

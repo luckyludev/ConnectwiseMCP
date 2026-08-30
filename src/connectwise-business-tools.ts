@@ -1270,7 +1270,7 @@ export function registerConnectWiseBusinessTools(
     "call_connectwise",
     {
       description:
-        "Read-only ConnectWise catalog lookup. Pick a route ID and provide its required parameters. Routes: " +
+        "Read-only ConnectWise catalog lookup. [BUILD-MARKER 4421014b-2026-08-30] Pick a route ID and provide its required parameters. Routes: " +
         CATALOG_ROUTE_IDS.join(", ") +
         ". schedule.entries.byMember accepts optional startDate/endDate (YYYY-MM-DD, at most a 31-day span) and returns entries ordered by dateStart. service.tickets.byOwner filters on ticket OWNER (owner/id), not assigned resources; it returns open tickets by default (closedFlag=false) — pass includeClosed:'true' to include closed ones, and returns status, board, priority, owner, contact, closedDate and dateResolved. All routes are GET-only with allowlisted parameters and bounded output.",
       inputSchema: {

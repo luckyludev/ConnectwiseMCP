@@ -678,8 +678,9 @@ describe("ConnectWiseClient", () => {
       "/v4_6_release/apis/3.0/schedule/entries",
     );
     const body = calls[0]!.body as Record<string, unknown>;
-    expect(body.dateStart).toBe("2026-08-31T16:30:00.000Z");
-    expect(body.dateEnd).toBe("2026-08-31T21:00:00.000Z");
+    // CW rejects fractional seconds; the client must send second precision.
+    expect(body.dateStart).toBe("2026-08-31T16:30:00Z");
+    expect(body.dateEnd).toBe("2026-08-31T21:00:00Z");
     expect(body.allowScheduleConflictsFlag).toBe(true);
     expect((body.member as { id: number }).id).toBe(149);
 
@@ -733,7 +734,7 @@ describe("ConnectWiseClient", () => {
     const put = calls.find((c) => c.method === "PUT")!;
     expect(put).toBeDefined();
     const body = put.body as Record<string, unknown>;
-    expect(body.dateStart).toBe("2026-09-01T16:00:00.000Z");
+    expect(body.dateStart).toBe("2026-09-01T16:00:00Z");
     expect(body.name).toBe("Keep me");
     expect(body.doneFlag).toBe(false);
     expect(body.status).toEqual({ id: 1 });
