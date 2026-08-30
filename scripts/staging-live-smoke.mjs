@@ -306,6 +306,67 @@ await mcpCall(
   init.sessionId,
 );
 
+// Gate 0: tools/list must expose every expected tool. A tool that passes its
+// own unit tests but is not registered looks identical to a nonexistent tool.
+log("requesting tools/list ...");
+const toolsListResp = await mcpCall(
+  { jsonrpc: "2.0", id: Date.now(), method: "tools/list" },
+  init.sessionId,
+);
+if (!toolsListResp.ok) {
+  fail("tools/list failed", toolsListResp.detail ?? toolsListResp.raw);
+}
+const registeredTools = (toolsListResp.parsed?.result?.tools ?? []).map(
+  (t) => t.name,
+);
+const expectedTools = [
+  "whoami",
+  "get_service_ticket",
+  "search_tickets_by_content",
+  "get_ticket_notes_with_content",
+  "get_ticket_attachments_with_details",
+  "get_complete_ticket_content",
+  "create_ticket_note",
+  "get_service_boards",
+  "get_board_options",
+  "list_board_tickets",
+  "get_service_statuses",
+  "get_service_priorities",
+  "get_service_sources",
+  "get_my_member",
+  "list_members",
+  "search_companies",
+  "search_contacts",
+  "list_time_entries",
+  "list_schedule_entries",
+  "get_time_sheets",
+  "get_document",
+  "download_document",
+  "open_attachment_uploader",
+  "upload_connectwise_image",
+  "call_connectwise",
+  "execute_api_call",
+  "get_agreement_additions",
+  "get_agreement_additions_summary",
+  "create_agreement_addition",
+  "search_agreement_additions",
+  "get_agreement_billing_summary",
+  "create_schedule_entry",
+  "update_schedule_entry",
+  "delete_schedule_entry",
+  "create_time_entry",
+];
+const missing = expectedTools.filter((name) => !registeredTools.includes(name));
+if (missing.length > 0) {
+  fail(
+    `tools/list is missing ${missing.length} expected tool(s): ${missing.join(", ")}`,
+    `registered (${registeredTools.length}): ${registeredTools.join(", ")}`,
+  );
+}
+log(
+  `tools/list ok (${registeredTools.length} registered; all ${expectedTools.length} expected present): ${registeredTools.join(", ")}`,
+);
+
 async function callTool(name, args) {
   const result = await mcpCall(
     {
