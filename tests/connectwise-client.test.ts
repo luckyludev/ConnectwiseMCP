@@ -11,6 +11,7 @@ const credentials: ConnectWiseCredentials = {
   publicKey: "public-key",
   privateKey: "private-key",
   clientId: "partner-client-id",
+  memberId: 149,
 };
 
 describe("ConnectWiseClient", () => {
@@ -242,6 +243,28 @@ describe("ConnectWiseClient", () => {
     expect(delays).toEqual([100]);
   });
 
+  it("refuses get_my_member without a profile memberId and makes no request", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(
+      {
+        apiBaseUrl: "https://api-na.myconnectwise.net/v4_6_release/apis/3.0",
+        companyId: "acme",
+        publicKey: "public-key",
+        privateKey: "private-key",
+        clientId: "partner-client-id",
+      },
+      {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json({});
+        },
+      },
+    );
+
+    await expect(client.getMyMember()).rejects.toThrow(/missing memberId/);
+    expect(requests).toBe(0);
+  });
+
   it("uses a Workers-supported redirect mode and refuses 3xx responses", async () => {
     let attempts = 0;
     let redirectMode: string | undefined;
@@ -371,7 +394,7 @@ describe("ConnectWiseClient", () => {
 
     await client.getMyMember();
     expect(new URL(urls[4]!).pathname).toBe(
-      "/v4_6_release/apis/3.0/system/myMember",
+      "/v4_6_release/apis/3.0/system/members/149",
     );
 
     await client.listTimeEntries(5);

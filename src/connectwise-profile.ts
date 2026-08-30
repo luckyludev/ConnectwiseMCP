@@ -62,6 +62,9 @@ const credentialsSchema = z
     publicKey: credentialValue,
     privateKey: credentialValue,
     clientId: credentialValue,
+    // CW member ID for this user (enables get_my_member via
+    // /system/members/{id}; the legacy /system/myMember route 404s).
+    memberId: z.number().int().positive().max(1_000_000).optional(),
   })
   .strict();
 
