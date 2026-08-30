@@ -1421,7 +1421,7 @@ export function registerConnectWiseBusinessTools(
     "create_schedule_entry",
     {
       description:
-        "Create a schedule entry on a member's calendar. memberId is always explicit — never defaulted. dateStart/dateEnd must be ISO 8601 WITH an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00); bare local or bare UTC times are rejected and converted to UTC server-side, so what lands on the calendar is always unambiguous. objectId is the ticket/record the entry attaches to and is required for service entries (objectType 4). allowConflicts defaults to false and sends allowScheduleConflictsFlag only when true (verified working on this instance). Returns the created entry with its stored UTC times.",
+        "Create a schedule entry on a member's calendar. [BUILD-MARKER 5371fc77-2026-08-30] memberId is always explicit — never defaulted. dateStart/dateEnd must be ISO 8601 WITH an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00); bare local or bare UTC times are rejected and converted to UTC server-side, so what lands on the calendar is always unambiguous. objectId is the ticket/record the entry attaches to and is required for service entries (objectType 4). allowConflicts defaults to false and sends allowScheduleConflictsFlag only when true (verified working on this instance). Returns the created entry with its stored UTC times.",
       inputSchema: {
         memberId: positiveId,
         dateStart: z.string(),
