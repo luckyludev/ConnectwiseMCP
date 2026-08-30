@@ -481,7 +481,59 @@ if (!schedule.ok || scheduleList.length === 0) {
 }
 log(`schedule.entries.byMember ok (${scheduleList.length} entries)`);
 
-// 13. Done.
+// 13. Phase 2 write cycle: create -> update -> delete (self-cleaning).
+log("calling create_schedule_entry (2026-09-08 16:00-17:00-04:00 ...)");
+const created = await callTool("create_schedule_entry", {
+  memberId: EXPECT_MEMBER_ID,
+  objectId: 1892065,
+  objectType: 4,
+  dateStart: "2026-09-08T16:00:00-04:00",
+  dateEnd: "2026-09-08T17:00:00-04:00",
+  statusId: 1,
+});
+if (!created.ok || typeof created.data?.id !== "number") {
+  fail("create_schedule_entry failed", created.detail ?? created.text);
+}
+const createdId = created.data.id;
+if (created.data.dateStart !== "2026-09-08T20:00:00Z") {
+  fail(
+    `create_schedule_entry stored ${created.data.dateStart}; expected 2026-09-08T20:00:00Z (offset conversion)`,
+    created.text,
+  );
+}
+log(
+  `create_schedule_entry ok (id=${createdId}, stored ${created.data.dateStart})`,
+);
+
+try {
+  log("calling update_schedule_entry (move dateEnd to 18:00-04:00) ...");
+  const updated = await callTool("update_schedule_entry", {
+    entryId: createdId,
+    dateEnd: "2026-09-08T18:00:00-04:00",
+  });
+  if (!updated.ok || updated.data?.dateEnd !== "2026-09-08T22:00:00Z") {
+    fail(
+      "update_schedule_entry failed or wrong stored dateEnd",
+      updated.detail ?? updated.text,
+    );
+  }
+  if (updated.data?.dateStart !== "2026-09-08T20:00:00Z") {
+    fail(
+      "update_schedule_entry blanked an unpassed field (dateStart)",
+      updated.text,
+    );
+  }
+  log("update_schedule_entry ok (unpassed fields survived)");
+} finally {
+  log("cleaning up: delete_schedule_entry ...");
+  const del = await callTool("delete_schedule_entry", { entryId: createdId });
+  if (!del.ok) {
+    fail("delete_schedule_entry failed", del.detail ?? del.text);
+  }
+  log(`delete_schedule_entry ok (${createdId} gone)`);
+}
+
+// 14. Done.
 server.close();
 log("PASS: staging worker is fully operational (auth + ConnectWise data).");
 process.exit(0);
