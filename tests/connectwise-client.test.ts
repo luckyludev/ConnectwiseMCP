@@ -728,8 +728,9 @@ describe("ConnectWiseClient", () => {
         dateEnd: "2026-09-03T00:00:00Z",
         hours: 2,
       },
+      { id: 4, dateStart: null, dateEnd: null, hours: 0.0 },
     ]);
-    expect(ghosts.map((g) => g.id)).toEqual([246998, 1]);
+    expect(ghosts.map((g) => g.id)).toEqual([246998, 1, 4]);
   });
 
   it("logs the scrubbed write payload in cw_request", async () => {

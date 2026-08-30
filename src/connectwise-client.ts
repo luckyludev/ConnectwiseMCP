@@ -756,12 +756,19 @@ export function ghostScheduleEntries(
     )
     .filter((entry) => {
       const hours = entry.hours;
+      const zeroHours =
+        hours === null || hours === undefined || Number(hours) === 0;
+      if (!zeroHours) return false;
+      // The spec's real ghost (246998) has dateStart == dateEnd. Some CW
+      // board-move ghosts come back with null dates but zero hours, so catch
+      // any zero-hour entry attached to the moved ticket.
       const dateStart =
         typeof entry.dateStart === "string" ? entry.dateStart : "";
       const dateEnd = typeof entry.dateEnd === "string" ? entry.dateEnd : "";
-      const zeroHours =
-        hours === null || hours === undefined || Number(hours) === 0;
-      return zeroHours && dateStart !== "" && dateStart === dateEnd;
+      return (
+        (dateStart !== "" && dateStart === dateEnd) ||
+        (dateStart === "" && dateEnd === "")
+      );
     })
     .map((entry) => ({
       id: Number(entry.id),
