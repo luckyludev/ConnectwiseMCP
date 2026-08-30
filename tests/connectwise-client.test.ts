@@ -583,6 +583,72 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow("includeClosed must be 'true' or 'false'");
   });
 
+  it("rejects invalid execute_api_call paths before any request", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json([]),
+    });
+    const rejections: Array<[string, RegExp]> = [
+      ["/service/tickets/../finance/agreements", /'..'/],
+      ["/service/tickets?conditions=id=1", /query string/],
+      ["https://na.myconnectwise.net/service/tickets", /must start with \//],
+      ["/service/tickets\\evil", /not a URL/],
+      ["/system/setup/mycompany", /not permitted/],
+      ["/system/apiMembers", /not permitted/],
+      ["/system/integrations", /not permitted/],
+      ["/sales", /prefix is not allowed/],
+      ["service/tickets", /must start with \//],
+    ];
+    for (const [path, expected] of rejections) {
+      await expect(client.hatchGet(path)).rejects.toThrow(expected);
+    }
+  });
+
+  it("clamps hatch pageSize to 100 and never defaults orderBy", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    const result = await client.hatchGet("/service/tickets", {
+      conditions: "board/id=32",
+      pageSize: 5000,
+    });
+    const url = new URL(urls[0]!);
+    expect(url.searchParams.get("pageSize")).toBe("100");
+    expect(url.searchParams.has("orderBy")).toBe(false);
+    expect(result).toEqual({ data: [], pageSizeClamped: true });
+
+    await client.hatchGet("/service/tickets", { orderBy: "dateEntered desc" });
+    expect(new URL(urls[1]!).searchParams.get("orderBy")).toBe(
+      "dateEntered desc",
+    );
+  });
+
+  it("points countOnly at the /count sub-resource", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json({ count: 11 });
+      },
+    });
+
+    const result = await client.hatchGet("/service/tickets", {
+      conditions: "board/id=32",
+      countOnly: true,
+    });
+    expect(new URL(urls[0]!).pathname).toBe(
+      "/v4_6_release/apis/3.0/service/tickets/count",
+    );
+    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
+      "board/id=32",
+    );
+    expect(result).toEqual({ data: { count: 11 }, pageSizeClamped: false });
+  });
+
   it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>

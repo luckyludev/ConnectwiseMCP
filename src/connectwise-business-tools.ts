@@ -8,6 +8,7 @@ import {
   MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
   type ConnectWiseClient,
+  type HatchOptions,
 } from "./connectwise-client";
 import {
   resolveConnectWiseCredentials,
@@ -1347,6 +1348,70 @@ export function registerConnectWiseBusinessTools(
           return list(await client.catalogGet(route, params), pageSize).map(
             project,
           );
+        },
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "execute_api_call",
+    {
+      description:
+        "GET-only ConnectWise API pass-through for analytical reads. path is a relative read endpoint under /service/, /company/, /finance/, /system/, /project/, /schedule/, /time/, /sales/, /procurement/; credential/integration paths (apiKeys, apiMembers, system/integrations, system/setup, mycompany/integrator) are denied. Supports conditions, childConditions, customFieldConditions, orderBy, fields, page, pageSize (capped at 100; larger values are clamped), and countOnly (returns the /count sub-resource). No write methods are available through this tool. Responses over 256 KB are rejected with a narrowing hint.",
+      inputSchema: {
+        path: z.string().trim().min(1).max(300),
+        conditions: z.string().trim().min(1).max(500).optional(),
+        childConditions: z.string().trim().min(1).max(500).optional(),
+        customFieldConditions: z.string().trim().min(1).max(500).optional(),
+        orderBy: z.string().trim().min(1).max(200).optional(),
+        fields: z.string().trim().min(1).max(500).optional(),
+        page: z.number().int().min(1).max(10_000).optional(),
+        pageSize: z.number().int().min(1).max(1_000).optional(),
+        countOnly: z.boolean().optional(),
+      },
+      annotations: readAnnotations,
+    },
+    ({
+      path,
+      conditions,
+      childConditions,
+      customFieldConditions,
+      orderBy,
+      fields,
+      page,
+      pageSize,
+      countOnly,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "execute_api_call",
+        async (client) => {
+          const hatchOptions: HatchOptions = {};
+          if (conditions !== undefined) hatchOptions.conditions = conditions;
+          if (childConditions !== undefined) {
+            hatchOptions.childConditions = childConditions;
+          }
+          if (customFieldConditions !== undefined) {
+            hatchOptions.customFieldConditions = customFieldConditions;
+          }
+          if (orderBy !== undefined) hatchOptions.orderBy = orderBy;
+          if (fields !== undefined) hatchOptions.fields = fields;
+          if (page !== undefined) hatchOptions.page = page;
+          if (pageSize !== undefined) hatchOptions.pageSize = pageSize;
+          if (countOnly !== undefined) hatchOptions.countOnly = countOnly;
+          const { data, pageSizeClamped } = await client.hatchGet(
+            path,
+            hatchOptions,
+          );
+          if (pageSizeClamped) {
+            return {
+              warning:
+                "pageSize exceeded the 100 cap and was clamped; narrow results with fields or countOnly",
+              data,
+            };
+          }
+          return data;
         },
         dependencies,
       ),

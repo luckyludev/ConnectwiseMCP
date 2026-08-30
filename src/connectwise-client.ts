@@ -1,6 +1,8 @@
 import type { ConnectWiseCredentials } from "./connectwise-profile";
 
 const MAX_RESPONSE_BYTES = 1_000_000;
+const HATCH_MAX_BODY_BYTES = 256_000;
+const HATCH_MAX_PAGE_SIZE = 100;
 export const MAX_IMAGE_UPLOAD_BYTES = 1_000_000;
 export const CONNECTWISE_IMAGE_MIME_TYPES = [
   "image/jpeg",
@@ -31,11 +33,15 @@ async function cancelReader(
   }
 }
 
-async function readBoundedResponse(response: Response): Promise<string> {
+async function readBoundedResponse(
+  response: Response,
+  maxBytes: number = MAX_RESPONSE_BYTES,
+  overflowMessage: string = "ConnectWise response too large",
+): Promise<string> {
   const declaredLength = Number(response.headers.get("Content-Length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     await cancelResponseBody(response);
-    throw new Error("ConnectWise response too large");
+    throw new Error(overflowMessage);
   }
   if (!response.body) return "";
 
@@ -47,13 +53,91 @@ async function readBoundedResponse(response: Response): Promise<string> {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_RESPONSE_BYTES) {
+    if (total > maxBytes) {
       await cancelReader(reader);
-      throw new Error("ConnectWise response too large");
+      throw new Error(overflowMessage);
     }
     text += decoder.decode(value, { stream: true });
   }
   return text + decoder.decode();
+}
+
+export type HatchOptions = {
+  conditions?: string;
+  childConditions?: string;
+  customFieldConditions?: string;
+  orderBy?: string;
+  fields?: string;
+  page?: number;
+  pageSize?: number;
+  countOnly?: boolean;
+};
+
+export type HatchResult = {
+  data: unknown;
+  pageSizeClamped: boolean;
+};
+
+const HATCH_ALLOWED_PREFIXES = [
+  "/service/",
+  "/company/",
+  "/finance/",
+  "/system/",
+  "/project/",
+  "/schedule/",
+  "/time/",
+  "/sales/",
+  "/procurement/",
+] as const;
+
+// Credential/integration material that must never be reachable through the
+// hatch, even though its prefix is allowlisted. Denylist overrides allowlist.
+const HATCH_DENYLIST = [
+  "apikeys",
+  "apimembers",
+  "/system/integrations",
+  "/system/setup",
+  "mycompany/integrator",
+] as const;
+
+function validateHatchPath(rawPath: string): string {
+  if (typeof rawPath !== "string" || rawPath.length === 0) {
+    throw new Error("path is required");
+  }
+  if (rawPath.length > 300) throw new Error("path is too long");
+  if (!rawPath.startsWith("/")) throw new Error("path must start with /");
+  if (rawPath.includes("//")) throw new Error("path must not contain '//'");
+  if (rawPath.includes("..")) throw new Error("path must not contain '..'");
+  if (rawPath.includes("?") || rawPath.includes("#")) {
+    throw new Error("path must not contain a query string or fragment");
+  }
+  if (rawPath.includes("\\") || rawPath.includes("://")) {
+    throw new Error("path must be a relative ConnectWise path, not a URL");
+  }
+  if (/[\s\u0080-\uFFFF]/.test(rawPath)) {
+    throw new Error("path must not contain whitespace or non-ASCII characters");
+  }
+  if (!/^\/[a-z0-9\-]+(\/[a-z0-9\-]+)*$/i.test(rawPath)) {
+    throw new Error("path must contain only path segments");
+  }
+  const lower = rawPath.toLowerCase();
+  if (HATCH_DENYLIST.some((denied) => lower.includes(denied))) {
+    throw new Error("path is not permitted (credential/integration material)");
+  }
+  if (!HATCH_ALLOWED_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
+    throw new Error("path prefix is not allowed for execute_api_call");
+  }
+  return rawPath;
+}
+
+function hatchTextParam(value: string, label: string): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 500) {
+    throw new Error(`Invalid ${label}`);
+  }
+  if (/[\u0000-\u001F\u007F]/.test(value)) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return value;
 }
 
 export type ConnectWiseClientDependencies = {
@@ -113,6 +197,7 @@ export type ConnectWiseClient = {
     route: string,
     params: Record<string, string | number>,
   ): Promise<unknown>;
+  hatchGet(path: string, options?: HatchOptions): Promise<HatchResult>;
   searchServiceTickets(searchText: string, pageSize: number): Promise<unknown>;
   getAgreement(agreementId: number): Promise<unknown>;
   getAgreementAdditions(
@@ -597,6 +682,8 @@ export function createConnectWiseClient(
     path: string,
     query?: Readonly<Record<string, string | number>>,
     body?: unknown,
+    maxBodyBytes?: number,
+    overflowMessage?: string,
   ): Promise<unknown> {
     const url = new URL(`${credentials.apiBaseUrl}${path}`);
     for (const [key, value] of Object.entries(query ?? {})) {
@@ -702,7 +789,11 @@ export function createConnectWiseClient(
           latencyMs: Date.now() - startedAtMs,
         }),
       );
-      const responseText = await readBoundedResponse(response);
+      const responseText = await readBoundedResponse(
+        response,
+        maxBodyBytes,
+        overflowMessage,
+      );
       if (!responseText) return null;
       try {
         return JSON.parse(responseText) as unknown;
@@ -1115,6 +1206,62 @@ export function createConnectWiseClient(
         : { pageSize: params.pageSize ?? 20 };
       const result = await requestJson("GET", path, query);
       return definition.transform ? definition.transform(result) : result;
+    },
+
+    async hatchGet(
+      path: string,
+      options: HatchOptions = {},
+    ): Promise<HatchResult> {
+      let resolvedPath = validateHatchPath(path);
+      const countOnly = options.countOnly === true;
+      if (countOnly) {
+        resolvedPath = `${resolvedPath}/count`;
+      }
+      const query: Record<string, string | number> = {};
+      if (options.conditions !== undefined) {
+        query.conditions = hatchTextParam(options.conditions, "conditions");
+      }
+      if (options.childConditions !== undefined) {
+        query.childConditions = hatchTextParam(
+          options.childConditions,
+          "childConditions",
+        );
+      }
+      if (options.customFieldConditions !== undefined) {
+        query.customFieldConditions = hatchTextParam(
+          options.customFieldConditions,
+          "customFieldConditions",
+        );
+      }
+      // Never default orderBy: CW rejects orderBy fields it does not
+      // consider sortable, even when they exist on the object.
+      if (options.orderBy !== undefined) {
+        query.orderBy = hatchTextParam(options.orderBy, "orderBy");
+      }
+      if (options.fields !== undefined) {
+        query.fields = hatchTextParam(options.fields, "fields");
+      }
+      const page = options.page ?? 1;
+      if (!Number.isSafeInteger(page) || page < 1 || page > 10_000) {
+        throw new Error("Invalid page");
+      }
+      query.page = page;
+      let pageSize = options.pageSize ?? 25;
+      if (!Number.isSafeInteger(pageSize) || pageSize < 1) {
+        throw new Error("Invalid pageSize");
+      }
+      const pageSizeClamped = pageSize > HATCH_MAX_PAGE_SIZE;
+      if (pageSizeClamped) pageSize = HATCH_MAX_PAGE_SIZE;
+      query.pageSize = pageSize;
+      const data = await requestJson(
+        "GET",
+        resolvedPath,
+        query,
+        undefined,
+        HATCH_MAX_BODY_BYTES,
+        "Response exceeds the 256 KB execute_api_call limit; narrow with fields or a smaller pageSize",
+      );
+      return { data, pageSizeClamped };
     },
 
     async searchServiceTickets(

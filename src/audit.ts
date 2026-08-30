@@ -33,6 +33,7 @@ export type ToolAuditName =
   | "open_attachment_uploader"
   | "upload_connectwise_image"
   | "call_connectwise"
+  | "execute_api_call"
   | "get_agreement_additions"
   | "get_agreement_additions_summary"
   | "create_agreement_addition"

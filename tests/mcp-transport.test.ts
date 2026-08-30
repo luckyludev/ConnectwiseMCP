@@ -58,6 +58,7 @@ function businessClient(
     downloadDocument: unusedDownload,
     uploadImageDocument: unused,
     catalogGet: unused,
+    hatchGet: async () => ({ data: undefined, pageSizeClamped: false }),
     searchServiceTickets: unused,
     getAgreement: unused,
     getAgreementAdditions: unused,
