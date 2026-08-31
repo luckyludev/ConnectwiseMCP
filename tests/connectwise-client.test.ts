@@ -307,6 +307,141 @@ describe("ConnectWiseClient", () => {
       description: "Managed service",
     });
   });
+  it("builds fixed board, lookup, and member read routes", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.getServiceBoards();
+    expect(new URL(urls[0]!).searchParams.get("orderBy")).toBe("name asc");
+    expect(new URL(urls[0]!).pathname).toBe(
+      "/v4_6_release/apis/3.0/service/boards",
+    );
+
+    await client.getBoardStatuses(32);
+    expect(new URL(urls[1]!).pathname).toBe(
+      "/v4_6_release/apis/3.0/service/boards/32/statuses",
+    );
+
+    await client.listBoardTickets(32, 10);
+    expect(new URL(urls[2]!).searchParams.get("conditions")).toBe(
+      "board/id=32",
+    );
+
+    await client.getServiceStatuses();
+    expect(new URL(urls[3]!).pathname).toBe(
+      "/v4_6_release/apis/3.0/service/statuses",
+    );
+
+    await client.getMyMember();
+    expect(new URL(urls[4]!).pathname).toBe(
+      "/v4_6_release/apis/3.0/system/myMember",
+    );
+
+    await client.listTimeEntries(5);
+    expect(new URL(urls[5]!).pathname).toBe(
+      "/v4_6_release/apis/3.0/time/entries",
+    );
+  });
+
+  it("escapes company and contact search conditions", async () => {
+    let url = "";
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        url = String(input);
+        return Response.json([]);
+      },
+    });
+
+    await client.searchCompanies("O'Brien", 10);
+    expect(new URL(url).searchParams.get("conditions")).toBe(
+      "name like '%O''Brien%'",
+    );
+
+    await client.searchContacts("a@b.com", 10);
+    expect(new URL(url).searchParams.get("conditions")).toBe(
+      "(name like '%a@b.com%' OR email like '%a@b.com%')",
+    );
+  });
+
+  it("builds allowlisted catalog routes and rejects unknown ones", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.catalogGet("service.tickets.byStatus", {
+      statusId: 547,
+      pageSize: 20,
+    });
+    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
+      "status/id=547",
+    );
+
+    await client.catalogGet("system.documents", {
+      recordType: "Ticket",
+      recordId: 77,
+      pageSize: 20,
+    });
+    expect(new URL(urls[1]!).searchParams.get("recordType")).toBe("Ticket");
+    expect(new URL(urls[1]!).searchParams.get("recordId")).toBe("77");
+
+    await expect(
+      client.catalogGet("finance.invoices.byRaw", { pageSize: 5 }),
+    ).rejects.toThrow("Unknown ConnectWise route");
+
+    await expect(
+      client.catalogGet("system.documents", { recordType: "Raw", recordId: 7 }),
+    ).rejects.toThrow("Unsupported document record type");
+
+    await expect(
+      client.catalogGet("service.boards.statuses", { pageSize: 5 }),
+    ).rejects.toThrow("Missing boardId");
+  });
+
+  it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("ABC"));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/pdf" } },
+        ),
+    });
+
+    await expect(client.downloadDocument(400)).resolves.toEqual({
+      base64: btoa("ABC"),
+      mimeType: "application/pdf",
+      byteLength: 3,
+    });
+
+    const oversized = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array(8_000_001));
+              controller.close();
+            },
+          }),
+          { status: 200 },
+        ),
+    });
+    await expect(oversized.downloadDocument(400)).rejects.toThrow(
+      "ConnectWise download too large",
+    );
+  });
 
   const imagePayload = {
     filename: "shot.png",
@@ -337,25 +472,6 @@ describe("ConnectWiseClient", () => {
       fileContents: "iVBORw0KGgo=",
       fileType: "image/png",
     });
-  });
-
-  it("falls back to the project-ticket attachment path when the service path is missing", async () => {
-    const urls: string[] = [];
-    const client = createConnectWiseClient(credentials, {
-      fetcher: async (input) => {
-        urls.push(String(input));
-        if (urls.length === 1) return new Response(null, { status: 404 });
-        return Response.json({ id: 56 });
-      },
-    });
-
-    await expect(client.attachImageToTicket(77, imagePayload)).resolves.toEqual(
-      { id: 56 },
-    );
-    expect(urls).toEqual([
-      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/77/attachments",
-      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/project/tickets/77/attachments",
-    ]);
   });
 
   it("posts a time-entry image attachment to the time-entry path", async () => {
@@ -406,5 +522,24 @@ describe("ConnectWiseClient", () => {
       }),
     ).rejects.toThrow("Invalid attachment filename");
     expect(requests).toBe(0);
+  });
+
+  it("falls back to the project-ticket attachment path when the service path is missing", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        if (urls.length === 1) return new Response(null, { status: 404 });
+        return Response.json({ id: 56 });
+      },
+    });
+
+    await expect(client.attachImageToTicket(77, imagePayload)).resolves.toEqual(
+      { id: 56 },
+    );
+    expect(urls).toEqual([
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/77/attachments",
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/project/tickets/77/attachments",
+    ]);
   });
 });
