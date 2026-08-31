@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createConnectWiseClient } from "../src/connectwise-client";
+import {
+  ConnectWiseRequestError,
+  MAX_IMAGE_UPLOAD_BYTES,
+  createConnectWiseClient,
+  ghostScheduleEntries,
+} from "../src/connectwise-client";
 import type { ConnectWiseCredentials } from "../src/connectwise-profile";
 
 const credentials: ConnectWiseCredentials = {
@@ -8,6 +13,7 @@ const credentials: ConnectWiseCredentials = {
   publicKey: "public-key",
   privateKey: "private-key",
   clientId: "partner-client-id",
+  memberId: 149,
 };
 
 describe("ConnectWiseClient", () => {
@@ -29,7 +35,9 @@ describe("ConnectWiseClient", () => {
       "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/123",
     );
     expect(capturedInit?.method).toBe("GET");
-    expect(capturedInit?.redirect).toBe("error");
+    // Workers does not implement redirect:"error" (throws synchronously);
+    // 3xx responses are refused explicitly by the client instead.
+    expect(capturedInit?.redirect).toBe("manual");
     const headers = new Headers(capturedInit?.headers);
     expect(headers.get("Authorization")).toBe(
       `Basic ${btoa("acme+public-key:private-key")}`,
@@ -53,7 +61,7 @@ describe("ConnectWiseClient", () => {
     expect(requests).toBe(0);
   });
 
-  it("does not expose an upstream error body", async () => {
+  it("surfaces a bounded, scrubbed error body preview without hanging", async () => {
     let attempts = 0;
     let cancelled = false;
     const client = createConnectWiseClient(credentials, {
@@ -64,9 +72,10 @@ describe("ConnectWiseClient", () => {
             start(controller) {
               controller.enqueue(
                 new TextEncoder().encode(
-                  "credential=[REDACTED]; sensitive customer response",
+                  '{"code":"Forbidden","message":"Access denied","authorization":"Basic dXNlcjpwYXNzInZhbHVl"}',
                 ),
               );
+              // Deliberately never closes: the preview must not hang.
             },
             cancel() {
               cancelled = true;
@@ -83,11 +92,15 @@ describe("ConnectWiseClient", () => {
     } catch (caught) {
       error = caught;
     }
-    expect(error).toBeInstanceOf(Error);
-    if (!(error instanceof Error)) throw new Error("Expected client error");
-    expect(error.message).toBe("ConnectWise request failed (401)");
-    expect(error.message).not.toContain("sensitive customer response");
-    expect(error.message).not.toContain("credential=");
+    expect(error).toBeInstanceOf(ConnectWiseRequestError);
+    if (!(error instanceof ConnectWiseRequestError)) {
+      throw new Error("Expected client error");
+    }
+    expect(error.message).toContain("ConnectWise request failed (401)");
+    expect(error.message).toContain("at GET /service/tickets/123");
+    expect(error.message).toContain("Forbidden");
+    expect(error.message).toContain("Access denied");
+    expect(error.message).not.toContain("dXNlcjpwYXNzInZhbHVl");
     expect(attempts).toBe(1);
     expect(cancelled).toBe(true);
   });
@@ -232,6 +245,50 @@ describe("ConnectWiseClient", () => {
     expect(delays).toEqual([100]);
   });
 
+  it("refuses get_my_member without a profile memberId and makes no request", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(
+      {
+        apiBaseUrl: "https://api-na.myconnectwise.net/v4_6_release/apis/3.0",
+        companyId: "acme",
+        publicKey: "public-key",
+        privateKey: "private-key",
+        clientId: "partner-client-id",
+      },
+      {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json({});
+        },
+      },
+    );
+
+    await expect(client.getMyMember()).rejects.toThrow(/missing memberId/);
+    expect(requests).toBe(0);
+  });
+
+  it("uses a Workers-supported redirect mode and refuses 3xx responses", async () => {
+    let attempts = 0;
+    let redirectMode: string | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        attempts += 1;
+        redirectMode = (init as { redirect?: string } | undefined)?.redirect;
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "https://evil.example/" },
+        });
+      },
+      sleep: async () => undefined,
+    });
+
+    await expect(client.getServiceTicket(123)).rejects.toThrow(
+      /redirected the request \(302\)/,
+    );
+    expect(redirectMode).toBe("manual");
+    expect(attempts).toBe(1);
+  });
+
   it("escapes ticket-search conditions and enforces the result bound", async () => {
     let capturedUrl = "";
     const client = createConnectWiseClient(credentials, {
@@ -339,7 +396,7 @@ describe("ConnectWiseClient", () => {
 
     await client.getMyMember();
     expect(new URL(urls[4]!).pathname).toBe(
-      "/v4_6_release/apis/3.0/system/myMember",
+      "/v4_6_release/apis/3.0/system/members/149",
     );
 
     await client.listTimeEntries(5);
@@ -406,6 +463,374 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow("Missing boardId");
   });
 
+  it("bounds schedule.entries.byMember with an optional date range", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.catalogGet("schedule.entries.byMember", {
+      memberId: 149,
+      startDate: "2026-08-01",
+      endDate: "2026-08-15",
+      pageSize: 20,
+    });
+    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
+      "member/id=149 and dateStart >= [2026-08-01] and dateStart <= [2026-08-15T23:59:59]",
+    );
+
+    await client.catalogGet("schedule.entries.byMember", {
+      memberId: 149,
+      startDate: "2026-08-01",
+      pageSize: 20,
+    });
+    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
+      "member/id=149 and dateStart >= [2026-08-01]",
+    );
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-08-15",
+        endDate: "2026-08-01",
+      }),
+    ).rejects.toThrow("endDate must be on or after startDate");
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-08-01",
+        endDate: "2026-09-30",
+      }),
+    ).rejects.toThrow("Date range must be 31 days or less");
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "08/01/2026",
+      }),
+    ).rejects.toThrow("Invalid startDate");
+  });
+
+  it("sends no orderBy on schedule entries and sorts them in the worker", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([
+          { id: 2, dateStart: "2026-09-02T13:30:00Z" },
+          { id: 1, dateStart: "2026-08-31T18:15:00Z" },
+          { id: 3, dateStart: "2026-09-01T12:30:00Z" },
+        ]);
+      },
+    });
+
+    const result = await client.catalogGet("schedule.entries.byMember", {
+      memberId: 149,
+      startDate: "2026-08-31",
+      endDate: "2026-09-06",
+    });
+    expect(new URL(urls[0]!).searchParams.has("orderBy")).toBe(false);
+    expect(result).toEqual([
+      { id: 1, dateStart: "2026-08-31T18:15:00Z" },
+      { id: 3, dateStart: "2026-09-01T12:30:00Z" },
+      { id: 2, dateStart: "2026-09-02T13:30:00Z" },
+    ]);
+  });
+
+  it("filters byOwner on owner with open-only default and explicit fields", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.catalogGet("service.tickets.byOwner", { memberId: 149 });
+    const first = new URL(urls[0]!);
+    expect(first.searchParams.get("conditions")).toBe(
+      "owner/id=149 and closedFlag=false",
+    );
+    expect(first.searchParams.get("fields")?.split(",")).toEqual(
+      expect.arrayContaining([
+        "status",
+        "board",
+        "priority",
+        "owner",
+        "closedFlag",
+        "closedDate",
+        "dateResolved",
+      ]),
+    );
+    expect(first.searchParams.has("orderBy")).toBe(false);
+
+    await client.catalogGet("service.tickets.byOwner", {
+      memberId: 149,
+      includeClosed: "true",
+    });
+    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
+      "owner/id=149",
+    );
+
+    await expect(
+      client.catalogGet("service.tickets.byOwner", {
+        memberId: 149,
+        includeClosed: "yes",
+      }),
+    ).rejects.toThrow("includeClosed must be 'true' or 'false'");
+  });
+
+  it("rejects invalid execute_api_call paths before any request", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json([]),
+    });
+    const rejections: Array<[string, RegExp]> = [
+      ["/service/tickets/../finance/agreements", /'..'/],
+      ["/service/tickets?conditions=id=1", /query string/],
+      ["https://na.myconnectwise.net/service/tickets", /must start with \//],
+      ["/service/tickets\\evil", /not a URL/],
+      ["/system/setup/mycompany", /not permitted/],
+      ["/system/apiMembers", /not permitted/],
+      ["/system/integrations", /not permitted/],
+      ["/sales", /prefix is not allowed/],
+      ["service/tickets", /must start with \//],
+    ];
+    for (const [path, expected] of rejections) {
+      await expect(client.hatchGet(path)).rejects.toThrow(expected);
+    }
+  });
+
+  it("clamps hatch pageSize to 100 and never defaults orderBy", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    const result = await client.hatchGet("/service/tickets", {
+      conditions: "board/id=32",
+      pageSize: 5000,
+    });
+    const url = new URL(urls[0]!);
+    expect(url.searchParams.get("pageSize")).toBe("100");
+    expect(url.searchParams.has("orderBy")).toBe(false);
+    expect(result).toEqual({ data: [], pageSizeClamped: true });
+
+    await client.hatchGet("/service/tickets", { orderBy: "dateEntered desc" });
+    expect(new URL(urls[1]!).searchParams.get("orderBy")).toBe(
+      "dateEntered desc",
+    );
+  });
+
+  it("points countOnly at the /count sub-resource", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json({ count: 11 });
+      },
+    });
+
+    const result = await client.hatchGet("/service/tickets", {
+      conditions: "board/id=32",
+      countOnly: true,
+    });
+    expect(new URL(urls[0]!).pathname).toBe(
+      "/v4_6_release/apis/3.0/service/tickets/count",
+    );
+    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
+      "board/id=32",
+    );
+    expect(result).toEqual({ data: { count: 11 }, pageSizeClamped: false });
+  });
+
+  it("creates a schedule entry with UTC conversion and an explicit conflict flag", async () => {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        calls.push({
+          method: (init as { method?: string } | undefined)?.method ?? "GET",
+          url: String(input),
+          ...((init as { body?: string } | undefined)?.body
+            ? { body: JSON.parse((init as { body: string }).body) }
+            : {}),
+        });
+        return Response.json({ id: 777, dateStart: "2026-08-31T16:30:00Z" });
+      },
+    });
+
+    await client.createScheduleEntry({
+      memberId: 149,
+      objectId: 1892065,
+      objectType: 4,
+      dateStart: "2026-08-31T12:30:00-04:00",
+      dateEnd: "2026-08-31T17:00:00-04:00",
+      allowConflicts: true,
+      name: "Test from pi",
+    });
+    expect(calls[0]!.method).toBe("POST");
+    expect(new URL(calls[0]!.url).pathname).toBe(
+      "/v4_6_release/apis/3.0/schedule/entries",
+    );
+    const body = calls[0]!.body as Record<string, unknown>;
+    // CW rejects fractional seconds; the client must send second precision.
+    expect(body.dateStart).toBe("2026-08-31T16:30:00Z");
+    expect(body.dateEnd).toBe("2026-08-31T21:00:00Z");
+    expect(body.allowScheduleConflictsFlag).toBe(true);
+    expect((body.member as { id: number }).id).toBe(149);
+
+    await expect(
+      client.createScheduleEntry({
+        memberId: 149,
+        dateStart: "2026-08-31T12:30:00",
+        dateEnd: "2026-08-31T17:00:00",
+      }),
+    ).rejects.toThrow(/explicit timezone offset/);
+
+    await expect(
+      client.createScheduleEntry({
+        memberId: 149,
+        dateStart: "2026-08-31T12:30:00-04:00",
+        dateEnd: "2026-08-31T17:00:00-04:00",
+      }),
+    ).rejects.toThrow(/objectId is required/);
+  });
+
+  it("ghostScheduleEntries detects zero-hour same-start/end entries only", () => {
+    const ghosts = ghostScheduleEntries([
+      {
+        id: 246998,
+        dateStart: "2026-09-03T00:00:00Z",
+        dateEnd: "2026-09-03T00:00:00Z",
+        hours: null,
+      },
+      {
+        id: 1,
+        dateStart: "2026-09-03T00:00:00Z",
+        dateEnd: "2026-09-03T00:00:00Z",
+        hours: 0,
+      },
+      {
+        id: 2,
+        dateStart: "2026-09-03T00:00:00Z",
+        dateEnd: "2026-09-03T02:00:00Z",
+        hours: null,
+      },
+      {
+        id: 3,
+        dateStart: "2026-09-03T00:00:00Z",
+        dateEnd: "2026-09-03T00:00:00Z",
+        hours: 2,
+      },
+      { id: 4, dateStart: null, dateEnd: null, hours: 0.0 },
+    ]);
+    expect(ghosts.map((g) => g.id)).toEqual([246998, 1, 4]);
+  });
+
+  it("logs the scrubbed write payload in cw_request", async () => {
+    const logs: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json({}),
+      log: (message) => logs.push(message),
+    });
+    await client.createScheduleEntry({
+      memberId: 149,
+      objectId: 1892065,
+      objectType: 4,
+      dateStart: "2026-08-31T08:30:00-04:00",
+      dateEnd: "2026-08-31T17:00:00-04:00",
+      name: "Sync test",
+    });
+    const logLine = logs.find((l) => l.includes("cw_request"))!;
+    expect(logLine).toContain('"requestBody"');
+    expect(logLine).toContain("2026-08-31T12:30:00Z");
+    expect(logLine).not.toContain("public-key");
+  });
+
+  it("updates a schedule entry via GET-then-merge PUT, preserving unpassed fields", async () => {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        const rawBody = (init as { body?: string } | undefined)?.body;
+        calls.push({
+          method,
+          url: String(input),
+          ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+        });
+        if (method === "GET" && String(input).includes("/schedule/entries/9")) {
+          return Response.json({
+            id: 9,
+            member: { id: 149 },
+            dateStart: "2026-08-31T16:30:00Z",
+            dateEnd: "2026-08-31T21:00:00Z",
+            status: { id: 1 },
+            name: "Keep me",
+            doneFlag: false,
+          });
+        }
+        return Response.json({ id: 9 });
+      },
+    });
+
+    await client.updateScheduleEntry(9, {
+      dateStart: "2026-09-01T12:00:00-04:00",
+    });
+    const put = calls.find((c) => c.method === "PUT")!;
+    expect(put).toBeDefined();
+    const body = put.body as Record<string, unknown>;
+    expect(body.dateStart).toBe("2026-09-01T16:00:00Z");
+    expect(body.name).toBe("Keep me");
+    expect(body.doneFlag).toBe(false);
+    expect(body.status).toEqual({ id: 1 });
+  });
+
+  it("deletes a schedule entry with DELETE", async () => {
+    const calls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        calls.push(
+          `${
+            (init as { method?: string } | undefined)?.method ?? "GET"
+          } ${String(input)}`,
+        );
+        return new Response(null, { status: 204 });
+      },
+    });
+    await client.deleteScheduleEntry(247134);
+    expect(calls[0]).toBe(
+      "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
+    );
+  });
+
+  it("rejects createTimeEntry when a timesheet is pending approval", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const url = String(_input);
+        if (url.includes("/time/sheets")) {
+          return Response.json([
+            { id: 99, status: "PendingApproval", period: 43 },
+          ]);
+        }
+        return Response.json({ id: 1 });
+      },
+    });
+    await expect(
+      client.createTimeEntry({
+        memberId: 149,
+        timeStart: "2026-09-01T12:00:00-04:00",
+        timeEnd: "2026-09-01T13:00:00-04:00",
+      }),
+    ).rejects.toThrow(/pending approval/);
+  });
+
   it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
@@ -441,6 +866,144 @@ describe("ConnectWiseClient", () => {
     await expect(oversized.downloadDocument(400)).rejects.toThrow(
       "ConnectWise download too large",
     );
+  });
+
+  it("uploads a bounded image document with multipart fields and no manual content type", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        capturedUrl = String(input);
+        capturedInit = init;
+        return Response.json(
+          {
+            id: 901,
+            title: "Router photo",
+            fileName: "router.png",
+            imageFlag: true,
+            size: 8,
+          },
+          { status: 201 },
+        );
+      },
+    });
+    const pngSignature = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    let binary = "";
+    for (const byte of pngSignature) binary += String.fromCharCode(byte);
+
+    await expect(
+      client.uploadImageDocument("Ticket", 77, {
+        fileName: "router.png",
+        mimeType: "image/png",
+        base64: btoa(binary),
+        title: "Router photo",
+        privateFlag: true,
+      }),
+    ).resolves.toMatchObject({ id: 901, fileName: "router.png" });
+
+    expect(capturedUrl).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/system/documents",
+    );
+    expect(capturedInit?.method).toBe("POST");
+    expect(capturedInit?.redirect).toBe("manual");
+    const headers = new Headers(capturedInit?.headers);
+    expect(headers.has("Content-Type")).toBe(false);
+    const body = capturedInit?.body;
+    expect(body).toBeInstanceOf(FormData);
+    if (!(body instanceof FormData)) throw new Error("Expected multipart body");
+    expect(body.get("recordType")).toBe("Ticket");
+    expect(body.get("recordId")).toBe("77");
+    expect(body.get("title")).toBe("Router photo");
+    expect(body.get("privateFlag")).toBe("true");
+    const file = body.get("file");
+    expect(file).toBeInstanceOf(File);
+    if (!(file instanceof File)) throw new Error("Expected image file");
+    expect(file.name).toBe("router.png");
+    expect(file.type).toBe("image/png");
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(pngSignature);
+  });
+
+  it("rejects spoofed, mismatched, and oversized image uploads before fetch", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => {
+        requests += 1;
+        return Response.json({}, { status: 201 });
+      },
+    });
+
+    await expect(
+      client.uploadImageDocument("TimeEntry", 88, {
+        fileName: "spoof.png",
+        mimeType: "image/png",
+        base64: btoa("not a png"),
+        privateFlag: true,
+      }),
+    ).rejects.toThrow("does not match the declared MIME type");
+
+    const pngSignature = String.fromCharCode(
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    );
+    await expect(
+      client.uploadImageDocument("Ticket", 77, {
+        fileName: "wrong.jpg",
+        mimeType: "image/png",
+        base64: btoa(pngSignature),
+        privateFlag: true,
+      }),
+    ).rejects.toThrow("extension does not match MIME type");
+
+    await expect(
+      client.uploadImageDocument("Ticket", 77, {
+        fileName: "huge.png",
+        mimeType: "image/png",
+        base64: "A".repeat(4 * Math.ceil(MAX_IMAGE_UPLOAD_BYTES / 3) + 4),
+        privateFlag: true,
+      }),
+    ).rejects.toThrow("Invalid or oversized image data");
+    expect(requests).toBe(0);
+  });
+
+  it("refuses an image-upload redirect without retrying the POST", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => {
+        requests += 1;
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "https://example.invalid/redirect" },
+        });
+      },
+    });
+    const pngSignature = String.fromCharCode(
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    );
+
+    await expect(
+      client.uploadImageDocument("Ticket", 77, {
+        fileName: "router.png",
+        mimeType: "image/png",
+        base64: btoa(pngSignature),
+        privateFlag: true,
+      }),
+    ).rejects.toThrow("redirects are not followed");
+    expect(requests).toBe(1);
   });
 
   const imagePayload = {

@@ -32,12 +32,21 @@ export type ToolAuditName =
   | "get_time_sheets"
   | "get_document"
   | "download_document"
+  | "open_attachment_uploader"
+  | "upload_connectwise_image"
   | "call_connectwise"
+  | "execute_api_call"
   | "get_agreement_additions"
   | "get_agreement_additions_summary"
   | "create_agreement_addition"
   | "search_agreement_additions"
-  | "get_agreement_billing_summary";
+  | "get_agreement_billing_summary"
+  | "create_schedule_entry"
+  | "update_schedule_entry"
+  | "delete_schedule_entry"
+  | "create_time_entry"
+  | "create_service_ticket"
+  | "update_service_ticket";
 
 const entraIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

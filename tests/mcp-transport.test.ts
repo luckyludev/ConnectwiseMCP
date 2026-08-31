@@ -1,7 +1,10 @@
 import { createMcpHandler } from "agents/mcp/server";
 import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/mcp-server";
-import type { ConnectWiseClient } from "../src/connectwise-client";
+import {
+  createConnectWiseClient,
+  type ConnectWiseClient,
+} from "../src/connectwise-client";
 
 const profile = (companyId: string) =>
   JSON.stringify({
@@ -48,8 +51,6 @@ function businessClient(
     getServicePriorities: unused,
     getServiceSources: unused,
     getMyMember: unused,
-    attachImageToTicket: unused,
-    attachImageToTimeEntry: unused,
     listMembers: unused,
     searchCompanies: unused,
     searchContacts: unused,
@@ -58,7 +59,18 @@ function businessClient(
     getTimeSheets: unused,
     getDocument: unused,
     downloadDocument: unusedDownload,
+    uploadImageDocument: unused,
+    attachImageToTicket: unused,
+    attachImageToTimeEntry: unused,
     catalogGet: unused,
+    hatchGet: async () => ({ data: undefined, pageSizeClamped: false }),
+    createScheduleEntry: unused,
+    updateScheduleEntry: unused,
+    deleteScheduleEntry: async () => undefined,
+    createTimeEntry: unused,
+    createServiceTicket: unused,
+    updateServiceTicket: unused,
+    openScheduleEntriesForObject: async () => [],
     searchServiceTickets: unused,
     getAgreement: unused,
     getAgreementAdditions: unused,
@@ -127,12 +139,16 @@ describe("authenticated MCP transport", () => {
       "get_time_sheets",
       "get_document",
       "download_document",
+      "open_attachment_uploader",
+      "upload_connectwise_image",
       "call_connectwise",
     ]) {
       expect(body).toContain(`"name":"${name}"`);
     }
     expect(body).toContain('"readOnlyHint":false');
     expect(body).toContain('"idempotentHint":false');
+    expect(body).toContain("ui://connectwise/attachment-uploader.html");
+    expect(body).toContain('"visibility":["app"]');
   });
 
   it("executes a write with only the authenticated user's ConnectWise profile", async () => {
@@ -221,7 +237,138 @@ describe("authenticated MCP transport", () => {
       reason: "ok",
     });
     expect(auditMessages[0]).not.toContain("Approved staging note");
-    expect(auditMessages[0]).not.toContain("77");
+    expect(auditMessages[0]).not.toContain('"ticketId"');
+  });
+
+  it("uploads an image through the app-only tool without echoing its bytes", async () => {
+    const auditMessages: string[] = [];
+    let received:
+      | {
+          companyId: string;
+          recordType: string;
+          recordId: number;
+          fileName: string;
+          privateFlag: boolean;
+        }
+      | undefined;
+    const imageBase64 = btoa(
+      String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
+    );
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          audit: { logger: (message) => auditMessages.push(message) },
+          createBusinessClient: (credentials) =>
+            businessClient({
+              async uploadImageDocument(recordType, recordId, input) {
+                received = {
+                  companyId: credentials.companyId,
+                  recordType,
+                  recordId,
+                  fileName: input.fileName,
+                  privateFlag: input.privateFlag,
+                };
+                return {
+                  id: 902,
+                  title: input.title,
+                  fileName: input.fileName,
+                  imageFlag: true,
+                  publicFlag: !input.privateFlag,
+                  size: 8,
+                };
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 21,
+          method: "tools/call",
+          params: {
+            name: "upload_connectwise_image",
+            arguments: {
+              recordType: "TimeEntry",
+              recordId: 88,
+              fileName: "onsite.png",
+              mimeType: "image/png",
+              base64: imageBase64,
+              title: "Onsite photo",
+              privateFlag: true,
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(received).toEqual({
+      companyId: "company-luis",
+      recordType: "TimeEntry",
+      recordId: 88,
+      fileName: "onsite.png",
+      privateFlag: true,
+    });
+    expect(body).toContain('\\"id\\":902');
+    expect(body).toContain('\\"recordType\\":\\"TimeEntry\\"');
+    expect(body).not.toContain(imageBase64);
+    expect(auditMessages).toHaveLength(1);
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      profileAlias: "LUIS",
+      tool: "upload_connectwise_image",
+      outcome: "success",
+      reason: "ok",
+    });
+    expect(auditMessages[0]).not.toContain(imageBase64);
+    expect(auditMessages[0]).not.toContain("onsite.png");
+  });
+
+  it("serves the inline attachment uploader as an MCP App resource", async () => {
+    const handler = createMcpHandler(() => createMcpServer(env), {
+      route: "/mcp",
+      corsOptions: false,
+      authContext: {
+        props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+      },
+    });
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 22,
+          method: "resources/read",
+          params: {
+            uri: "ui://connectwise/attachment-uploader.html",
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(body).toContain("text/html;profile=mcp-app");
+    expect(body).toContain("Drop or paste an image here");
+    expect(body).toContain("upload_connectwise_image");
+    expect(body).not.toContain("private-key");
   });
 
   it("isolates concurrent profile contexts from hostile headers and arguments", async () => {
@@ -463,6 +610,18 @@ describe("authenticated MCP transport", () => {
                     },
                   ];
                 }
+                if (route === "service.tickets.byOwner") {
+                  return [
+                    {
+                      id: 912,
+                      summary: "Closed router ticket",
+                      owner: { id: 149, name: "Luis" },
+                      closedFlag: true,
+                      closedDate: "2026-08-29T18:00:00Z",
+                      dateResolved: "2026-08-29T17:45:00Z",
+                    },
+                  ];
+                }
                 return [
                   {
                     id: 400,
@@ -541,6 +700,40 @@ describe("authenticated MCP transport", () => {
       }),
     );
     expect(secondBody).toContain('\\"fileName\\":\\"Onsite Log.pdf\\"');
+
+    const third = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 531,
+          method: "tools/call",
+          params: {
+            name: "call_connectwise",
+            arguments: {
+              route: "service.tickets.byOwner",
+              memberId: 149,
+              includeClosed: "true",
+            },
+          },
+        }),
+      }),
+    );
+    const thirdBody = await third.text();
+    expect(calls[2]).toEqual({
+      route: "service.tickets.byOwner",
+      params: { pageSize: 20, memberId: 149, includeClosed: "true" },
+    });
+    expect(thirdBody).toContain('\\"closedFlag\\":true');
+    expect(thirdBody).toContain(
+      '\\"dateResolved\\":\\"2026-08-29T17:45:00Z\\"',
+    );
   });
 
   it("downloads a document as bounded base64", async () => {
@@ -719,6 +912,757 @@ describe("authenticated MCP transport", () => {
     expect(received).toEqual({ companyId: "company-luis" });
     const body = await response.text();
     expect(body).toContain('\\"id\\":149');
+  });
+
+  // Phase 2 write tools must be exercised through the MCP tool interface with
+  // the exact JSON arguments a client sends (third occurrence of the
+  // wrong-layer test: mocks/curl passed while the tool handler failed).
+  it("create_schedule_entry converts offset to second-precision UTC on the wire", async () => {
+    const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      const rawBody = (init as { body?: string } | undefined)?.body;
+      bodies.push({
+        method,
+        url: String(input),
+        ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+      });
+      return Response.json({
+        id: 9001,
+        member: { id: 149 },
+        dateStart: "2026-08-31T12:30:00Z",
+        dateEnd: "2026-08-31T21:00:00Z",
+        status: { id: 1 },
+      });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_schedule_entry",
+            arguments: {
+              memberId: 149,
+              objectId: 1892065,
+              objectType: 4,
+              statusId: 1,
+              dateStart: "2026-08-31T08:30:00-04:00",
+              dateEnd: "2026-08-31T17:00:00-04:00",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    const post = bodies.find(
+      (b) => b.method === "POST" && b.url.endsWith("/schedule/entries"),
+    )!;
+    expect(post).toBeDefined();
+    const wire = post.body as Record<string, unknown>;
+    // CW rejects fractional seconds; must be second precision on the wire.
+    expect(wire.dateStart).toBe("2026-08-31T12:30:00Z");
+    expect(wire.dateEnd).toBe("2026-08-31T21:00:00Z");
+    expect((wire.member as { id: number }).id).toBe(149);
+    expect((wire.type as { id: number }).id).toBe(4);
+    expect(text).toContain('\\"id\\":9001');
+  });
+
+  it("create_schedule_entry rejects a bare local time without a fetch", async () => {
+    let requests = 0;
+    const fetcher: typeof fetch = async (_input, _init) => {
+      requests += 1;
+      return Response.json({});
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_schedule_entry",
+            arguments: {
+              memberId: 149,
+              objectId: 1892065,
+              objectType: 4,
+              dateStart: "2026-08-31T12:30:00",
+              dateEnd: "2026-08-31T17:00:00",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    expect(text).toContain("explicit timezone offset");
+    expect(requests).toBe(0);
+  });
+
+  it("update_schedule_entry merges over GET and preserves unpassed fields", async () => {
+    const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      const rawBody = (init as { body?: string } | undefined)?.body;
+      bodies.push({
+        method,
+        url: String(input),
+        ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+      });
+      if (method === "GET" && String(input).includes("/schedule/entries/9")) {
+        return Response.json({
+          id: 9,
+          member: { id: 149 },
+          objectId: 1892065,
+          type: { id: 4 },
+          status: { id: 1 },
+          dateStart: "2026-08-31T12:30:00Z",
+          dateEnd: "2026-08-31T21:00:00Z",
+          name: "Keep me",
+          doneFlag: false,
+        });
+      }
+      return Response.json({ id: 9, dateEnd: "2026-08-31T22:00:00Z" });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "update_schedule_entry",
+            arguments: {
+              entryId: 9,
+              dateEnd: "2026-08-31T18:00:00-04:00",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    const put = bodies.find((b) => b.method === "PUT")!;
+    expect(put).toBeDefined();
+    const wire = put.body as Record<string, unknown>;
+    expect(wire.dateEnd).toBe("2026-08-31T22:00:00Z");
+    expect(wire.dateStart).toBe("2026-08-31T12:30:00Z");
+    expect(wire.name).toBe("Keep me");
+    expect((wire.member as { id: number }).id).toBe(149);
+    expect((wire.type as { id: number }).id).toBe(4);
+    expect(text).toContain('\\"dateEnd\\":\\"2026-08-31T22:00:00Z\\"');
+  });
+
+  it("delete_schedule_entry issues DELETE through the tool", async () => {
+    const calls: string[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      calls.push(
+        `${(init as { method?: string } | undefined)?.method ?? "GET"} ${String(input)}`,
+      );
+      return new Response(null, { status: 204 });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "delete_schedule_entry",
+            arguments: { entryId: 247134 },
+          },
+        }),
+      }),
+    );
+    await response.text();
+    expect(calls[0]).toBe(
+      "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
+    );
+  });
+
+  it("create_time_entry surfaces a locked timesheet message through the tool", async () => {
+    const bodies: Array<{ method: string; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      bodies.push({ method, url: String(input) });
+      if (String(input).includes("/time/sheets")) {
+        return Response.json([
+          { id: 99, status: "PendingApproval", period: 43 },
+        ]);
+      }
+      return Response.json({ id: 1 });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_time_entry",
+            arguments: {
+              memberId: 149,
+              timeStart: "2026-09-01T12:00:00-04:00",
+              timeEnd: "2026-09-01T13:00:00-04:00",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    expect(text).toContain("pending approval");
+    expect(bodies.filter((b) => b.method === "POST").length).toBe(0);
+  });
+
+  it("create_service_ticket posts the ticket body through the tool", async () => {
+    const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      const rawBody = (init as { body?: string } | undefined)?.body;
+      bodies.push({
+        method,
+        url: String(input),
+        ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+      });
+      if (method === "POST" && String(input).endsWith("/service/tickets")) {
+        return Response.json({
+          id: 7001,
+          summary: "Daily Server Backup Audit",
+          company: { id: 250 },
+          board: { id: 32, name: "Triage" },
+          status: { id: 547, name: "New" },
+        });
+      }
+      return Response.json({});
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_service_ticket",
+            arguments: {
+              companyId: 250,
+              summary: "Daily Server Backup Audit",
+              ownerId: 212,
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    const post = bodies.find(
+      (b) => b.method === "POST" && b.url.endsWith("/service/tickets"),
+    )!;
+    expect(post).toBeDefined();
+    const wire = post.body as Record<string, unknown>;
+    expect((wire.company as { id: number }).id).toBe(250);
+    expect(wire.summary).toBe("Daily Server Backup Audit");
+    expect((wire.board as { id: number }).id).toBe(32);
+    expect((wire.status as { id: number }).id).toBe(547);
+    expect((wire.owner as { id: number }).id).toBe(212);
+    expect(text).toContain('\\"id\\":7001');
+  });
+
+  it("update_service_ticket merges over GET and preserves unpassed fields", async () => {
+    const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      const rawBody = (init as { body?: string } | undefined)?.body;
+      bodies.push({
+        method,
+        url: String(input),
+        ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+      });
+      if (
+        method === "GET" &&
+        String(input).includes("/service/tickets/1927659")
+      ) {
+        return Response.json({
+          id: 1927659,
+          summary: "Daily Server Backup Audit ",
+          recordType: "ServiceTicket",
+          board: { id: 64, name: "Backups - Management" },
+          status: { id: 935, name: "Scheduled" },
+          company: { id: 250, name: "FUNCSHUN" },
+          owner: { id: 266, name: "Juan Arango" },
+          priority: { id: 7 },
+          type: null,
+          closedFlag: false,
+          _info: { dateEntered: "2026-08-27T12:00:00Z" },
+        });
+      }
+      return Response.json({ id: 1927659 });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "update_service_ticket",
+            arguments: { ticketId: 1927659, ownerId: 212 },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    const put = bodies.find(
+      (b) => b.method === "PUT" && b.url.includes("/service/tickets/1927659"),
+    )!;
+    expect(put).toBeDefined();
+    const wire = put.body as Record<string, unknown>;
+    expect((wire.owner as { id: number }).id).toBe(212);
+    // unpassed fields preserved
+    expect((wire.board as { id: number }).id).toBe(64);
+    expect((wire.summary as string).trim()).toBe("Daily Server Backup Audit");
+    expect((wire.company as { id: number }).id).toBe(250);
+    // read-only/system fields stripped
+    expect(wire.id).toBeUndefined();
+    expect(wire._info).toBeUndefined();
+    expect(wire.recordType).toBeUndefined();
+    expect(text).toContain('\\"id\\":1927659');
+  });
+
+  it("update_service_ticket rejects a status not valid on the target board", async () => {
+    let puts = 0;
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      if (
+        method === "GET" &&
+        String(input).includes("/service/boards/64/statuses")
+      ) {
+        return Response.json([
+          { id: 921, name: "In Progress~" },
+          { id: 935, name: "Scheduled" },
+          { id: 955, name: ">Closed" },
+        ]);
+      }
+      if (
+        method === "GET" &&
+        String(input).includes("/service/tickets/1927659")
+      ) {
+        return Response.json({ id: 1927659, board: { id: 64 } });
+      }
+      if (method === "PUT") puts += 1;
+      return Response.json({ id: 1927659 });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "update_service_ticket",
+            arguments: { ticketId: 1927659, boardId: 64, statusId: 547 },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    expect(text).toContain("is not valid on board 64");
+    expect(text).toContain("921");
+    expect(text).toContain("935");
+    expect(puts).toBe(0);
+  });
+
+  it("update_service_ticket allows a status valid on the target board", async () => {
+    let puts = 0;
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      if (
+        method === "GET" &&
+        String(input).includes("/service/boards/64/statuses")
+      ) {
+        return Response.json([
+          { id: 921, name: "In Progress~" },
+          { id: 935, name: "Scheduled" },
+        ]);
+      }
+      if (
+        method === "GET" &&
+        String(input).includes("/service/tickets/1927659")
+      ) {
+        return Response.json({ id: 1927659, board: { id: 64 } });
+      }
+      if (method === "PUT") {
+        puts += 1;
+        return Response.json({ id: 1927659, owner: { id: 212 } });
+      }
+      return Response.json({});
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "update_service_ticket",
+            arguments: { ticketId: 1927659, boardId: 64, statusId: 935 },
+          },
+        }),
+      }),
+    );
+    await response.text();
+    expect(puts).toBe(1);
+  });
+
+  it("update_service_ticket removes board-move ghosts and reports it", async () => {
+    const bodies: Array<{ method: string; url: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      bodies.push({ method, url: String(input) });
+      if (
+        method === "GET" &&
+        String(input).includes("/service/tickets/1927963")
+      ) {
+        return Response.json({
+          id: 1927963,
+          summary: "Scratch",
+          board: { id: 32 },
+          status: { id: 547 },
+          company: { id: 250 },
+          _info: {},
+        });
+      }
+      if (
+        method === "GET" &&
+        String(input).includes("/service/boards/64/statuses")
+      ) {
+        return Response.json([
+          { id: 935, name: "Scheduled" },
+          { id: 921, name: "In Progress~" },
+        ]);
+      }
+      if (method === "PUT") {
+        return Response.json({ id: 1927963, board: { id: 64 } });
+      }
+      if (
+        method === "GET" &&
+        String(input).includes("/schedule/entries") &&
+        String(input).includes("objectId")
+      ) {
+        return Response.json([
+          {
+            id: 247139,
+            dateStart: "2026-09-03T00:00:00Z",
+            dateEnd: "2026-09-03T00:00:00Z",
+            hours: 0,
+          },
+        ]);
+      }
+      if (method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      return Response.json([]);
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "update_service_ticket",
+            arguments: { ticketId: 1927963, boardId: 64, statusId: 935 },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    expect(bodies.filter((b) => b.method === "PUT").length).toBe(1);
+    expect(bodies.filter((b) => b.method === "DELETE").length).toBe(1);
+    expect(text).toContain("247139");
+    expect(text).toContain("ghost");
+  });
+
+  it("whereId reaches the schedule create/update wire body", async () => {
+    const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      const rawBody = (init as { body?: string } | undefined)?.body;
+      bodies.push({
+        method,
+        url: String(input),
+        ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+      });
+      if (method === "POST" && String(input).endsWith("/schedule/entries")) {
+        return Response.json({ id: 100, dateStart: "2026-09-01T12:00:00Z" });
+      }
+      if (method === "GET" && String(input).includes("/schedule/entries/100")) {
+        return Response.json({
+          id: 100,
+          member: { id: 149 },
+          dateStart: "2026-09-01T12:00:00Z",
+          where: { id: 4 },
+        });
+      }
+      return Response.json({ id: 100, where: { id: 2 } });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+      },
+    );
+    const create = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_schedule_entry",
+            arguments: {
+              memberId: 149,
+              objectId: 1927351,
+              objectType: 4,
+              dateStart: "2026-09-01T08:00:00-04:00",
+              dateEnd: "2026-09-01T09:00:00-04:00",
+              whereId: 2,
+            },
+          },
+        }),
+      }),
+    );
+    await create.text();
+    const createPost = bodies.find(
+      (b) => b.method === "POST" && b.url.endsWith("/schedule/entries"),
+    )!;
+    expect((createPost.body as Record<string, unknown>).where).toEqual({
+      id: 2,
+    });
+
+    const update = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: {
+            name: "update_schedule_entry",
+            arguments: { entryId: 100, whereId: 2 },
+          },
+        }),
+      }),
+    );
+    await update.text();
+    const put = bodies.find((b) => b.method === "PUT")!;
+    expect((put.body as Record<string, unknown>).where).toEqual({ id: 2 });
   });
 
   it("attaches a chat image to a ticket with only the authenticated user's profile", async () => {

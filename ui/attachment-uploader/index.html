@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ConnectWise image uploader</title>
+  </head>
+  <body>
+    <main class="app" id="app">
+      <header>
+        <p class="eyebrow">ConnectWise MCP</p>
+        <h1>Attach an image</h1>
+        <p class="intro">
+          Paste, drop, or choose an image. Large images are resized in this
+          panel before upload.
+        </p>
+      </header>
+      <form id="upload-form">
+        <div class="row">
+          <label>
+            Destination
+            <select id="record-type">
+              <option value="Ticket">Ticket attachment / note</option>
+              <option value="TimeEntry">Time entry attachment</option>
+            </select>
+          </label>
+          <label>
+            <span id="record-id-label">Ticket ID</span>
+            <input
+              id="record-id"
+              type="number"
+              min="1"
+              step="1"
+              inputmode="numeric"
+              required
+            />
+          </label>
+        </div>
+        <button class="drop-zone" id="drop-zone" type="button">
+          <span class="drop-title">Drop or paste an image here</span>
+          <span class="drop-subtitle">or choose PNG, JPEG, GIF, or WebP</span>
+        </button>
+        <input
+          id="file-input"
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          hidden
+        />
+        <section class="preview-card" id="preview-card" hidden>
+          <img id="preview" alt="Selected attachment preview" />
+          <div>
+            <strong id="file-name"></strong>
+            <span id="file-details"></span>
+          </div>
+        </section>
+        <div class="row">
+          <label>
+            Attachment title
+            <input id="title" type="text" maxlength="200" />
+          </label>
+          <label>
+            Visibility
+            <select id="visibility">
+              <option value="private">Internal / private</option>
+              <option value="public">Customer visible</option>
+            </select>
+          </label>
+        </div>
+        <section class="note-panel" id="note-panel">
+          <label>
+            Optional ticket note
+            <textarea
+              id="note-text"
+              rows="3"
+              maxlength="8000"
+              placeholder="Add a note to the ticket after the image uploads"
+            ></textarea>
+          </label>
+          <div class="checks">
+            <label
+              ><input id="internal-only" type="checkbox" checked /> Internal
+              note</label
+            >
+            <label
+              ><input id="resolution-note" type="checkbox" /> Resolution
+              note</label
+            >
+            <label><input id="issue-note" type="checkbox" /> Issue note</label>
+          </div>
+          <p class="hint">
+            ConnectWise stores the image as a ticket attachment. If note text is
+            provided, the note is created immediately after the attachment.
+          </p>
+        </section>
+        <button class="submit" id="submit" type="submit" disabled>
+          Attach image
+        </button>
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+      </form>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

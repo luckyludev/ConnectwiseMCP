@@ -2,9 +2,14 @@ import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   CATALOG_ROUTE_IDS,
+  CONNECTWISE_IMAGE_MIME_TYPES,
+  ConnectWiseDownloadError,
   ConnectWiseRequestError,
+  MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
+  ghostScheduleEntries,
   type ConnectWiseClient,
+  type HatchOptions,
 } from "./connectwise-client";
 import {
   resolveConnectWiseCredentials,
@@ -17,10 +22,16 @@ import {
   type ToolAuditDependencies,
   type ToolAuditName,
 } from "./audit";
+import { ATTACHMENT_UPLOADER_HTML } from "./generated/attachment-uploader-html";
+
+const ATTACHMENT_UPLOADER_RESOURCE_URI =
+  "ui://connectwise/attachment-uploader.html";
+const ATTACHMENT_UPLOADER_MIME_TYPE = "text/html;profile=mcp-app";
 
 type BusinessToolDependencies = {
   audit?: ToolAuditDependencies;
   createClient?: (credentials: ConnectWiseCredentials) => ConnectWiseClient;
+  requestLog?: (message: string) => void;
 };
 
 type AuthProps = Partial<EntraAccessTokenProps> | undefined;
@@ -93,6 +104,9 @@ function ticket(value: unknown): Record<string, unknown> {
     type: reference(parsed.type),
     owner: reference(parsed.owner),
     contact: reference(parsed.contact),
+    closedFlag: boolean(parsed.closedFlag),
+    closedDate: text(parsed.closedDate, 100),
+    dateResolved: text(parsed.dateResolved, 100),
     created: text(info?.dateEntered, 100),
     updated: text(info?.lastUpdated, 100),
   });
@@ -215,10 +229,28 @@ function output(value: unknown): CallToolResult {
 
 function failureMessage(error: unknown): string {
   if (error instanceof ConnectWiseRequestError) {
-    if (error.status === 401 || error.status === 403) {
-      return `ConnectWise denied this operation (${error.status})`;
+    const diagnostics = error.diagnostics;
+    const where = diagnostics
+      ? ` at ${diagnostics.method} ${diagnostics.path}`
+      : "";
+    if (diagnostics?.bodyPreview) {
+      return `ConnectWise request failed (${error.status})${where}: ${diagnostics.bodyPreview.slice(0, 300)}`;
     }
-    if (error.status === 404) return "ConnectWise record not found";
+    if (error.status === 401 || error.status === 403) {
+      return `ConnectWise denied this operation (${error.status})${where}`;
+    }
+    if (error.status === 404) return `ConnectWise record not found${where}`;
+    return `ConnectWise request failed (${error.status})${where}`;
+  }
+  if (error instanceof ConnectWiseDownloadError) {
+    return `ConnectWise download failed (${error.status})`;
+  }
+  if (
+    error instanceof Error &&
+    typeof error.message === "string" &&
+    error.message.length > 0
+  ) {
+    return `ConnectWise operation failed: ${error.message.slice(0, 200)}`;
   }
   return "ConnectWise operation failed";
 }
@@ -264,10 +296,28 @@ async function runBusinessTool(
     };
   }
   try {
+    const requestLog = dependencies.requestLog ?? ((message: string) => {});
     const credentials = resolveConnectWiseCredentials(env, props.profileAlias);
-    const client = (dependencies.createClient ?? createConnectWiseClient)(
-      credentials,
-    );
+    try {
+      requestLog(
+        JSON.stringify({
+          event: "cw_credentials",
+          profileAlias: props.profileAlias,
+          companyIdLength: credentials.companyId.length,
+          publicKeyLength: credentials.publicKey.length,
+          privateKeyLength: credentials.privateKey.length,
+          clientIdLength: credentials.clientId.length,
+          apiBaseOrigin: new URL(credentials.apiBaseUrl).origin,
+        }),
+      );
+    } catch {
+      // Diagnostics are best-effort and must not alter the MCP result.
+    }
+    const clientFactory =
+      dependencies.createClient ??
+      ((c: ConnectWiseCredentials) =>
+        createConnectWiseClient(c, { log: requestLog }));
+    const client = clientFactory(credentials);
     const result = await operation(client);
     emitToolAudit(
       {
@@ -417,6 +467,124 @@ export function registerConnectWiseBusinessTools(
     ...writeAnnotations,
     destructiveHint: true,
   } as const;
+
+  server.registerResource(
+    "ConnectWise attachment uploader",
+    ATTACHMENT_UPLOADER_RESOURCE_URI,
+    {
+      title: "ConnectWise image uploader",
+      description:
+        "Paste, drop, or choose an image and attach it to a ConnectWise ticket or time entry.",
+      mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
+          text: ATTACHMENT_UPLOADER_HTML,
+          _meta: {
+            ui: {
+              csp: {
+                connectDomains: [],
+                resourceDomains: [],
+              },
+            },
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerTool(
+    "open_attachment_uploader",
+    {
+      title: "Attach an image to ConnectWise",
+      description:
+        "Open a secure inline uploader for pasting, dropping, or choosing an image. The image can be attached to a ticket (with an optional ticket note) or an existing time entry.",
+      inputSchema: {
+        recordType: z.enum(["Ticket", "TimeEntry"]).default("Ticket"),
+        recordId: positiveId.optional(),
+      },
+      annotations: readAnnotations,
+      _meta: {
+        ui: { resourceUri: ATTACHMENT_UPLOADER_RESOURCE_URI },
+      },
+    },
+    ({ recordType, recordId }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "open_attachment_uploader",
+        async () => ({
+          recordType,
+          recordId: recordId ?? null,
+          maxImageBytes: MAX_IMAGE_UPLOAD_BYTES,
+          allowedMimeTypes: CONNECTWISE_IMAGE_MIME_TYPES,
+        }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "upload_connectwise_image",
+    {
+      title: "Upload a ConnectWise image",
+      description:
+        "App-only image upload used by the inline ConnectWise attachment uploader.",
+      inputSchema: {
+        recordType: z.enum(["Ticket", "TimeEntry"]),
+        recordId: positiveId,
+        fileName: z.string().trim().min(1).max(128),
+        mimeType: z.enum(CONNECTWISE_IMAGE_MIME_TYPES),
+        base64: z
+          .string()
+          .min(4)
+          .max(4 * Math.ceil(MAX_IMAGE_UPLOAD_BYTES / 3)),
+        title: z.string().trim().min(1).max(200).optional(),
+        privateFlag: z.boolean().default(true),
+      },
+      annotations: writeAnnotations,
+      _meta: {
+        ui: { visibility: ["app"] },
+      },
+    },
+    ({
+      recordType,
+      recordId,
+      fileName,
+      mimeType,
+      base64,
+      title,
+      privateFlag,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "upload_connectwise_image",
+        async (client) => {
+          const created = object(
+            await client.uploadImageDocument(recordType, recordId, {
+              fileName,
+              mimeType,
+              base64,
+              ...(title === undefined ? {} : { title }),
+              privateFlag,
+            }),
+          );
+          const document = created ? attachment(created) : {};
+          if (document.id === undefined) {
+            throw new Error("Invalid ConnectWise upload response");
+          }
+          return {
+            recordType,
+            recordId,
+            document,
+          };
+        },
+        dependencies,
+      ),
+  );
 
   server.registerTool(
     "search_tickets_by_content",
@@ -930,13 +1098,16 @@ export function registerConnectWiseBusinessTools(
       chargeToType: text(value.chargeToType, 100),
     });
 
+  // CW schedule entries use dateStart/dateEnd and name (live-verified).
   const scheduleEntryItem = (value: Record<string, unknown>) =>
     compact({
       id: id(value.id),
       member: reference(value.member),
-      start: text(value.start, 100),
-      end: text(value.end, 100),
-      description: text(value.description, 300),
+      start: text(value.dateStart, 100),
+      end: text(value.dateEnd, 100),
+      name: text(value.name, 300),
+      hours: number(value.hours),
+      done: boolean(value.doneFlag),
       type: reference(value.type),
       status: reference(value.status),
     });
@@ -1296,9 +1467,9 @@ export function registerConnectWiseBusinessTools(
     "call_connectwise",
     {
       description:
-        "Read-only ConnectWise catalog lookup. Pick a route ID and provide its required parameters. Routes: " +
+        "Read-only ConnectWise catalog lookup. [BUILD-MARKER 4421014b-2026-08-30] Pick a route ID and provide its required parameters. Routes: " +
         CATALOG_ROUTE_IDS.join(", ") +
-        ". All routes are GET-only with allowlisted parameters and bounded output.",
+        ". schedule.entries.byMember accepts optional startDate/endDate (YYYY-MM-DD, at most a 31-day span) and returns entries ordered by dateStart. service.tickets.byOwner filters on ticket OWNER (owner/id), not assigned resources; it returns open tickets by default (closedFlag=false) — pass includeClosed:'true' to include closed ones, and returns status, board, priority, owner, contact, closedDate and dateResolved. All routes are GET-only with allowlisted parameters and bounded output.",
       inputSchema: {
         route: z.enum(CATALOG_ROUTE_IDS),
         boardId: positiveId.optional(),
@@ -1317,6 +1488,15 @@ export function registerConnectWiseBusinessTools(
           .optional(),
         name: z.string().trim().min(1).max(100).optional(),
         query: z.string().trim().min(1).max(100).optional(),
+        startDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+        endDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+        includeClosed: z.enum(["true", "false"]).optional(),
         pageSize: pageSize,
       },
       annotations: readAnnotations,
@@ -1330,6 +1510,9 @@ export function registerConnectWiseBusinessTools(
       recordType,
       name,
       query,
+      startDate,
+      endDate,
+      includeClosed,
       pageSize,
     }) =>
       runBusinessTool(
@@ -1345,10 +1528,383 @@ export function registerConnectWiseBusinessTools(
           if (recordType !== undefined) params.recordType = recordType;
           if (name !== undefined) params.name = name;
           if (query !== undefined) params.query = query;
+          if (startDate !== undefined) params.startDate = startDate;
+          if (endDate !== undefined) params.endDate = endDate;
+          if (includeClosed !== undefined) {
+            params.includeClosed = includeClosed;
+          }
+          const project =
+            route === "service.tickets.byOwner" ||
+            route === "service.tickets.byStatus"
+              ? ticket
+              : route === "schedule.entries.byMember"
+                ? scheduleEntryItem
+                : route === "time.entries.byMember"
+                  ? timeEntryRead
+                  : catalogItem;
           return list(await client.catalogGet(route, params), pageSize).map(
-            catalogItem,
+            project,
           );
         },
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "execute_api_call",
+    {
+      description:
+        "GET-only ConnectWise API pass-through for analytical reads. path is a relative read endpoint under /service/, /company/, /finance/, /system/, /project/, /schedule/, /time/, /sales/, /procurement/; credential/integration paths (apiKeys, apiMembers, system/integrations, system/setup, mycompany/integrator) are denied. Supports conditions, childConditions, customFieldConditions, orderBy, fields, page, pageSize (capped at 100; larger values are clamped), and countOnly (returns the /count sub-resource). No write methods are available through this tool. Responses over 256 KB are rejected with a narrowing hint.",
+      inputSchema: {
+        path: z.string().trim().min(1).max(300),
+        conditions: z.string().trim().min(1).max(500).optional(),
+        childConditions: z.string().trim().min(1).max(500).optional(),
+        customFieldConditions: z.string().trim().min(1).max(500).optional(),
+        orderBy: z.string().trim().min(1).max(200).optional(),
+        fields: z.string().trim().min(1).max(500).optional(),
+        page: z.number().int().min(1).max(10_000).optional(),
+        pageSize: z.number().int().min(1).max(1_000).optional(),
+        countOnly: z.boolean().optional(),
+      },
+      annotations: readAnnotations,
+    },
+    ({
+      path,
+      conditions,
+      childConditions,
+      customFieldConditions,
+      orderBy,
+      fields,
+      page,
+      pageSize,
+      countOnly,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "execute_api_call",
+        async (client) => {
+          const hatchOptions: HatchOptions = {};
+          if (conditions !== undefined) hatchOptions.conditions = conditions;
+          if (childConditions !== undefined) {
+            hatchOptions.childConditions = childConditions;
+          }
+          if (customFieldConditions !== undefined) {
+            hatchOptions.customFieldConditions = customFieldConditions;
+          }
+          if (orderBy !== undefined) hatchOptions.orderBy = orderBy;
+          if (fields !== undefined) hatchOptions.fields = fields;
+          if (page !== undefined) hatchOptions.page = page;
+          if (pageSize !== undefined) hatchOptions.pageSize = pageSize;
+          if (countOnly !== undefined) hatchOptions.countOnly = countOnly;
+          const { data, pageSizeClamped } = await client.hatchGet(
+            path,
+            hatchOptions,
+          );
+          if (pageSizeClamped) {
+            return {
+              warning:
+                "pageSize exceeded the 100 cap and was clamped; narrow results with fields or countOnly",
+              data,
+            };
+          }
+          return data;
+        },
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "create_service_ticket",
+    {
+      description:
+        "Create a ConnectWise service ticket. companyId and summary are required and never defaulted. Defaults: boardId 32 (Triage), statusId 547 (New). New tickets default to Priority 4 - Low and a placeholder type ('-CHANGE BOARD FIRST-') until they are corrected on a real board — the created ticket shows these so the caller knows to fix them. initialDescription is posted as the ticket's initial description note. Returns the full created ticket.",
+      inputSchema: {
+        companyId: positiveId,
+        summary: z.string().trim().min(1).max(100),
+        boardId: positiveId.optional(),
+        statusId: positiveId.optional(),
+        contactId: positiveId.optional(),
+        priorityId: positiveId.optional(),
+        typeId: positiveId.optional(),
+        ownerId: positiveId.optional(),
+        initialDescription: z.string().trim().min(1).max(8_000).optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      companyId,
+      summary,
+      boardId,
+      statusId,
+      contactId,
+      priorityId,
+      typeId,
+      ownerId,
+      initialDescription,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "create_service_ticket",
+        (client) =>
+          client.createServiceTicket({
+            companyId,
+            summary,
+            ...(boardId !== undefined ? { boardId } : {}),
+            ...(statusId !== undefined ? { statusId } : {}),
+            ...(contactId !== undefined ? { contactId } : {}),
+            ...(priorityId !== undefined ? { priorityId } : {}),
+            ...(typeId !== undefined ? { typeId } : {}),
+            ...(ownerId !== undefined ? { ownerId } : {}),
+            ...(initialDescription !== undefined ? { initialDescription } : {}),
+          }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "update_service_ticket",
+    {
+      description:
+        "Update an existing ConnectWise service ticket. Only the fields you pass change: the client GETs the ticket first, merges, then PUTs — unpassed fields (company, contact, dates, costs) survive. A board move auto-generates a zero-hour ghost schedule entry on the ticket; this tool detects it and removes it in the same operation (reported in the response). Status is board-scoped: a status that is not valid on the target board is rejected with the valid statuses listed.",
+      inputSchema: {
+        ticketId: positiveId,
+        ownerId: positiveId.optional(),
+        statusId: positiveId.optional(),
+        boardId: positiveId.optional(),
+        priorityId: positiveId.optional(),
+        typeId: positiveId.optional(),
+        summary: z.string().trim().min(1).max(100).optional(),
+        contactId: positiveId.optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      ticketId,
+      ownerId,
+      statusId,
+      boardId,
+      priorityId,
+      typeId,
+      summary,
+      contactId,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "update_service_ticket",
+        async (client) => {
+          // Board-scoped status validation, before any write. When a board is
+          // being set, the status must be valid there.
+          if (boardId !== undefined && statusId !== undefined) {
+            const statuses = (await client.getBoardStatuses(boardId)) as Array<{
+              id?: number;
+              name?: string;
+            }>;
+            const valid = Array.isArray(statuses) ? statuses : [];
+            if (!valid.some((s) => Number(s.id) === statusId)) {
+              const names = valid
+                .map((s) => `${s.id} ${s.name ?? ""}`.trim())
+                .join(", ");
+              throw new Error(
+                `statusId ${statusId} is not valid on board ${boardId}; valid statuses: ${names || "none"}`,
+              );
+            }
+          }
+          return client
+            .updateServiceTicket(ticketId, {
+              ...(ownerId !== undefined ? { ownerId } : {}),
+              ...(statusId !== undefined ? { statusId } : {}),
+              ...(boardId !== undefined ? { boardId } : {}),
+              ...(priorityId !== undefined ? { priorityId } : {}),
+              ...(typeId !== undefined ? { typeId } : {}),
+              ...(summary !== undefined ? { summary } : {}),
+              ...(contactId !== undefined ? { contactId } : {}),
+            })
+            .then(async (updated) => {
+              // A board move auto-generates a zero-hour ghost schedule entry
+              // on the ticket. Detect it and remove it in the same operation.
+              if (boardId !== undefined) {
+                const entries =
+                  await client.openScheduleEntriesForObject(ticketId);
+                const ghosts = ghostScheduleEntries(entries);
+                for (const ghost of ghosts) {
+                  await client.deleteScheduleEntry(ghost.id);
+                }
+                if (ghosts.length > 0) {
+                  return {
+                    ...(updated as object),
+                    _ghostScheduleEntriesRemoved: ghosts.map((g) => g.id),
+                  };
+                }
+              }
+              return updated;
+            });
+        },
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "create_schedule_entry",
+    {
+      description:
+        "Create a schedule entry on a member's calendar. memberId is always explicit — never defaulted. dateStart/dateEnd must be ISO 8601 WITH an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00); bare local or bare UTC times are rejected and converted to UTC server-side, so what lands on the calendar is always unambiguous. objectId is the ticket/record the entry attaches to and is required for service entries (objectType 4). allowConflicts defaults to false and sends allowScheduleConflictsFlag only when true. whereId sets the location (e.g. on-site vs Remote); omit to use the member's default. Returns the created entry with its stored UTC times.",
+      inputSchema: {
+        memberId: positiveId,
+        dateStart: z.string(),
+        dateEnd: z.string(),
+        objectId: positiveId.optional(),
+        objectType: z.number().int().min(1).max(100).optional(),
+        statusId: positiveId.optional(),
+        allowConflicts: z.boolean().optional(),
+        doneFlag: z.boolean().optional(),
+        name: z.string().trim().min(1).max(500).optional(),
+        whereId: positiveId.optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      memberId,
+      dateStart,
+      dateEnd,
+      objectId,
+      objectType,
+      statusId,
+      allowConflicts,
+      doneFlag,
+      name,
+      whereId,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "create_schedule_entry",
+        (client) =>
+          client.createScheduleEntry({
+            memberId,
+            dateStart,
+            dateEnd,
+            ...(objectId !== undefined ? { objectId } : {}),
+            ...(objectType !== undefined ? { objectType } : {}),
+            ...(statusId !== undefined ? { statusId } : {}),
+            ...(allowConflicts !== undefined ? { allowConflicts } : {}),
+            ...(doneFlag !== undefined ? { doneFlag } : {}),
+            ...(name !== undefined ? { name } : {}),
+            ...(whereId !== undefined ? { whereId } : {}),
+          }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "update_schedule_entry",
+    {
+      description:
+        "Update an existing schedule entry. Only the fields you pass change: the client GETs the entry first, merges, then PUTs the merged record — unpassed fields (member, objectId, type, notes) survive unchanged instead of being blanked. dateStart/dateEnd require an explicit timezone offset like create_schedule_entry. Returns the updated entry.",
+      inputSchema: {
+        entryId: positiveId,
+        dateStart: z.string().optional(),
+        dateEnd: z.string().optional(),
+        statusId: positiveId.optional(),
+        doneFlag: z.boolean().optional(),
+        name: z.string().trim().min(1).max(500).optional(),
+        allowConflicts: z.boolean().optional(),
+        whereId: positiveId.optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      entryId,
+      dateStart,
+      dateEnd,
+      statusId,
+      doneFlag,
+      name,
+      allowConflicts,
+      whereId,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "update_schedule_entry",
+        (client) =>
+          client.updateScheduleEntry(entryId, {
+            ...(dateStart !== undefined ? { dateStart } : {}),
+            ...(dateEnd !== undefined ? { dateEnd } : {}),
+            ...(statusId !== undefined ? { statusId } : {}),
+            ...(doneFlag !== undefined ? { doneFlag } : {}),
+            ...(name !== undefined ? { name } : {}),
+            ...(allowConflicts !== undefined ? { allowConflicts } : {}),
+            ...(whereId !== undefined ? { whereId } : {}),
+          }),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "delete_schedule_entry",
+    {
+      description:
+        "Permanently delete a schedule entry by ID. Use for ghost entries left by failed UI/PUT operations. This is destructive and cannot be undone.",
+      inputSchema: { entryId: positiveId },
+      annotations: financialWriteAnnotations,
+    },
+    ({ entryId }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "delete_schedule_entry",
+        (client) => client.deleteScheduleEntry(entryId),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "create_time_entry",
+    {
+      description:
+        "Create a time entry for a member. timeStart/timeEnd must be ISO 8601 WITH an explicit timezone offset (converted to UTC server-side). If a timesheet is pending approval the write is refused with a clear instruction to recall/approve it first. Known charge mappings: Unprofitable chargeTo 13/workType 25/DoNotBill; Vacation chargeTo 2/workType 7/NoCharge; Sick chargeTo 7/workType 6/NoCharge. Returns the created entry.",
+      inputSchema: {
+        memberId: positiveId,
+        timeStart: z.string(),
+        timeEnd: z.string(),
+        notes: z.string().trim().min(1).max(2000).optional(),
+        ticketId: positiveId.optional(),
+        chargeToId: positiveId.optional(),
+        workTypeId: positiveId.optional(),
+        billableOption: z
+          .enum(["Billable", "DoNotBill", "NoCharge"])
+          .optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({
+      memberId,
+      timeStart,
+      timeEnd,
+      notes,
+      ticketId,
+      chargeToId,
+      workTypeId,
+      billableOption,
+    }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "create_time_entry",
+        (client) =>
+          client.createTimeEntry({
+            memberId,
+            timeStart,
+            timeEnd,
+            ...(notes !== undefined ? { notes } : {}),
+            ...(ticketId !== undefined ? { ticketId } : {}),
+            ...(chargeToId !== undefined ? { chargeToId } : {}),
+            ...(workTypeId !== undefined ? { workTypeId } : {}),
+            ...(billableOption !== undefined ? { billableOption } : {}),
+          }),
         dependencies,
       ),
   );

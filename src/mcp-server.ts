@@ -90,6 +90,7 @@ export type ServiceTicketDependencies = AuditedToolDependencies & {
   createBusinessClient?: (
     credentials: ConnectWiseCredentials,
   ) => ConnectWiseClient;
+  requestLog?: (message: string) => void;
 };
 
 export async function getServiceTicketResult(
@@ -133,10 +134,13 @@ export async function getServiceTicketResult(
   }
 
   try {
+    const requestLog = dependencies.requestLog ?? ((message: string) => {});
     const credentials = resolveConnectWiseCredentials(env, props.profileAlias);
-    const client = (dependencies.createClient ?? createConnectWiseClient)(
-      credentials,
-    );
+    const clientFactory =
+      dependencies.createClient ??
+      ((c: ConnectWiseCredentials) =>
+        createConnectWiseClient(c, { log: requestLog }));
+    const client = clientFactory(credentials);
     const parsed = serviceTicketSchema.parse(
       await client.getServiceTicket(ticketId),
     );
@@ -231,6 +235,7 @@ export function createMcpServer(
       ...(dependencies.createBusinessClient
         ? { createClient: dependencies.createBusinessClient }
         : {}),
+      requestLog: dependencies.requestLog ?? console.info,
     },
   );
 
