@@ -15,6 +15,8 @@ export type ToolAuditName =
   | "get_ticket_attachments_with_details"
   | "get_complete_ticket_content"
   | "create_ticket_note"
+  | "attach_image_to_ticket"
+  | "attach_image_to_time_entry"
   | "get_service_boards"
   | "get_board_options"
   | "list_board_tickets"

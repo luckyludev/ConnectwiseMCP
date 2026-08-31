@@ -442,4 +442,104 @@ describe("ConnectWiseClient", () => {
       "ConnectWise download too large",
     );
   });
+
+  const imagePayload = {
+    filename: "shot.png",
+    base64: "iVBORw0KGgo=",
+    mimeType: "image/png",
+  };
+
+  it("posts a ticket image attachment as the fixed JSON payload", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        capturedUrl = String(input);
+        capturedInit = init;
+        return Response.json({ id: 55 });
+      },
+    });
+
+    await expect(client.attachImageToTicket(77, imagePayload)).resolves.toEqual(
+      { id: 55 },
+    );
+    expect(capturedUrl).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/77/attachments",
+    );
+    expect(capturedInit?.method).toBe("POST");
+    expect(JSON.parse(String(capturedInit?.body))).toEqual({
+      filename: "shot.png",
+      fileContents: "iVBORw0KGgo=",
+      fileType: "image/png",
+    });
+  });
+
+  it("posts a time-entry image attachment to the time-entry path", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        capturedUrl = String(input);
+        capturedInit = init;
+        return Response.json({ id: 66 });
+      },
+    });
+
+    await expect(
+      client.attachImageToTimeEntry(42, imagePayload),
+    ).resolves.toEqual({ id: 66 });
+    expect(capturedUrl).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/timeentries/42/attachments",
+    );
+    expect(capturedInit?.method).toBe("POST");
+  });
+
+  it("rejects unsupported image types and unsafe filenames without a request", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => {
+        requests += 1;
+        return Response.json({});
+      },
+    });
+
+    await expect(
+      client.attachImageToTicket(77, {
+        ...imagePayload,
+        mimeType: "application/pdf",
+      }),
+    ).rejects.toThrow("Unsupported image type");
+    await expect(
+      client.attachImageToTicket(77, {
+        ...imagePayload,
+        base64: "not base64!",
+      }),
+    ).rejects.toThrow("Invalid image contents");
+    await expect(
+      client.attachImageToTimeEntry(42, {
+        ...imagePayload,
+        filename: "../escape.png",
+      }),
+    ).rejects.toThrow("Invalid attachment filename");
+    expect(requests).toBe(0);
+  });
+
+  it("falls back to the project-ticket attachment path when the service path is missing", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        if (urls.length === 1) return new Response(null, { status: 404 });
+        return Response.json({ id: 56 });
+      },
+    });
+
+    await expect(client.attachImageToTicket(77, imagePayload)).resolves.toEqual(
+      { id: 56 },
+    );
+    expect(urls).toEqual([
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/77/attachments",
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/project/tickets/77/attachments",
+    ]);
+  });
 });
