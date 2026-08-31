@@ -358,6 +358,80 @@ async function runBusinessTool(
 
 const positiveId = z.number().int().positive();
 const pageSize = z.number().int().min(1).max(50).default(20);
+
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+const MAX_IMAGE_BYTES = 10_000_000;
+const MAX_IMAGE_BASE64_CHARS = Math.ceil((MAX_IMAGE_BYTES / 3) * 4);
+const IMAGE_DATA_URI_PATTERN =
+  /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
+
+const image = z
+  .string()
+  .min(1)
+  .refine((value) => {
+    const match = IMAGE_DATA_URI_PATTERN.exec(value);
+    return match !== null && (match[2] ?? "").length <= MAX_IMAGE_BASE64_CHARS;
+  }, "Expected a base64 image data URI (png, jpeg, webp, or gif), 10 MB maximum");
+
+type ImagePayload = {
+  base64: string;
+  mimeType: string;
+  extension: string;
+};
+
+function imageFromDataUri(value: string): ImagePayload {
+  const match = IMAGE_DATA_URI_PATTERN.exec(value);
+  const mimeType = match?.[1];
+  const base64 = match?.[2];
+  if (
+    mimeType === undefined ||
+    base64 === undefined ||
+    base64.length === 0 ||
+    base64.length > MAX_IMAGE_BASE64_CHARS
+  ) {
+    throw new Error(
+      "Expected a base64 image data URI (png, jpeg, webp, or gif), 10 MB maximum",
+    );
+  }
+  return {
+    base64,
+    mimeType,
+    extension: IMAGE_EXTENSIONS[mimeType] ?? "png",
+  };
+}
+
+function attachmentFilename(
+  value: string | undefined,
+  extension: string,
+): string {
+  const fallback = `image.${extension}`;
+  if (value === undefined) return fallback;
+  const cleaned = value
+    .normalize("NFKC")
+    .slice(0, 200)
+    .replace(/[^A-Za-z0-9 ._()\-]/g, "")
+    .trim();
+  return /^[A-Za-z0-9][A-Za-z0-9 ._()\-]*\.[A-Za-z0-9]{1,10}$/.test(cleaned)
+    ? cleaned
+    : fallback;
+}
+
+function inlineImageTag(attachmentUrl: unknown): string {
+  const url = text(attachmentUrl, 1_000);
+  if (
+    url === undefined ||
+    !/^https:\/\/[A-Za-z0-9._~\/?#@!$&*+,;=%-]+$/.test(url)
+  ) {
+    throw new Error("ConnectWise did not return a usable attachment link");
+  }
+  return `\n<img src="${url.replaceAll("&", "&amp;")}">`;
+}
+
 const date = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -629,25 +703,52 @@ export function registerConnectWiseBusinessTools(
     "create_ticket_note",
     {
       description:
-        "Create a service or project ticket note using the authenticated user's ConnectWise API member permissions.",
+        "Create a service or project ticket note using the authenticated user's ConnectWise API member permissions. Pass image (base64 data URI) to attach it to the ticket first and inline it in the note.",
       inputSchema: {
         ticketId: positiveId,
         text: z.string().trim().min(1).max(8_000),
+        image: image.optional(),
         internalOnly: z.boolean().default(true),
         resolutionNote: z.boolean().default(false),
         issueNote: z.boolean().default(false),
       },
       annotations: writeAnnotations,
     },
-    ({ ticketId, text: noteText, internalOnly, resolutionNote, issueNote }) =>
+    ({
+      ticketId,
+      text: noteText,
+      image: imageValue,
+      internalOnly,
+      resolutionNote,
+      issueNote,
+    }) =>
       runBusinessTool(
         getProps(),
         env,
         "create_ticket_note",
         async (client) => {
+          let imageRef = "";
+          if (imageValue !== undefined) {
+            const payload = imageFromDataUri(imageValue);
+            const resolvedFilename = attachmentFilename(
+              undefined,
+              payload.extension,
+            );
+            const attached = object(
+              await client.attachImageToTicket(ticketId, {
+                filename: resolvedFilename,
+                base64: payload.base64,
+                mimeType: payload.mimeType,
+              }),
+            );
+            if (id(attached?.id) === undefined) {
+              throw new Error("Invalid ConnectWise write response");
+            }
+            imageRef = inlineImageTag(attached?.url);
+          }
           const created = object(
             await client.createTicketNote(ticketId, {
-              text: noteText,
+              text: noteText + imageRef,
               internalOnly,
               resolutionNote,
               issueNote,
@@ -663,6 +764,101 @@ export function registerConnectWiseBusinessTools(
             internalOnly,
             resolutionNote,
             issueNote,
+            ...(imageValue !== undefined ? { imageAttached: true } : {}),
+          });
+        },
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "attach_image_to_ticket",
+    {
+      description:
+        "Attach an image from the chat (base64 data URI, 10 MB maximum) to a ConnectWise ticket using the authenticated user's ConnectWise API member permissions.",
+      inputSchema: {
+        ticketId: positiveId,
+        image,
+        filename: z.string().trim().min(1).max(200).optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({ ticketId, image: imageValue, filename }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "attach_image_to_ticket",
+        async (client) => {
+          const payload = imageFromDataUri(imageValue);
+          const resolvedFilename = attachmentFilename(
+            filename,
+            payload.extension,
+          );
+          const created = object(
+            await client.attachImageToTicket(ticketId, {
+              filename: resolvedFilename,
+              base64: payload.base64,
+              mimeType: payload.mimeType,
+            }),
+          );
+          const createdId = id(created?.id);
+          if (createdId === undefined) {
+            throw new Error("Invalid ConnectWise write response");
+          }
+          return compact({
+            id: createdId,
+            ticketId,
+            filename: resolvedFilename,
+            mimeType: payload.mimeType,
+            url: text(created?.url, 1_000),
+            size: number(created?.size),
+          });
+        },
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "attach_image_to_time_entry",
+    {
+      description:
+        "Attach an image from the chat (base64 data URI, 10 MB maximum) to a ConnectWise time entry using the authenticated user's ConnectWise API member permissions.",
+      inputSchema: {
+        timeEntryId: positiveId,
+        image,
+        filename: z.string().trim().min(1).max(200).optional(),
+      },
+      annotations: writeAnnotations,
+    },
+    ({ timeEntryId, image: imageValue, filename }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "attach_image_to_time_entry",
+        async (client) => {
+          const payload = imageFromDataUri(imageValue);
+          const resolvedFilename = attachmentFilename(
+            filename,
+            payload.extension,
+          );
+          const created = object(
+            await client.attachImageToTimeEntry(timeEntryId, {
+              filename: resolvedFilename,
+              base64: payload.base64,
+              mimeType: payload.mimeType,
+            }),
+          );
+          const createdId = id(created?.id);
+          if (createdId === undefined) {
+            throw new Error("Invalid ConnectWise write response");
+          }
+          return compact({
+            id: createdId,
+            timeEntryId,
+            filename: resolvedFilename,
+            mimeType: payload.mimeType,
+            url: text(created?.url, 1_000),
+            size: number(created?.size),
           });
         },
         dependencies,
