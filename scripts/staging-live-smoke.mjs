@@ -11,8 +11,8 @@
  *      with SMOKE_EXPECT_MEMBER_ID set, that id is required.
  *   2. service.boards.statuses for board 32 returns at least one status.
  *
- * Security: never prints access tokens, authorization codes, client
- * secrets, or state values. Only lengths and structural facts.
+ * Security: output is allowlisted. It never prints response bodies, access
+ * tokens, authorization URLs/codes, client secrets, state, or business data.
  *
  * Usage:
  *   node scripts/staging-live-smoke.mjs
@@ -20,13 +20,14 @@
  *   SMOKE_BASE_URL        (default: staging worker)
  *   SMOKE_EXPECT_MEMBER_ID (default: 149)
  *   SMOKE_BOARD_ID         (default: 32)
- *   SMOKE_NO_BROWSER       (skip `open`, print URL only)
+ *   SMOKE_NO_BROWSER       (fail closed instead of opening a browser)
  */
 
 import { createServer } from "node:http";
 import { randomBytes, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import process from "node:process";
+import { readBoundedJson, readBoundedText } from "./smoke-response.mjs";
 
 const BASE_URL = (
   process.env.SMOKE_BASE_URL ??
@@ -35,8 +36,14 @@ const BASE_URL = (
 const EXPECT_MEMBER_ID = Number(process.env.SMOKE_EXPECT_MEMBER_ID ?? "149");
 const BOARD_ID = Number(process.env.SMOKE_BOARD_ID ?? "32");
 const LOGIN_TIMEOUT_MS = Number(process.env.SMOKE_LOGIN_TIMEOUT_MS ?? 420_000);
+const HTTP_TIMEOUT_MS = 30_000;
 
 const log = (...parts) => console.log("[smoke]", ...parts);
+const smokeFetch = (input, init = {}) =>
+  globalThis.fetch(input, {
+    ...init,
+    signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+  });
 
 function base64url(bytes) {
   return Buffer.from(bytes)
@@ -46,19 +53,20 @@ function base64url(bytes) {
     .replace(/=+$/, "");
 }
 
-function fail(message, detail) {
+function fail(message) {
   log("FAIL", message);
-  if (detail !== undefined) {
-    try {
-      log(
-        "detail:",
-        typeof detail === "string" ? detail : JSON.stringify(detail, null, 2),
-      );
-    } catch {
-      log("detail:", String(detail));
-    }
-  }
   process.exit(1);
+}
+
+function failUnexpectedly() {
+  log("FAIL unexpected smoke failure");
+  process.exit(1);
+}
+process.on("uncaughtException", failUnexpectedly);
+process.on("unhandledRejection", failUnexpectedly);
+
+if (process.env.SMOKE_NO_BROWSER && !process.env.SMOKE_ACCESS_TOKEN) {
+  fail("browser launch disabled; provide an approved access token instead");
 }
 
 // 1. Loopback server to receive the OAuth callback.
@@ -87,16 +95,34 @@ const loopbackPort = server.address().port;
 const loopbackRedirectUri = `http://127.0.0.1:${loopbackPort}/callback`;
 let callbackSeen = null;
 
-log(`base: ${BASE_URL}`);
-log(`loopback callback: ${loopbackRedirectUri}`);
-
 // 2. Canonical resource (for the `resource` parameter).
-const resourceResponse = await fetch(
+const resourceResponse = await smokeFetch(
   `${BASE_URL}/.well-known/oauth-protected-resource`,
 );
-const resourceMeta = await resourceResponse.json().catch(() => ({}));
-const canonicalResource =
-  typeof resourceMeta?.resource === "string" ? resourceMeta.resource : BASE_URL;
+if (!resourceResponse.ok) {
+  await resourceResponse.body?.cancel();
+  fail(`protected-resource discovery failed (${resourceResponse.status})`);
+}
+const resourceMeta = await readBoundedJson(resourceResponse, null);
+if (typeof resourceMeta?.resource !== "string") {
+  fail("protected-resource discovery returned invalid metadata");
+}
+let canonicalResource;
+try {
+  canonicalResource = new URL(resourceMeta.resource);
+} catch {
+  fail("protected-resource discovery returned invalid metadata");
+}
+const expectedResource = new URL("/mcp", `${BASE_URL}/`);
+if (
+  canonicalResource.username ||
+  canonicalResource.password ||
+  canonicalResource.hash ||
+  canonicalResource.toString() !== expectedResource.toString()
+) {
+  fail("protected-resource discovery returned unexpected metadata");
+}
+canonicalResource = canonicalResource.toString();
 
 // 3. Token acquisition.
 //
@@ -113,7 +139,7 @@ if (process.env.SMOKE_ACCESS_TOKEN) {
   );
 } else {
   // 3a. Dynamic client registration (loopback).
-  const registerResponse = await fetch(`${BASE_URL}/oauth/register`, {
+  const registerResponse = await smokeFetch(`${BASE_URL}/oauth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -125,14 +151,12 @@ if (process.env.SMOKE_ACCESS_TOKEN) {
     }),
   });
   if (!registerResponse.ok) {
-    fail(
-      `DCR rejected (${registerResponse.status})`,
-      await registerResponse.text(),
-    );
+    await registerResponse.body?.cancel();
+    fail(`DCR rejected (${registerResponse.status})`);
   }
-  const registration = await registerResponse.json();
+  const registration = await readBoundedJson(registerResponse, {});
   if (!registration.client_id || !registration.client_secret) {
-    fail("DCR response missing client_id/client_secret", registration);
+    fail("DCR response missing required fields");
   }
   log(`DCR ok (client_id length ${registration.client_id.length})`);
 
@@ -159,20 +183,16 @@ if (process.env.SMOKE_ACCESS_TOKEN) {
 
   log("Opening the ConnectWise consent page in your browser.");
   log("Click 'Continue with Microsoft' and complete sign-in.");
-  if (process.env.SMOKE_NO_BROWSER) {
-    log(`Open this URL in a browser: ${authorizeUrl}`);
-  } else {
-    const opener = spawn("open", [authorizeUrl.toString()], {
-      stdio: "ignore",
+  const opener = spawn("open", [authorizeUrl.toString()], {
+    stdio: "ignore",
+  });
+  await new Promise((resolve) => {
+    opener.once("error", () => fail("browser launch failed"));
+    opener.once("close", (code) => {
+      if (code !== 0) fail("browser launch failed");
+      resolve();
     });
-    opener.on("error", () =>
-      log(`Open this URL in a browser: ${authorizeUrl}`),
-    );
-    // Bring the default browser to the foreground so the consent page is visible.
-    spawn("osascript", ["-e", 'tell application "Brave Browser" to activate'], {
-      stdio: "ignore",
-    }).on("error", () => {});
-  }
+  });
 
   // 7. Wait for the loopback callback.
   log(
@@ -199,7 +219,7 @@ if (process.env.SMOKE_ACCESS_TOKEN) {
       client_id: registration.client_id,
       redirect_uri: loopbackRedirectUri,
     });
-    return fetch(`${BASE_URL}/oauth/token`, {
+    return smokeFetch(`${BASE_URL}/oauth/token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -214,25 +234,14 @@ if (process.env.SMOKE_ACCESS_TOKEN) {
     ).toString("base64")}`,
   });
   if (!tokenResponse.ok) {
-    const firstBody = await tokenResponse.text();
-    tokenResponse = await tokenRequest({});
-    if (!tokenResponse.ok) {
-      fail(
-        `token exchange failed (${tokenResponse.status})`,
-        firstBody.length < 500 ? firstBody : `${tokenResponse.status}`,
-      );
-    }
+    await tokenResponse.body?.cancel();
+    fail(`token exchange failed (${tokenResponse.status})`);
   }
-  token = await tokenResponse.json();
+  token = await readBoundedJson(tokenResponse, {});
   if (!token.access_token) {
-    fail("token response missing access_token", {
-      error: token.error,
-      error_description: token.error_description,
-    });
+    fail("token response missing access_token");
   }
-  log(
-    `token ok (length ${token.access_token.length}, scopes: ${(token.scope ?? "").split(" ").join(",")})`,
-  );
+  log(`token ok (length ${token.access_token.length})`);
 }
 if (!token?.access_token) {
   fail(
@@ -250,13 +259,13 @@ const mcpHeaders = (extra = {}) => ({
 });
 
 async function mcpCall(payload, sessionId) {
-  const response = await fetch(`${BASE_URL}/mcp`, {
+  const response = await smokeFetch(`${BASE_URL}/mcp`, {
     method: "POST",
     headers: mcpHeaders(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
     body: JSON.stringify(payload),
   });
   const contentType = response.headers.get("content-type") ?? "";
-  const text = await response.text();
+  const text = await readBoundedText(response);
   let parsed = null;
   if (contentType.includes("text/event-stream")) {
     for (const line of text.split("\n")) {
@@ -279,7 +288,6 @@ async function mcpCall(payload, sessionId) {
     status: response.status,
     sessionId: response.headers.get("mcp-session-id") ?? sessionId,
     parsed,
-    raw: text,
   };
 }
 
@@ -297,9 +305,9 @@ const init = await mcpCall(
   null,
 );
 if (init.status !== 200 || !init.parsed?.result) {
-  fail(`MCP initialize failed (${init.status})`, init.raw.slice(0, 400));
+  fail(`MCP initialize failed (${init.status})`);
 }
-log(`MCP session established (server: ${init.parsed.result.serverInfo?.name})`);
+log("MCP session established");
 
 await mcpCall(
   { jsonrpc: "2.0", method: "notifications/initialized" },
@@ -318,7 +326,7 @@ if (
   toolsListResp.parsed?.error ||
   !Array.isArray(toolsListResp.parsed?.result?.tools)
 ) {
-  fail("tools/list failed", toolsListResp.raw);
+  fail("tools/list failed");
 }
 const registeredTools = (toolsListResp.parsed?.result?.tools ?? []).map(
   (t) => t.name,
@@ -365,10 +373,7 @@ const expectedTools = [
 ];
 const missing = expectedTools.filter((name) => !registeredTools.includes(name));
 if (missing.length > 0) {
-  fail(
-    `tools/list is missing ${missing.length} expected tool(s): ${missing.join(", ")}`,
-    `registered (${registeredTools.length}): ${registeredTools.join(", ")}`,
-  );
+  fail(`tools/list is missing ${missing.length} expected tool(s)`);
 }
 const forbidden = ["execute_api_call"].filter((name) =>
   registeredTools.includes(name),
@@ -380,10 +385,10 @@ const unexpected = registeredTools.filter(
   (name) => !expectedTools.includes(name),
 );
 if (unexpected.length > 0) {
-  fail(`tools/list exposes unexpected tool(s): ${unexpected.join(", ")}`);
+  fail(`tools/list exposes ${unexpected.length} unexpected tool(s)`);
 }
 log(
-  `tools/list ok (${registeredTools.length} registered; all ${expectedTools.length} expected present; no forbidden generic tools): ${registeredTools.join(", ")}`,
+  `tools/list ok (${registeredTools.length} registered; expected catalog present)`,
 );
 
 async function callTool(name, args) {
@@ -399,12 +404,12 @@ async function callTool(name, args) {
   if (result.status !== 200) {
     return {
       ok: false,
-      detail: `HTTP ${result.status}: ${result.raw.slice(0, 400)}`,
+      reason: `http_${result.status}`,
     };
   }
   const payload = result.parsed;
   if (payload?.error) {
-    return { ok: false, detail: payload.error };
+    return { ok: false, reason: "mcp_error" };
   }
   const toolResult = payload?.result;
   const text = toolResult?.content
@@ -419,11 +424,8 @@ async function callTool(name, args) {
   }
   return {
     ok: !toolResult?.isError,
-    text,
     data,
-    detail: toolResult?.isError
-      ? (text ?? JSON.stringify(toolResult))
-      : undefined,
+    reason: toolResult?.isError ? "tool_error" : undefined,
   };
 }
 
@@ -431,40 +433,30 @@ async function callTool(name, args) {
 log("calling get_my_member ...");
 const member = await callTool("get_my_member", {});
 if (!member.ok) {
-  fail("get_my_member failed", member.detail);
+  fail(`get_my_member failed (${member.reason})`);
 }
 const memberId = member.data?.member?.id ?? member.data?.id;
-log(
-  `myMember ok (id=${memberId}, name=${member.data?.member?.firstName} ${member.data?.member?.lastName ?? ""})`.trim(),
-);
 if (memberId !== EXPECT_MEMBER_ID) {
-  fail(
-    `get_my_member returned id ${memberId}, expected ${EXPECT_MEMBER_ID}`,
-    member.text,
-  );
+  fail("get_my_member identity mismatch");
 }
+log("get_my_member ok (expected identity matched)");
 
 // 11. Gate 2: board statuses via the catalog tool.
-log(
-  `calling call_connectwise service.boards.statuses (boardId ${BOARD_ID}) ...`,
-);
+log("calling call_connectwise service.boards.statuses ...");
 const statuses = await callTool("call_connectwise", {
   route: "service.boards.statuses",
   boardId: BOARD_ID,
 });
 if (!statuses.ok) {
-  fail("call_connectwise service.boards.statuses failed", statuses.detail);
+  fail(`call_connectwise service.boards.statuses failed (${statuses.reason})`);
 }
 const statusList = Array.isArray(statuses.data)
   ? statuses.data
   : statuses.data?.items;
 if (!Array.isArray(statusList) || statusList.length === 0) {
-  fail(
-    "board statuses came back empty",
-    statuses.text?.slice(0, 400) ?? "no data",
-  );
+  fail("board statuses came back empty");
 }
-log(`board ${BOARD_ID} statuses ok (${statusList.length} statuses)`);
+log("board statuses ok");
 
 // 12. Gate 3: fixed-route schedule catalog date range.
 log("calling call_connectwise schedule.entries.byMember (date range) ...");
@@ -474,16 +466,11 @@ const schedule = await callTool("call_connectwise", {
   startDate: "2026-08-31",
   endDate: "2026-09-06",
 });
-const scheduleList = Array.isArray(schedule.data)
-  ? schedule.data
-  : (schedule.data?.slice?.(0) ?? []);
+const scheduleList = Array.isArray(schedule.data) ? schedule.data : [];
 if (!schedule.ok || scheduleList.length === 0) {
-  fail(
-    "schedule.entries.byMember failed (InvalidOrderBy?)",
-    schedule.detail ?? schedule.text,
-  );
+  fail(`schedule.entries.byMember failed (${schedule.reason ?? "empty"})`);
 }
-log(`schedule.entries.byMember ok (${scheduleList.length} entries)`);
+log("schedule.entries.byMember ok");
 
 // 13. Done. The smoke remains read-only; write acceptance requires a separately
 // authorized staging procedure and an access token carrying mcp:write.
