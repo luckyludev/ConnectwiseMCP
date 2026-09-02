@@ -667,7 +667,7 @@ describe("ConnectWiseClient", () => {
     expect(ghosts.map((g) => g.id)).toEqual([246998, 1, 4]);
   });
 
-  it("logs the scrubbed write payload in cw_request", async () => {
+  it("logs only allowlisted request metadata", async () => {
     const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async () => Response.json({}),
@@ -682,9 +682,23 @@ describe("ConnectWiseClient", () => {
       name: "Sync test",
     });
     const logLine = logs.find((l) => l.includes("cw_request"))!;
-    expect(logLine).toContain('"requestBody"');
-    expect(logLine).toContain("2026-08-31T12:30:00Z");
-    expect(logLine).not.toContain("public-key");
+    const requestLog = JSON.parse(logLine) as Record<string, unknown>;
+    expect(Object.keys(requestLog).sort()).toEqual([
+      "event",
+      "latencyMs",
+      "method",
+      "outcome",
+      "status",
+    ]);
+    expect(requestLog).toMatchObject({
+      event: "cw_request",
+      method: "POST",
+      outcome: "success",
+      status: 200,
+    });
+    expect(logLine).not.toContain("Sync test");
+    expect(logLine).not.toContain("1892065");
+    expect(logLine).not.toContain("api-na.myconnectwise.net");
   });
 
   it("updates a schedule entry via GET-then-merge PUT, preserving unpassed fields", async () => {
@@ -805,6 +819,7 @@ describe("ConnectWiseClient", () => {
   it("uploads a bounded image document with multipart fields and no manual content type", async () => {
     let capturedUrl = "";
     let capturedInit: RequestInit | undefined;
+    const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input, init) => {
         capturedUrl = String(input);
@@ -820,6 +835,7 @@ describe("ConnectWiseClient", () => {
           { status: 201 },
         );
       },
+      log: (message) => logs.push(message),
     });
     const pngSignature = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -857,6 +873,23 @@ describe("ConnectWiseClient", () => {
     expect(file.name).toBe("router.png");
     expect(file.type).toBe("image/png");
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(pngSignature);
+    const requestLog = JSON.parse(logs[0]!) as Record<string, unknown>;
+    expect(Object.keys(requestLog).sort()).toEqual([
+      "event",
+      "latencyMs",
+      "method",
+      "outcome",
+      "status",
+    ]);
+    expect(requestLog).toMatchObject({
+      event: "cw_request",
+      method: "POST",
+      outcome: "success",
+      status: 201,
+    });
+    expect(logs[0]).not.toContain("Router photo");
+    expect(logs[0]).not.toContain("router.png");
+    expect(logs[0]).not.toContain("api-na.myconnectwise.net");
   });
 
   it("rejects spoofed, mismatched, and oversized image uploads before fetch", async () => {

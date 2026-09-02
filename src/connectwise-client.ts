@@ -764,6 +764,30 @@ export function createConnectWiseClient(
     `${credentials.companyId}+${credentials.publicKey}:${credentials.privateKey}`,
   );
 
+  function emitRequestLog(
+    method: "GET" | "POST" | "PUT" | "DELETE",
+    status: number | null,
+    startedAtMs: number,
+    outcome: "success" | "unavailable" | "redirect_refused" | "upstream_error",
+  ): void {
+    try {
+      log(
+        JSON.stringify({
+          event: "cw_request",
+          method,
+          status,
+          latencyMs: Math.min(
+            30_000,
+            Math.max(0, Math.round(Date.now() - startedAtMs)),
+          ),
+          outcome,
+        }),
+      );
+    } catch {
+      // Request diagnostics are best-effort and must not alter the result.
+    }
+  }
+
   async function requestJson(
     method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
@@ -773,12 +797,6 @@ export function createConnectWiseClient(
     overflowMessage?: string,
   ): Promise<unknown> {
     const url = new URL(`${credentials.apiBaseUrl}${path}`);
-    // Log the outbound payload for write calls so failures are diagnosable
-    // (the URL alone has no body). Scrubbed and bounded; never raw.
-    const requestBodyPreview =
-      body === undefined
-        ? undefined
-        : scrubSecrets(JSON.stringify(body)).slice(0, 500);
     for (const [key, value] of Object.entries(query ?? {})) {
       url.searchParams.set(key, String(value));
     }
@@ -805,47 +823,20 @@ export function createConnectWiseClient(
         });
       } catch {
         if (attempt + 1 < maxAttempts) {
-          log(
-            JSON.stringify({
-              event: "cw_request",
-              method,
-              url: url.toString(),
-              status: null,
-              latencyMs: Date.now() - startedAtMs,
-              ...(requestBodyPreview
-                ? { requestBody: requestBodyPreview }
-                : {}),
-              failure: "unavailable",
-            }),
-          );
+          emitRequestLog(method, null, startedAtMs, "unavailable");
           await sleep(100);
           continue;
         }
-        log(
-          JSON.stringify({
-            event: "cw_request",
-            method,
-            url: url.toString(),
-            status: null,
-            latencyMs: Date.now() - startedAtMs,
-            ...(requestBodyPreview ? { requestBody: requestBodyPreview } : {}),
-            failure: "unavailable",
-          }),
-        );
+        emitRequestLog(method, null, startedAtMs, "unavailable");
         throw new Error("ConnectWise request unavailable");
       }
       if (response.status >= 300 && response.status < 400) {
         await cancelResponseBody(response);
-        log(
-          JSON.stringify({
-            event: "cw_request",
-            method,
-            url: url.toString(),
-            status: response.status,
-            latencyMs: Date.now() - startedAtMs,
-            ...(requestBodyPreview ? { requestBody: requestBodyPreview } : {}),
-            failure: "redirect_refused",
-          }),
+        emitRequestLog(
+          method,
+          response.status,
+          startedAtMs,
+          "redirect_refused",
         );
         throw new Error(
           `ConnectWise redirected the request (${response.status}); redirects are not followed`,
@@ -862,33 +853,14 @@ export function createConnectWiseClient(
       }
       if (!response.ok) {
         const bodyPreview = await readErrorBodyPreview(response);
-        log(
-          JSON.stringify({
-            event: "cw_request",
-            method,
-            url: url.toString(),
-            status: response.status,
-            latencyMs: Date.now() - startedAtMs,
-            ...(requestBodyPreview ? { requestBody: requestBodyPreview } : {}),
-            ...(bodyPreview ? { bodyPreview } : {}),
-          }),
-        );
+        emitRequestLog(method, response.status, startedAtMs, "upstream_error");
         throw new ConnectWiseRequestError(response.status, {
           method,
           path,
           ...(bodyPreview ? { bodyPreview } : {}),
         });
       }
-      log(
-        JSON.stringify({
-          event: "cw_request",
-          method,
-          url: url.toString(),
-          status: response.status,
-          latencyMs: Date.now() - startedAtMs,
-          ...(requestBodyPreview ? { requestBody: requestBodyPreview } : {}),
-        }),
-      );
+      emitRequestLog(method, response.status, startedAtMs, "success");
       const responseText = await readBoundedResponse(
         response,
         maxBodyBytes,
@@ -1234,29 +1206,16 @@ export function createConnectWiseClient(
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch {
-        log(
-          JSON.stringify({
-            event: "cw_request",
-            method: "POST",
-            url: url.toString(),
-            status: null,
-            latencyMs: Date.now() - startedAtMs,
-            failure: "unavailable",
-          }),
-        );
+        emitRequestLog("POST", null, startedAtMs, "unavailable");
         throw new Error("ConnectWise request unavailable");
       }
       if (response.status >= 300 && response.status < 400) {
         await cancelResponseBody(response);
-        log(
-          JSON.stringify({
-            event: "cw_request",
-            method: "POST",
-            url: url.toString(),
-            status: response.status,
-            latencyMs: Date.now() - startedAtMs,
-            failure: "redirect_refused",
-          }),
+        emitRequestLog(
+          "POST",
+          response.status,
+          startedAtMs,
+          "redirect_refused",
         );
         throw new Error(
           "ConnectWise redirected the request (" +
@@ -1266,31 +1225,14 @@ export function createConnectWiseClient(
       }
       if (!response.ok) {
         const bodyPreview = await readErrorBodyPreview(response);
-        log(
-          JSON.stringify({
-            event: "cw_request",
-            method: "POST",
-            url: url.toString(),
-            status: response.status,
-            latencyMs: Date.now() - startedAtMs,
-            ...(bodyPreview ? { bodyPreview } : {}),
-          }),
-        );
+        emitRequestLog("POST", response.status, startedAtMs, "upstream_error");
         throw new ConnectWiseRequestError(response.status, {
           method: "POST",
           path: "/system/documents",
           ...(bodyPreview ? { bodyPreview } : {}),
         });
       }
-      log(
-        JSON.stringify({
-          event: "cw_request",
-          method: "POST",
-          url: url.toString(),
-          status: response.status,
-          latencyMs: Date.now() - startedAtMs,
-        }),
-      );
+      emitRequestLog("POST", response.status, startedAtMs, "success");
       const responseText = await readBoundedResponse(response);
       if (!responseText) return null;
       try {
