@@ -254,6 +254,20 @@ function failureMessage(error: unknown): string {
   return "ConnectWise operation failed";
 }
 
+const WRITE_TOOLS: ReadonlySet<ToolAuditName> = new Set([
+  "upload_connectwise_image",
+  "create_ticket_note",
+  "attach_image_to_ticket",
+  "attach_image_to_time_entry",
+  "create_agreement_addition",
+  "create_service_ticket",
+  "update_service_ticket",
+  "create_schedule_entry",
+  "update_schedule_entry",
+  "delete_schedule_entry",
+  "create_time_entry",
+]);
+
 async function runBusinessTool(
   props: AuthProps,
   env: object,
@@ -262,7 +276,10 @@ async function runBusinessTool(
   dependencies: BusinessToolDependencies,
 ): Promise<CallToolResult> {
   const startedAtMs = getAuditStartTime(dependencies.audit);
-  if (!props?.scopes?.includes("mcp:read")) {
+  if (
+    !props?.scopes?.includes("mcp:read") ||
+    (WRITE_TOOLS.has(tool) && !props.scopes.includes("mcp:write"))
+  ) {
     emitToolAudit(
       {
         props,
