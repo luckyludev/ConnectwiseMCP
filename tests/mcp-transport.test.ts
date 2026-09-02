@@ -743,6 +743,9 @@ describe("authenticated MCP transport", () => {
                     title: "Onsite Log.pdf",
                     fileName: "Onsite Log.pdf",
                     size: 123456,
+                    password: "must-not-escape",
+                    privateKey: "must-not-escape",
+                    unexpected: "must-not-escape",
                   },
                 ];
               },
@@ -815,6 +818,10 @@ describe("authenticated MCP transport", () => {
       }),
     );
     expect(secondBody).toContain('\\"fileName\\":\\"Onsite Log.pdf\\"');
+    expect(secondBody).not.toContain("must-not-escape");
+    expect(secondBody).not.toContain("password");
+    expect(secondBody).not.toContain("privateKey");
+    expect(secondBody).not.toContain("unexpected");
 
     const third = await handler.fetch(
       new Request("http://localhost/mcp", {
@@ -1179,7 +1186,11 @@ describe("authenticated MCP transport", () => {
           doneFlag: false,
         });
       }
-      return Response.json({ id: 9, dateEnd: "2026-08-31T22:00:00Z" });
+      return Response.json({
+        id: 9,
+        dateEnd: "2026-08-31T22:00:00Z",
+        privateKey: "UPSTREAM_PRIVATE_VALUE",
+      });
     };
     const handler = createMcpHandler(
       () =>
@@ -1227,7 +1238,9 @@ describe("authenticated MCP transport", () => {
     expect(wire.name).toBe("Keep me");
     expect((wire.member as { id: number }).id).toBe(149);
     expect((wire.type as { id: number }).id).toBe(4);
-    expect(text).toContain('\\"dateEnd\\":\\"2026-08-31T22:00:00Z\\"');
+    expect(text).toContain('\\"end\\":\\"2026-08-31T22:00:00Z\\"');
+    expect(text).not.toContain("UPSTREAM_PRIVATE_VALUE");
+    expect(text).not.toContain("privateKey");
   });
 
   it("delete_schedule_entry issues DELETE through the tool", async () => {
@@ -1350,6 +1363,8 @@ describe("authenticated MCP transport", () => {
           company: { id: 250 },
           board: { id: 32, name: "Triage" },
           status: { id: 547, name: "New" },
+          customFields: [{ value: "UPSTREAM_PRIVATE_VALUE" }],
+          privateKey: "UPSTREAM_PRIVATE_VALUE",
         });
       }
       return Response.json({});
@@ -1404,6 +1419,9 @@ describe("authenticated MCP transport", () => {
     expect((wire.status as { id: number }).id).toBe(547);
     expect((wire.owner as { id: number }).id).toBe(212);
     expect(text).toContain('\\"id\\":7001');
+    expect(text).not.toContain("UPSTREAM_PRIVATE_VALUE");
+    expect(text).not.toContain("customFields");
+    expect(text).not.toContain("privateKey");
   });
 
   it("update_service_ticket merges over GET and preserves unpassed fields", async () => {
@@ -1434,7 +1452,11 @@ describe("authenticated MCP transport", () => {
           _info: { dateEntered: "2026-08-27T12:00:00Z" },
         });
       }
-      return Response.json({ id: 1927659 });
+      return Response.json({
+        id: 1927659,
+        privateKey: "UPSTREAM_PRIVATE_VALUE",
+        customFields: [{ value: "UPSTREAM_PRIVATE_VALUE" }],
+      });
     };
     const handler = createMcpHandler(
       () =>
@@ -1486,6 +1508,9 @@ describe("authenticated MCP transport", () => {
     expect(wire._info).toBeUndefined();
     expect(wire.recordType).toBeUndefined();
     expect(text).toContain('\\"id\\":1927659');
+    expect(text).not.toContain("UPSTREAM_PRIVATE_VALUE");
+    expect(text).not.toContain("customFields");
+    expect(text).not.toContain("privateKey");
   });
 
   it("update_service_ticket rejects a status not valid on the target board", async () => {
