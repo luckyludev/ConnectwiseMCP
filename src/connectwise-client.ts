@@ -213,6 +213,22 @@ export type ConnectWiseRequestDiagnostics = {
   bodyPreview?: string;
 };
 
+export type ConnectWiseUserErrorCode =
+  "timezone_required" | "timesheet_pending" | "invalid_board_status";
+
+export class ConnectWiseUserError extends Error {
+  constructor(readonly code: ConnectWiseUserErrorCode) {
+    super(
+      code === "timezone_required"
+        ? "Date/time values require an explicit timezone offset"
+        : code === "timesheet_pending"
+          ? "A timesheet is pending approval"
+          : "The selected status is not valid on the selected board",
+    );
+    this.name = "ConnectWiseUserError";
+  }
+}
+
 export class ConnectWiseRequestError extends Error {
   constructor(
     readonly status: number,
@@ -697,9 +713,7 @@ function toUtcIso(value: string, label: string): string {
     throw new Error(`Invalid ${label}`);
   }
   if (!ISO_OFFSET_RE.test(value)) {
-    throw new Error(
-      `${label} must be ISO 8601 with an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00)`,
-    );
+    throw new ConnectWiseUserError("timezone_required");
   }
   const ms = Date.parse(value);
   if (!Number.isFinite(ms)) {
@@ -1591,9 +1605,7 @@ export function createConnectWiseClient(
         for (const sheet of sheets) {
           const status = (sheet as Record<string, unknown>)?.status;
           if (status === "PendingApproval") {
-            throw new Error(
-              "A timesheet is pending approval; time entries cannot be written until it is approved or recalled",
-            );
+            throw new ConnectWiseUserError("timesheet_pending");
           }
         }
       }

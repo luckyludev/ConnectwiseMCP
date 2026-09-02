@@ -5,6 +5,7 @@ import {
   CONNECTWISE_IMAGE_MIME_TYPES,
   ConnectWiseDownloadError,
   ConnectWiseRequestError,
+  ConnectWiseUserError,
   MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
   ghostScheduleEntries,
@@ -228,28 +229,24 @@ function output(value: unknown): CallToolResult {
 
 function failureMessage(error: unknown): string {
   if (error instanceof ConnectWiseRequestError) {
-    const diagnostics = error.diagnostics;
-    const where = diagnostics
-      ? ` at ${diagnostics.method} ${diagnostics.path}`
-      : "";
-    if (diagnostics?.bodyPreview) {
-      return `ConnectWise request failed (${error.status})${where}: ${diagnostics.bodyPreview.slice(0, 300)}`;
-    }
     if (error.status === 401 || error.status === 403) {
-      return `ConnectWise denied this operation (${error.status})${where}`;
+      return "ConnectWise denied this operation";
     }
-    if (error.status === 404) return `ConnectWise record not found${where}`;
-    return `ConnectWise request failed (${error.status})${where}`;
+    if (error.status === 404) return "ConnectWise record not found";
+    if (error.status === 429) return "ConnectWise rate limit reached";
+    if (error.status >= 500) return "ConnectWise service unavailable";
+    return "ConnectWise request failed";
   }
   if (error instanceof ConnectWiseDownloadError) {
-    return `ConnectWise download failed (${error.status})`;
+    return "ConnectWise download failed";
   }
-  if (
-    error instanceof Error &&
-    typeof error.message === "string" &&
-    error.message.length > 0
-  ) {
-    return `ConnectWise operation failed: ${error.message.slice(0, 200)}`;
+  if (error instanceof ConnectWiseUserError) {
+    if (error.code === "timezone_required")
+      return "Date/time values require an explicit timezone offset";
+    if (error.code === "timesheet_pending")
+      return "A timesheet is pending approval; approve or recall it before retrying";
+    if (error.code === "invalid_board_status")
+      return "The selected status is not valid on the selected board; call get_board_options to select a valid status";
   }
   return "ConnectWise operation failed";
 }
@@ -1648,12 +1645,7 @@ export function registerConnectWiseBusinessTools(
             }>;
             const valid = Array.isArray(statuses) ? statuses : [];
             if (!valid.some((s) => Number(s.id) === statusId)) {
-              const names = valid
-                .map((s) => `${s.id} ${s.name ?? ""}`.trim())
-                .join(", ");
-              throw new Error(
-                `statusId ${statusId} is not valid on board ${boardId}; valid statuses: ${names || "none"}`,
-              );
+              throw new ConnectWiseUserError("invalid_board_status");
             }
           }
           return client
