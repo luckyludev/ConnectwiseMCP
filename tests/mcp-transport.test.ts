@@ -151,6 +151,121 @@ describe("authenticated MCP transport", () => {
     expect(body).toContain('"visibility":["app"]');
   });
 
+  it("denies every write tool without mcp:write before resolving a profile", async () => {
+    const auditMessages: string[] = [];
+    let clientCreated = false;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          audit: { logger: (message) => auditMessages.push(message) },
+          createBusinessClient: () => {
+            clientCreated = true;
+            return businessClient();
+          },
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const writes: Array<{ name: string; arguments: Record<string, unknown> }> =
+      [
+        {
+          name: "upload_connectwise_image",
+          arguments: {
+            recordType: "Ticket",
+            recordId: 1,
+            fileName: "test.png",
+            mimeType: "image/png",
+            base64: "AAAA",
+          },
+        },
+        {
+          name: "create_ticket_note",
+          arguments: { ticketId: 1, text: "must not be sent" },
+        },
+        {
+          name: "attach_image_to_ticket",
+          arguments: { ticketId: 1, image: tinyPngDataUri },
+        },
+        {
+          name: "attach_image_to_time_entry",
+          arguments: { timeEntryId: 1, image: tinyPngDataUri },
+        },
+        {
+          name: "create_agreement_addition",
+          arguments: {
+            agreementId: 1,
+            productId: 1,
+            quantity: 1,
+            unitPrice: 1,
+            effectiveDate: "2026-09-02",
+          },
+        },
+        {
+          name: "create_service_ticket",
+          arguments: { companyId: 1, summary: "must not be sent" },
+        },
+        { name: "update_service_ticket", arguments: { ticketId: 1 } },
+        {
+          name: "create_schedule_entry",
+          arguments: {
+            memberId: 1,
+            dateStart: "2026-09-02T10:00:00Z",
+            dateEnd: "2026-09-02T11:00:00Z",
+          },
+        },
+        { name: "update_schedule_entry", arguments: { entryId: 1 } },
+        { name: "delete_schedule_entry", arguments: { entryId: 1 } },
+        {
+          name: "create_time_entry",
+          arguments: {
+            memberId: 1,
+            timeStart: "2026-09-02T10:00:00Z",
+            timeEnd: "2026-09-02T11:00:00Z",
+          },
+        },
+      ];
+
+    for (const [index, write] of writes.entries()) {
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 20 + index,
+            method: "tools/call",
+            params: write,
+          }),
+        }),
+      );
+      expect(await response.text(), write.name).toContain("Insufficient scope");
+    }
+
+    expect(clientCreated).toBe(false);
+    expect(auditMessages).toHaveLength(writes.length);
+    expect(auditMessages.map((message) => JSON.parse(message).tool)).toEqual(
+      writes.map((write) => write.name),
+    );
+    for (const message of auditMessages) {
+      expect(JSON.parse(message)).toMatchObject({
+        profileAlias: "LUIS",
+        outcome: "denied",
+        reason: "insufficient_scope",
+      });
+      expect(message).not.toContain("must not be sent");
+    }
+  });
+
   it("executes a write with only the authenticated user's ConnectWise profile", async () => {
     const auditMessages: string[] = [];
     let received:
@@ -185,7 +300,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -283,7 +398,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -342,7 +457,7 @@ describe("authenticated MCP transport", () => {
       route: "/mcp",
       corsOptions: false,
       authContext: {
-        props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
       },
     });
     const response = await handler.fetch(
@@ -509,7 +624,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -562,7 +677,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -637,7 +752,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -757,7 +872,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -812,7 +927,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -888,7 +1003,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -944,7 +1059,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1003,7 +1120,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1071,7 +1190,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1126,7 +1247,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1176,7 +1299,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1238,7 +1363,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1318,7 +1445,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1391,7 +1520,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1455,7 +1586,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1540,7 +1673,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const response = await handler.fetch(
@@ -1602,7 +1737,9 @@ describe("authenticated MCP transport", () => {
       {
         route: "/mcp",
         corsOptions: false,
-        authContext: { props: { profileAlias: "LUIS", scopes: ["mcp:read"] } },
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
       },
     );
     const create = await handler.fetch(
@@ -1691,7 +1828,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -1759,7 +1896,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "MAYA", scopes: ["mcp:read"] },
+          props: { profileAlias: "MAYA", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -1825,7 +1962,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );
@@ -1879,7 +2016,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
         },
       },
     );

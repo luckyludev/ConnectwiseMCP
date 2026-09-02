@@ -1,6 +1,6 @@
 # ConnectWise MCP v2 Architecture
 
-> **Status:** Worker V2 security/authentication and the bounded business read/write catalog are implemented in `src/`. Entra selects one immutable profile mapping, while the mapped ConnectWise API member remains the final permission authority. Live staging validation remains required. The existing Docker deployment stays available for rollback until the acceptance gates pass.
+> **Status:** Worker V2 security/authentication and a bounded business catalog are implemented in `src/`. Entra selects one immutable profile mapping. The current OAuth policy issues read access only; registered write tools are dormant behind an unissued `mcp:write` scope. Live staging validation remains required. The existing Docker deployment stays available for rollback until the acceptance gates pass.
 
 ## Recommendation
 
@@ -38,7 +38,8 @@ Authentication and authorization have separate responsibilities:
 2. **An Entra group gates application access.** For example, `ConnectWise-MCP-Users` determines who may connect.
 3. **Immutable identity selects credentials.** The validated key `<tenant-id>:<object-id>` maps to one of six profile aliases such as `LUIS`.
 4. **Cloudflare secrets hold credentials.** The browser and MCP client never receive ConnectWise keys.
-5. **ConnectWise enforces business permissions.** The mapped API member's ConnectWise Security Role determines boards, companies, finance, projects, and read/write access.
+5. **The Worker gates operation classes.** Every tool requires `mcp:read`; write-capable tools additionally require `mcp:write` before profile-secret access. The current OAuth flow never issues or retains `mcp:write`.
+6. **ConnectWise enforces business permissions after Worker authorization.** The mapped API member's ConnectWise Security Role determines boards, companies, finance, projects, and allowed reads. It is an additional boundary, not a substitute for the Worker scope gate.
 
 Entra does not automatically translate its groups into ConnectWise Security Roles. The explicit identity-to-profile mapping is the bridge between the two systems.
 

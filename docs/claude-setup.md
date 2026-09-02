@@ -4,21 +4,11 @@
 
 Add the canonical Worker `/mcp` URL in Claude under **Customize → Connectors → Add custom connector**, then complete Microsoft Entra sign-in. Do not enter ConnectWise or Cloudflare secrets in Claude; the Worker resolves the authenticated identity's server-side `CW_PROFILE_<ALIAS>` secret.
 
-The connector exposes bounded reads and writes. Entra controls who can reach the connector and selects the immutable profile mapping; the selected ConnectWise API member's Security Role is the final authority for every business operation. The retained `mcp:read` OAuth scope is server access, not a grant of ConnectWise write permission.
+The connector currently permits bounded reads only. Entra controls who can reach it and selects the immutable profile mapping. Write-capable tools remain registered for compatibility but require `mcp:write`, which the current OAuth flow does not issue, so they are denied before profile-secret access. Do not treat a ConnectWise Security Role as authorization to bypass this Worker scope gate.
 
-### Attach an image from chat
+### Write tools are disabled
 
-Ask Claude to “open the ConnectWise attachment uploader for ticket 123” or call `open_attachment_uploader` directly. The inline app lets the user:
-
-- paste an image from the clipboard;
-- drag and drop an image;
-- choose a PNG, JPEG, GIF, or WebP file;
-- select a Ticket or existing TimeEntry and choose internal/private or customer-visible attachment visibility;
-- optionally create a ticket note after the ticket attachment succeeds.
-
-Standard MCP tool arguments are JSON and do not automatically carry the original bytes of an image already attached to a chat message. Paste or drop that image into the inline uploader. Images over 1 MB are resized locally; the Worker independently enforces the 1 MB cap, validates MIME type, signature, extension, and fixed record type, never fetches an image URL, and never echoes image bytes into the result or audit log.
-
-The attachment and optional ticket note are separate ConnectWise writes. If the attachment succeeds and the note fails, the app reports the document ID as partial success.
+The attachment uploader, ticket-note, ticket/agreement/schedule/time-entry creation, update, and deletion tools cannot be used by a normally authenticated Claude connector in the current release. They are retained in the catalog for compatibility but require the unissued `mcp:write` scope. Do not attempt to enable or test them against live ConnectWise until the separate write authorization and staging gates are reviewed and approved.
 
 Follow the non-secret [V2 staging acceptance checklist](v2-staging-acceptance-checklist.md) before production onboarding.
 

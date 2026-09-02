@@ -223,7 +223,7 @@ if (process.env.SMOKE_ACCESS_TOKEN) {
       );
     }
   }
-  const token = await tokenResponse.json();
+  token = await tokenResponse.json();
   if (!token.access_token) {
     fail("token response missing access_token", {
       error: token.error,
@@ -313,8 +313,12 @@ const toolsListResp = await mcpCall(
   { jsonrpc: "2.0", id: Date.now(), method: "tools/list" },
   init.sessionId,
 );
-if (!toolsListResp.ok) {
-  fail("tools/list failed", toolsListResp.detail ?? toolsListResp.raw);
+if (
+  toolsListResp.status !== 200 ||
+  toolsListResp.parsed?.error ||
+  !Array.isArray(toolsListResp.parsed?.result?.tools)
+) {
+  fail("tools/list failed", toolsListResp.raw);
 }
 const registeredTools = (toolsListResp.parsed?.result?.tools ?? []).map(
   (t) => t.name,
@@ -327,6 +331,8 @@ const expectedTools = [
   "get_ticket_attachments_with_details",
   "get_complete_ticket_content",
   "create_ticket_note",
+  "attach_image_to_ticket",
+  "attach_image_to_time_entry",
   "get_service_boards",
   "get_board_options",
   "list_board_tickets",
@@ -354,6 +360,8 @@ const expectedTools = [
   "update_schedule_entry",
   "delete_schedule_entry",
   "create_time_entry",
+  "create_service_ticket",
+  "update_service_ticket",
 ];
 const missing = expectedTools.filter((name) => !registeredTools.includes(name));
 if (missing.length > 0) {
@@ -367,6 +375,12 @@ const forbidden = ["execute_api_call"].filter((name) =>
 );
 if (forbidden.length > 0) {
   fail(`tools/list exposes forbidden generic tool(s): ${forbidden.join(", ")}`);
+}
+const unexpected = registeredTools.filter(
+  (name) => !expectedTools.includes(name),
+);
+if (unexpected.length > 0) {
+  fail(`tools/list exposes unexpected tool(s): ${unexpected.join(", ")}`);
 }
 log(
   `tools/list ok (${registeredTools.length} registered; all ${expectedTools.length} expected present; no forbidden generic tools): ${registeredTools.join(", ")}`,
@@ -471,59 +485,8 @@ if (!schedule.ok || scheduleList.length === 0) {
 }
 log(`schedule.entries.byMember ok (${scheduleList.length} entries)`);
 
-// 13. Phase 2 write cycle: create -> update -> delete (self-cleaning).
-log("calling create_schedule_entry (2026-09-08 16:00-17:00-04:00 ...)");
-const created = await callTool("create_schedule_entry", {
-  memberId: EXPECT_MEMBER_ID,
-  objectId: 1892065,
-  objectType: 4,
-  dateStart: "2026-09-08T16:00:00-04:00",
-  dateEnd: "2026-09-08T17:00:00-04:00",
-  statusId: 1,
-});
-if (!created.ok || typeof created.data?.id !== "number") {
-  fail("create_schedule_entry failed", created.detail ?? created.text);
-}
-const createdId = created.data.id;
-if (created.data.dateStart !== "2026-09-08T20:00:00Z") {
-  fail(
-    `create_schedule_entry stored ${created.data.dateStart}; expected 2026-09-08T20:00:00Z (offset conversion)`,
-    created.text,
-  );
-}
-log(
-  `create_schedule_entry ok (id=${createdId}, stored ${created.data.dateStart})`,
-);
-
-try {
-  log("calling update_schedule_entry (move dateEnd to 18:00-04:00) ...");
-  const updated = await callTool("update_schedule_entry", {
-    entryId: createdId,
-    dateEnd: "2026-09-08T18:00:00-04:00",
-  });
-  if (!updated.ok || updated.data?.dateEnd !== "2026-09-08T22:00:00Z") {
-    fail(
-      "update_schedule_entry failed or wrong stored dateEnd",
-      updated.detail ?? updated.text,
-    );
-  }
-  if (updated.data?.dateStart !== "2026-09-08T20:00:00Z") {
-    fail(
-      "update_schedule_entry blanked an unpassed field (dateStart)",
-      updated.text,
-    );
-  }
-  log("update_schedule_entry ok (unpassed fields survived)");
-} finally {
-  log("cleaning up: delete_schedule_entry ...");
-  const del = await callTool("delete_schedule_entry", { entryId: createdId });
-  if (!del.ok) {
-    fail("delete_schedule_entry failed", del.detail ?? del.text);
-  }
-  log(`delete_schedule_entry ok (${createdId} gone)`);
-}
-
-// 14. Done.
+// 13. Done. The smoke remains read-only; write acceptance requires a separately
+// authorized staging procedure and an access token carrying mcp:write.
 server.close();
 log("PASS: staging worker is fully operational (auth + ConnectWise data).");
 process.exit(0);

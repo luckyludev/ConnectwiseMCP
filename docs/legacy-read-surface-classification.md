@@ -1,10 +1,10 @@
 # Legacy MCP surface migration classification
 
-> **Status:** decision record for Worker V2. The authenticated user's mapped ConnectWise API member is the final authority for both reads and writes. The active legacy implementation is `deploy/cwm-mcp/api_gateway/server.py`; archival copies are not part of this inventory.
+> **Status:** decision record for Worker V2. The active legacy implementation is `deploy/cwm-mcp/api_gateway/server.py`; archival copies are not part of this inventory.
 
 ## Authorization and safety rules
 
-Entra authorization determines who may reach the MCP server and selects exactly one server-side `CW_PROFILE_<ALIAS>` secret. The `mcp:read` OAuth scope is the MCP server-access scope retained for compatibility with connected clients; it does not grant a ConnectWise permission. Every business call uses the mapped user's ConnectWise credentials, and ConnectWise Security Roles decide which boards, companies, finance records, projects, reads, and writes succeed.
+Entra authorization determines who may reach the MCP server and selects exactly one server-side `CW_PROFILE_<ALIAS>` secret. Every tool requires `mcp:read`. Write-capable tools additionally require `mcp:write` before profile-secret access; the current authorization flow never issues or retains that scope, so production-default access is read-only. If a separately reviewed policy later enables `mcp:write`, every business call still uses the mapped user's ConnectWise credentials and ConnectWise Security Roles remain the final business-authorization boundary.
 
 V2 never accepts caller-selected ConnectWise hosts, endpoints, methods, credential headers, profile aliases, raw conditions, or arbitrary request bodies. Every tool uses a fixed route and method, validated inputs, server-controlled result bounds, an allowlisted output projection, sanitized failures, and an argument-free audit event. Non-idempotent writes are never retried after an ambiguous network failure.
 
@@ -15,6 +15,7 @@ The Worker exposes these bounded business tools:
 - Identity and ticket metadata: `whoami`, `get_service_ticket`.
 - Ticket reads: `search_tickets_by_content`, `get_ticket_notes_with_content`, `get_ticket_attachments_with_details`, `get_complete_ticket_content`.
 - Ticket writes: `create_ticket_note`.
+- Ticket and attachment writes: `attach_image_to_ticket`, `attach_image_to_time_entry`, `create_service_ticket`, `update_service_ticket`.
 - Service/reference reads: `get_service_boards`, `get_board_options`, `list_board_tickets`, `get_service_statuses`, `get_service_priorities`, `get_service_sources`.
 - People/company reads: `get_my_member`, `list_members`, `search_companies`, `search_contacts`.
 - Time, schedule, and document reads: `list_time_entries`, `list_schedule_entries`, `get_time_sheets`, `get_document`, `download_document`.
@@ -22,8 +23,9 @@ The Worker exposes these bounded business tools:
 - Agreement reads: `get_agreement_additions`, `get_agreement_additions_summary`, `search_agreement_additions`, `get_agreement_billing_summary`.
 - Agreement writes: `create_agreement_addition`.
 - Attachment UI: `open_attachment_uploader` is model-visible; `upload_connectwise_image` is app-only and attaches a bounded image to a Ticket or TimeEntry.
+- Schedule/time writes: `create_schedule_entry`, `update_schedule_entry`, `delete_schedule_entry`, `create_time_entry`.
 
-Ticket-note text and commercial fields are returned only when the mapped ConnectWise API member can retrieve them. All list sections are capped at 50 items. Document downloads return bounded base64 without download URLs or GUIDs. Image uploads accept only verified image bytes and return a small document receipt without echoing the image, note text, or arbitrary upstream fields. All writes are non-idempotent and are never retried.
+Ticket-note text and commercial fields are returned only when the mapped ConnectWise API member can retrieve them. All list sections are capped at 50 items. Document downloads return bounded base64 without download URLs or GUIDs. The registered catalog contains 38 tools (37 model-visible and one app-only); 11 are dormant write-capable tools that require the currently unissued `mcp:write` scope. All writes are non-idempotent and are never retried.
 
 ## Active legacy tool decisions
 
