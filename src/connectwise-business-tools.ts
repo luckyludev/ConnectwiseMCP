@@ -1122,19 +1122,30 @@ export function registerConnectWiseBusinessTools(
       status: reference(value.status),
     });
 
-  const catalogItem = (value: Record<string, unknown>) => {
-    const kept: Record<string, unknown> = {};
-    for (const [key, raw] of Object.entries(value)) {
-      if (Object.keys(kept).length >= 10) break;
-      if (typeof raw === "string" && raw.length > 0 && raw.length <= 300) {
-        kept[key] = raw;
-      } else if (typeof raw === "number" && Number.isFinite(raw)) {
-        kept[key] = raw;
-      } else if (typeof raw === "boolean") {
-        kept[key] = raw;
-      }
-    }
-    return kept;
+  const configurationItem = (value: Record<string, unknown>) =>
+    compact({
+      id: id(value.id),
+      name: text(value.name, 300),
+      type: reference(value.type),
+      status: reference(value.status),
+      company: reference(value.company),
+      site: reference(value.site),
+      contact: reference(value.contact),
+    });
+
+  const catalogProjectors: Record<
+    (typeof CATALOG_ROUTE_IDS)[number],
+    (value: Record<string, unknown>) => Record<string, unknown>
+  > = {
+    "service.boards.statuses": lookupItem,
+    "service.boards.types": lookupItem,
+    "service.tickets.byStatus": ticket,
+    "service.tickets.byOwner": ticket,
+    "company.configurations": configurationItem,
+    "system.documents": attachment,
+    "finance.agreements.byName": agreement,
+    "time.entries.byMember": timeEntryRead,
+    "schedule.entries.byMember": scheduleEntryItem,
   };
 
   server.registerTool(
@@ -1534,15 +1545,7 @@ export function registerConnectWiseBusinessTools(
           if (includeClosed !== undefined) {
             params.includeClosed = includeClosed;
           }
-          const project =
-            route === "service.tickets.byOwner" ||
-            route === "service.tickets.byStatus"
-              ? ticket
-              : route === "schedule.entries.byMember"
-                ? scheduleEntryItem
-                : route === "time.entries.byMember"
-                  ? timeEntryRead
-                  : catalogItem;
+          const project = catalogProjectors[route];
           return list(await client.catalogGet(route, params), pageSize).map(
             project,
           );
@@ -1555,7 +1558,7 @@ export function registerConnectWiseBusinessTools(
     "create_service_ticket",
     {
       description:
-        "Create a ConnectWise service ticket. companyId and summary are required and never defaulted. Defaults: boardId 32 (Triage), statusId 547 (New). New tickets default to Priority 4 - Low and a placeholder type ('-CHANGE BOARD FIRST-') until they are corrected on a real board — the created ticket shows these so the caller knows to fix them. initialDescription is posted as the ticket's initial description note. Returns the full created ticket.",
+        "Create a ConnectWise service ticket. companyId and summary are required and never defaulted. Defaults: boardId 32 (Triage), statusId 547 (New). New tickets default to Priority 4 - Low and a placeholder type ('-CHANGE BOARD FIRST-') until they are corrected on a real board — the created ticket shows these so the caller knows to fix them. initialDescription is posted as the ticket's initial description note. Returns an allowlisted ticket receipt.",
       inputSchema: {
         companyId: positiveId,
         summary: z.string().trim().min(1).max(100),
@@ -1585,17 +1588,21 @@ export function registerConnectWiseBusinessTools(
         env,
         "create_service_ticket",
         (client) =>
-          client.createServiceTicket({
-            companyId,
-            summary,
-            ...(boardId !== undefined ? { boardId } : {}),
-            ...(statusId !== undefined ? { statusId } : {}),
-            ...(contactId !== undefined ? { contactId } : {}),
-            ...(priorityId !== undefined ? { priorityId } : {}),
-            ...(typeId !== undefined ? { typeId } : {}),
-            ...(ownerId !== undefined ? { ownerId } : {}),
-            ...(initialDescription !== undefined ? { initialDescription } : {}),
-          }),
+          client
+            .createServiceTicket({
+              companyId,
+              summary,
+              ...(boardId !== undefined ? { boardId } : {}),
+              ...(statusId !== undefined ? { statusId } : {}),
+              ...(contactId !== undefined ? { contactId } : {}),
+              ...(priorityId !== undefined ? { priorityId } : {}),
+              ...(typeId !== undefined ? { typeId } : {}),
+              ...(ownerId !== undefined ? { ownerId } : {}),
+              ...(initialDescription !== undefined
+                ? { initialDescription }
+                : {}),
+            })
+            .then(ticket),
         dependencies,
       ),
   );
@@ -1669,14 +1676,13 @@ export function registerConnectWiseBusinessTools(
                 for (const ghost of ghosts) {
                   await client.deleteScheduleEntry(ghost.id);
                 }
-                if (ghosts.length > 0) {
+                if (ghosts.length > 0)
                   return {
-                    ...(updated as object),
-                    _ghostScheduleEntriesRemoved: ghosts.map((g) => g.id),
+                    ...ticket(updated),
+                    ghostScheduleEntryIdsRemoved: ghosts.map((g) => g.id),
                   };
-                }
               }
-              return updated;
+              return ticket(updated);
             });
         },
         dependencies,
@@ -1719,18 +1725,20 @@ export function registerConnectWiseBusinessTools(
         env,
         "create_schedule_entry",
         (client) =>
-          client.createScheduleEntry({
-            memberId,
-            dateStart,
-            dateEnd,
-            ...(objectId !== undefined ? { objectId } : {}),
-            ...(objectType !== undefined ? { objectType } : {}),
-            ...(statusId !== undefined ? { statusId } : {}),
-            ...(allowConflicts !== undefined ? { allowConflicts } : {}),
-            ...(doneFlag !== undefined ? { doneFlag } : {}),
-            ...(name !== undefined ? { name } : {}),
-            ...(whereId !== undefined ? { whereId } : {}),
-          }),
+          client
+            .createScheduleEntry({
+              memberId,
+              dateStart,
+              dateEnd,
+              ...(objectId !== undefined ? { objectId } : {}),
+              ...(objectType !== undefined ? { objectType } : {}),
+              ...(statusId !== undefined ? { statusId } : {}),
+              ...(allowConflicts !== undefined ? { allowConflicts } : {}),
+              ...(doneFlag !== undefined ? { doneFlag } : {}),
+              ...(name !== undefined ? { name } : {}),
+              ...(whereId !== undefined ? { whereId } : {}),
+            })
+            .then((value) => scheduleEntryItem(object(value) ?? {})),
         dependencies,
       ),
   );
@@ -1767,15 +1775,17 @@ export function registerConnectWiseBusinessTools(
         env,
         "update_schedule_entry",
         (client) =>
-          client.updateScheduleEntry(entryId, {
-            ...(dateStart !== undefined ? { dateStart } : {}),
-            ...(dateEnd !== undefined ? { dateEnd } : {}),
-            ...(statusId !== undefined ? { statusId } : {}),
-            ...(doneFlag !== undefined ? { doneFlag } : {}),
-            ...(name !== undefined ? { name } : {}),
-            ...(allowConflicts !== undefined ? { allowConflicts } : {}),
-            ...(whereId !== undefined ? { whereId } : {}),
-          }),
+          client
+            .updateScheduleEntry(entryId, {
+              ...(dateStart !== undefined ? { dateStart } : {}),
+              ...(dateEnd !== undefined ? { dateEnd } : {}),
+              ...(statusId !== undefined ? { statusId } : {}),
+              ...(doneFlag !== undefined ? { doneFlag } : {}),
+              ...(name !== undefined ? { name } : {}),
+              ...(allowConflicts !== undefined ? { allowConflicts } : {}),
+              ...(whereId !== undefined ? { whereId } : {}),
+            })
+            .then((value) => scheduleEntryItem(object(value) ?? {})),
         dependencies,
       ),
   );
@@ -1832,16 +1842,18 @@ export function registerConnectWiseBusinessTools(
         env,
         "create_time_entry",
         (client) =>
-          client.createTimeEntry({
-            memberId,
-            timeStart,
-            timeEnd,
-            ...(notes !== undefined ? { notes } : {}),
-            ...(ticketId !== undefined ? { ticketId } : {}),
-            ...(chargeToId !== undefined ? { chargeToId } : {}),
-            ...(workTypeId !== undefined ? { workTypeId } : {}),
-            ...(billableOption !== undefined ? { billableOption } : {}),
-          }),
+          client
+            .createTimeEntry({
+              memberId,
+              timeStart,
+              timeEnd,
+              ...(notes !== undefined ? { notes } : {}),
+              ...(ticketId !== undefined ? { ticketId } : {}),
+              ...(chargeToId !== undefined ? { chargeToId } : {}),
+              ...(workTypeId !== undefined ? { workTypeId } : {}),
+              ...(billableOption !== undefined ? { billableOption } : {}),
+            })
+            .then((value) => timeEntryRead(object(value) ?? {})),
         dependencies,
       ),
   );
