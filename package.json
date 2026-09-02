@@ -16,7 +16,7 @@
     "format:check": "prettier --check src tests ui scripts .github/workflows/v2-ci.yml docs/v2-foundation.md docs/legacy-read-surface-classification.md docs/v2-staging-acceptance-checklist.md docs/cloudflare-workers-staging-howto.md docs/architecture.md docs/chatgpt-connector.md docs/claude-setup.md docs/n8n-setup.md docs/copilot-studio-azure.md docs/azure-ad-checklist.md docs/entra-authentication.md docs/troubleshooting.md docs/README.md package.json tsconfig.json tsconfig.ui.json vite.attachment.config.ts wrangler.jsonc",
     "prebuild": "npm run build:attachment-app",
     "build": "wrangler deploy --env=\"\" --dry-run --outdir dist",
-    "check": "npm run scripts:check && npm run typecheck && npm test && npm run format:check && npm audit --audit-level=high && npm run build"
+    "check": "npm run scripts:check && npm run typecheck && npm test && npm run format:check && npm audit --audit-level=moderate && npm run build"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "0.8.3",
