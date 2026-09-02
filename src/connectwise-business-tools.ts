@@ -244,9 +244,9 @@ function failureMessage(error: unknown): string {
     if (error.code === "timezone_required")
       return "Date/time values require an explicit timezone offset";
     if (error.code === "timesheet_pending")
-      return "A timesheet is pending approval; the write was not performed";
+      return "A timesheet is pending approval; approve or recall it before retrying";
     if (error.code === "invalid_board_status")
-      return "The selected status is not valid on the selected board";
+      return "The selected status is not valid on the selected board; call get_board_options to select a valid status";
   }
   return "ConnectWise operation failed";
 }

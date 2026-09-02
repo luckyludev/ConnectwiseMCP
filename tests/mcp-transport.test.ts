@@ -1408,6 +1408,7 @@ describe("authenticated MCP transport", () => {
     );
     const text = await response.text();
     expect(text).toContain("pending approval");
+    expect(text).toContain("approve or recall it before retrying");
     expect(bodies.filter((b) => b.method === "POST").length).toBe(0);
   });
 
@@ -1637,6 +1638,7 @@ describe("authenticated MCP transport", () => {
     );
     const text = await response.text();
     expect(text).toContain("selected status is not valid");
+    expect(text).toContain("call get_board_options");
     expect(text).not.toContain("921");
     expect(text).not.toContain("935");
     expect(puts).toBe(0);
