@@ -297,21 +297,6 @@ async function runBusinessTool(
   try {
     const requestLog = dependencies.requestLog ?? ((message: string) => {});
     const credentials = resolveConnectWiseCredentials(env, props.profileAlias);
-    try {
-      requestLog(
-        JSON.stringify({
-          event: "cw_credentials",
-          profileAlias: props.profileAlias,
-          companyIdLength: credentials.companyId.length,
-          publicKeyLength: credentials.publicKey.length,
-          privateKeyLength: credentials.privateKey.length,
-          clientIdLength: credentials.clientId.length,
-          apiBaseOrigin: new URL(credentials.apiBaseUrl).origin,
-        }),
-      );
-    } catch {
-      // Diagnostics are best-effort and must not alter the MCP result.
-    }
     const clientFactory =
       dependencies.createClient ??
       ((c: ConnectWiseCredentials) =>
