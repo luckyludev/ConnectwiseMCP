@@ -345,7 +345,6 @@ const expectedTools = [
   "open_attachment_uploader",
   "upload_connectwise_image",
   "call_connectwise",
-  "execute_api_call",
   "get_agreement_additions",
   "get_agreement_additions_summary",
   "create_agreement_addition",
@@ -363,8 +362,14 @@ if (missing.length > 0) {
     `registered (${registeredTools.length}): ${registeredTools.join(", ")}`,
   );
 }
+const forbidden = ["execute_api_call"].filter((name) =>
+  registeredTools.includes(name),
+);
+if (forbidden.length > 0) {
+  fail(`tools/list exposes forbidden generic tool(s): ${forbidden.join(", ")}`);
+}
 log(
-  `tools/list ok (${registeredTools.length} registered; all ${expectedTools.length} expected present): ${registeredTools.join(", ")}`,
+  `tools/list ok (${registeredTools.length} registered; all ${expectedTools.length} expected present; no forbidden generic tools): ${registeredTools.join(", ")}`,
 );
 
 async function callTool(name, args) {
@@ -447,83 +452,7 @@ if (!Array.isArray(statusList) || statusList.length === 0) {
 }
 log(`board ${BOARD_ID} statuses ok (${statusList.length} statuses)`);
 
-// 12. Gates 3-7: execute_api_call hatch + schedule catalog date range.
-log("calling execute_api_call /system/myMembers ...");
-const myMembers = await callTool("execute_api_call", {
-  path: "/system/myMembers",
-});
-if (!myMembers.ok || typeof myMembers.data?.id !== "number") {
-  fail(
-    "execute_api_call /system/myMembers failed",
-    myMembers.detail ?? myMembers.text,
-  );
-}
-log(`myMembers ok (id=${myMembers.data.id})`);
-
-log("calling execute_api_call /service/boards/32/statuses ...");
-const hatchStatuses = await callTool("execute_api_call", {
-  path: "/service/boards/32/statuses",
-});
-if (
-  !hatchStatuses.ok ||
-  !Array.isArray(hatchStatuses.data) ||
-  hatchStatuses.data.length === 0
-) {
-  fail(
-    "execute_api_call /service/boards/32/statuses failed",
-    hatchStatuses.detail ?? hatchStatuses.text,
-  );
-}
-log(`hatch statuses ok (${hatchStatuses.data.length})`);
-
-log(
-  "calling execute_api_call /service/tickets with fields id,summary,status ...",
-);
-const hatchTickets = await callTool("execute_api_call", {
-  path: "/service/tickets",
-  conditions: `board/id=${BOARD_ID}`,
-  pageSize: 5,
-  fields: "id,summary,status",
-});
-if (!hatchTickets.ok) {
-  fail(
-    "execute_api_call /service/tickets failed",
-    hatchTickets.detail ?? hatchTickets.text,
-  );
-}
-const tickets = Array.isArray(hatchTickets.data)
-  ? hatchTickets.data
-  : (hatchTickets.data?.slice?.(0) ?? []);
-if (tickets.length > 5) {
-  fail(
-    `execute_api_call tickets returned ${tickets.length} records (> pageSize 5)`,
-  );
-}
-for (const item of tickets) {
-  const keys = Object.keys(item).sort();
-  const allowed = ["id", "summary", "status", "_info"];
-  if (keys.some((k) => !allowed.includes(k))) {
-    fail(`execute_api_call tickets returned extra fields: ${keys.join(",")}`);
-  }
-}
-log(
-  `hatch tickets ok (${tickets.length} records, fields id/summary/status only)`,
-);
-
-log("calling execute_api_call /service/tickets countOnly ...");
-const hatchCount = await callTool("execute_api_call", {
-  path: "/service/tickets",
-  conditions: `board/id=${BOARD_ID}`,
-  countOnly: true,
-});
-if (!hatchCount.ok || typeof hatchCount.data?.count !== "number") {
-  fail(
-    "execute_api_call countOnly failed",
-    hatchCount.detail ?? hatchCount.text,
-  );
-}
-log(`hatch count ok (${hatchCount.data.count} tickets on board ${BOARD_ID})`);
-
+// 12. Gate 3: fixed-route schedule catalog date range.
 log("calling call_connectwise schedule.entries.byMember (date range) ...");
 const schedule = await callTool("call_connectwise", {
   route: "schedule.entries.byMember",

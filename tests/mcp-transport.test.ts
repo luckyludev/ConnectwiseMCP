@@ -63,7 +63,6 @@ function businessClient(
     attachImageToTicket: unused,
     attachImageToTimeEntry: unused,
     catalogGet: unused,
-    hatchGet: async () => ({ data: undefined, pageSizeClamped: false }),
     createScheduleEntry: unused,
     updateScheduleEntry: unused,
     deleteScheduleEntry: async () => undefined,
@@ -145,6 +144,7 @@ describe("authenticated MCP transport", () => {
     ]) {
       expect(body).toContain(`"name":"${name}"`);
     }
+    expect(body).not.toContain('"name":"execute_api_call"');
     expect(body).toContain('"readOnlyHint":false');
     expect(body).toContain('"idempotentHint":false');
     expect(body).toContain("ui://connectwise/attachment-uploader.html");
