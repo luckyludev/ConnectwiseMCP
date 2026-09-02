@@ -2,6 +2,7 @@ import { createMcpHandler } from "agents/mcp/server";
 import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/mcp-server";
 import {
+  ConnectWiseRequestError,
   createConnectWiseClient,
   type ConnectWiseClient,
 } from "../src/connectwise-client";
@@ -858,6 +859,70 @@ describe("authenticated MCP transport", () => {
     );
   });
 
+  it("does not expose upstream response bodies or internal errors", async () => {
+    const errors: unknown[] = [
+      new ConnectWiseRequestError(400, {
+        method: "GET",
+        path: "/company/configurations",
+        bodyPreview:
+          '{"privateKey":"secret value with spaces","token":"short"}',
+      }),
+      new Error("CW_PROFILE_LUIS contains private-key and secret value"),
+      new Error("secret value explicit timezone offset privateKey"),
+      new Error("secret value timesheet is pending approval privateKey"),
+      new Error("statusId 1 is not valid on board 2; secret value privateKey"),
+    ];
+
+    for (const [index, error] of errors.entries()) {
+      const handler = createMcpHandler(
+        () =>
+          createMcpServer(env, {
+            createBusinessClient: () =>
+              businessClient({
+                async catalogGet() {
+                  throw error;
+                },
+              }),
+          }),
+        {
+          route: "/mcp",
+          corsOptions: false,
+          authContext: {
+            props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          },
+        },
+      );
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 540 + index,
+            method: "tools/call",
+            params: {
+              name: "call_connectwise",
+              arguments: {
+                route: "company.configurations",
+                query: "router",
+              },
+            },
+          }),
+        }),
+      );
+      const body = await response.text();
+      expect(body).not.toContain("secret value");
+      expect(body).not.toContain("privateKey");
+      expect(body).not.toContain("CW_PROFILE_LUIS");
+      expect(body).not.toContain("/company/configurations");
+    }
+  });
+
   it("downloads a document as bounded base64", async () => {
     let received: { companyId: string; documentId: number } | undefined;
     const handler = createMcpHandler(
@@ -1571,9 +1636,9 @@ describe("authenticated MCP transport", () => {
       }),
     );
     const text = await response.text();
-    expect(text).toContain("is not valid on board 64");
-    expect(text).toContain("921");
-    expect(text).toContain("935");
+    expect(text).toContain("selected status is not valid");
+    expect(text).not.toContain("921");
+    expect(text).not.toContain("935");
     expect(puts).toBe(0);
   });
 
