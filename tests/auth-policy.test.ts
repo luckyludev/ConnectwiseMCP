@@ -108,6 +108,40 @@ describe("resolveCredentialProfile", () => {
     ).toThrowError(new AuthorizationPolicyError("invalid_configuration"));
   });
 
+  it("rejects duplicate identity keys instead of accepting the last value", () => {
+    expect(() =>
+      resolveCredentialProfile(
+        {
+          tid: "tenant-a",
+          oid: "user-1",
+          groups: ["group-mcp-users"],
+        },
+        {
+          ...config,
+          identityProfileMap:
+            '{"tenant-a:user-1":"FIRST","tenant-a:user-1":"SECOND"}',
+        },
+      ),
+    ).toThrowError(new AuthorizationPolicyError("invalid_configuration"));
+  });
+
+  it("rejects duplicate identity keys with equivalent JSON escapes", () => {
+    expect(() =>
+      resolveCredentialProfile(
+        {
+          tid: "tenant-a",
+          oid: "user-1",
+          groups: ["group-mcp-users"],
+        },
+        {
+          ...config,
+          identityProfileMap:
+            '{"tenant-a:user-1":"FIRST","tenant-a:user-\\u0031":"SECOND"}',
+        },
+      ),
+    ).toThrowError(new AuthorizationPolicyError("invalid_configuration"));
+  });
+
   it("rejects a profile alias shared by multiple identities", () => {
     expect(() =>
       resolveCredentialProfile(
