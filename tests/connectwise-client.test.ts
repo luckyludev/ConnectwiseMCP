@@ -61,21 +61,20 @@ describe("ConnectWiseClient", () => {
     expect(requests).toBe(0);
   });
 
-  it("surfaces a bounded, scrubbed error body preview without hanging", async () => {
+  it("cancels upstream error bodies without retaining their contents", async () => {
     let attempts = 0;
     let cancelled = false;
+    const sensitiveBody =
+      '{"code":"Forbidden","message":"Access denied","privateKey":"secret value with spaces","token":"short"}' +
+      "x".repeat(2_000_000);
     const client = createConnectWiseClient(credentials, {
       fetcher: async () => {
         attempts += 1;
         return new Response(
           new ReadableStream({
             start(controller) {
-              controller.enqueue(
-                new TextEncoder().encode(
-                  '{"code":"Forbidden","message":"Access denied","authorization":"Basic dXNlcjpwYXNzInZhbHVl"}',
-                ),
-              );
-              // Deliberately never closes: the preview must not hang.
+              controller.enqueue(new TextEncoder().encode(sensitiveBody));
+              // Deliberately never closes: failures must cancel without reading.
             },
             cancel() {
               cancelled = true;
@@ -96,11 +95,18 @@ describe("ConnectWiseClient", () => {
     if (!(error instanceof ConnectWiseRequestError)) {
       throw new Error("Expected client error");
     }
-    expect(error.message).toContain("ConnectWise request failed (401)");
-    expect(error.message).toContain("at GET /service/tickets/123");
-    expect(error.message).toContain("Forbidden");
-    expect(error.message).toContain("Access denied");
-    expect(error.message).not.toContain("dXNlcjpwYXNzInZhbHVl");
+    expect(error.message).toBe(
+      "ConnectWise request failed (401) at GET /service/tickets/123",
+    );
+    expect(error.message).not.toContain("Forbidden");
+    expect(error.message).not.toContain("Access denied");
+    expect(error.message).not.toContain("secret value with spaces");
+    expect(error.message).not.toContain("short");
+    expect(error.diagnostics).toEqual({
+      method: "GET",
+      path: "/service/tickets/123",
+    });
+    expect(JSON.stringify(error.diagnostics)).not.toContain("Forbidden");
     expect(attempts).toBe(1);
     expect(cancelled).toBe(true);
   });
@@ -890,6 +896,61 @@ describe("ConnectWiseClient", () => {
     expect(logs[0]).not.toContain("Router photo");
     expect(logs[0]).not.toContain("router.png");
     expect(logs[0]).not.toContain("api-na.myconnectwise.net");
+  });
+
+  it("cancels image-upload error bodies without retaining their contents", async () => {
+    let cancelled = false;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(
+                  '{"message":"upload denied","privateKey":"secret value"}',
+                ),
+              );
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 403 },
+        ),
+    });
+    const pngSignature = String.fromCharCode(
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    );
+
+    let error: unknown;
+    try {
+      await client.uploadImageDocument("Ticket", 77, {
+        fileName: "router.png",
+        mimeType: "image/png",
+        base64: btoa(pngSignature),
+        privateFlag: true,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(ConnectWiseRequestError);
+    if (!(error instanceof ConnectWiseRequestError)) {
+      throw new Error("Expected client error");
+    }
+    expect(error.message).toBe(
+      "ConnectWise request failed (403) at POST /system/documents",
+    );
+    expect(JSON.stringify(error)).not.toContain("upload denied");
+    expect(JSON.stringify(error)).not.toContain("secret value");
+    expect(cancelled).toBe(true);
   });
 
   it("rejects spoofed, mismatched, and oversized image uploads before fetch", async () => {
