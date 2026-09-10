@@ -25,7 +25,7 @@ npx wrangler deploy --env staging --dry-run --outdir dist-staging
 rm -rf dist-staging
 ```
 
-`npm run check` runs typechecking, tests, formatting, a high-severity npm audit, and an explicit top-level dry-run. The staging dry-run validates the selected environment but does not publish a Worker.
+`npm run check` runs typechecking, tests, formatting, a moderate-or-higher npm audit, and explicit top-level and staging dry-runs. The staging dry-run validates only the local bundle and selected configuration path; it does not authenticate, inspect remote variables, validate their presence or values, or publish a Worker. `--keep-vars` protects remote variables when the same command is later run without `--dry-run`.
 
 Record account/operator and release evidence in an approved secure operations record. Do not put sensitive command output in Git.
 
@@ -41,13 +41,7 @@ rm -rf dist-staging
 
 Confirm the `OAUTH_KV` namespace already bound in `wrangler.jsonc` is the approved **runtime** staging namespace. Do not create another runtime namespace or replace that binding merely because this procedure is being followed. Record only sanitized evidence in the secure operations record; do not paste namespace IDs into chat, tickets, or this repository.
 
-The acceptance checklist also requires a distinct **preview** KV namespace/binding. The current staging environment does not yet define a preview binding, so it does **not** satisfy that acceptance item. Create and bind a preview namespace only with separate operator approval, after first confirming that one does not already exist:
-
-```bash
-npx wrangler kv namespace create connectwise-mcp-v2-staging-oauth-preview
-```
-
-Add the resulting identifier only to a reviewed staging binding, separate from the runtime ID:
+The acceptance checklist also requires a distinct **preview** KV namespace/binding. The reviewed staging environment defines separate runtime and preview identifiers in `wrangler.jsonc`. Before deployment, an authorized operator must confirm that both identifiers belong to the approved staging-only namespaces and are distinct. Do not create or replace either namespace merely because this procedure is being followed.
 
 ```jsonc
 {
@@ -109,7 +103,7 @@ This step needs Entra/operator approval. Configure the staging Entra application
 https://connectwise-mcp-v2-staging.<workers-dev-subdomain>.workers.dev/callback
 ```
 
-Then replace only the approved staging values in `wrangler.jsonc`:
+Then set only the approved staging values in the remote Worker configuration through the approved Cloudflare workflow:
 
 - `ENTRA_TENANT_ID`
 - `ENTRA_CLIENT_ID`
