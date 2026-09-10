@@ -176,6 +176,71 @@ describe("staging smoke output safety", () => {
     },
   );
 
+  it.each([
+    [
+      "2026-02-30",
+      "2026-03-01",
+      "SMOKE_SCHEDULE_START_DATE must be a valid YYYY-MM-DD date",
+    ],
+    [
+      "2026-9-01",
+      "2026-09-02",
+      "SMOKE_SCHEDULE_START_DATE must be a valid YYYY-MM-DD date",
+    ],
+    [
+      "2026-09-03",
+      "2026-09-02",
+      "SMOKE_SCHEDULE_END_DATE must not precede SMOKE_SCHEDULE_START_DATE",
+    ],
+    [
+      "2026-09-01",
+      "2026-09-08",
+      "smoke schedule range must not exceed 7 days inclusive",
+    ],
+  ])(
+    "rejects an unsafe schedule range (%s through %s)",
+    (startDate, endDate, error) => {
+      const run = spawnSync(
+        process.execPath,
+        [
+          new URL("../scripts/staging-live-smoke.mjs", import.meta.url)
+            .pathname,
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
+            SMOKE_SCHEDULE_START_DATE: startDate,
+            SMOKE_SCHEDULE_END_DATE: endDate,
+          },
+        },
+      );
+      expect(run.status).toBe(1);
+      expect(`${run.stdout}${run.stderr}`).toBe(`[smoke] FAIL ${error}\n`);
+    },
+  );
+
+  it("requires both approved schedule-range dates", () => {
+    const run = spawnSync(
+      process.execPath,
+      [new URL("../scripts/staging-live-smoke.mjs", import.meta.url).pathname],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
+          SMOKE_SCHEDULE_START_DATE: "2026-09-01",
+          SMOKE_SCHEDULE_END_DATE: "",
+        },
+      },
+    );
+    expect(run.status).toBe(1);
+    expect(`${run.stdout}${run.stderr}`).toBe(
+      "[smoke] FAIL SMOKE_SCHEDULE_START_DATE and SMOKE_SCHEDULE_END_DATE are required\n",
+    );
+  });
+
   it("keeps successful mocked live-flow output free of response data", async () => {
     const canary = "CANARY_SECRET_MEMBER_AND_CONNECTWISE_DATA";
     const smokePath = new URL(
@@ -192,6 +257,7 @@ describe("staging smoke output safety", () => {
     expect(toolNames.length).toBe(38);
 
     let baseUrl = "";
+    let capturedScheduleArguments;
     const mock = createServer(async (request, response) => {
       response.setHeader("Content-Type", "application/json");
       if (request.url === "/.well-known/oauth-protected-resource") {
@@ -232,6 +298,7 @@ describe("staging smoke output safety", () => {
         ) {
           data = [{ id: 1, name: canary }];
         } else {
+          capturedScheduleArguments = payload.params.arguments;
           data = [{ id: 2, name: canary }];
         }
         response.end(
@@ -256,6 +323,8 @@ describe("staging smoke output safety", () => {
         NODE_ENV: "test",
         SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
         SMOKE_ACCESS_TOKEN: `TOKEN_${canary}`,
+        SMOKE_SCHEDULE_START_DATE: "2026-09-01",
+        SMOKE_SCHEDULE_END_DATE: "2026-09-07",
       },
     });
     let output = "";
@@ -267,6 +336,12 @@ describe("staging smoke output safety", () => {
     await new Promise((resolve) => mock.close(resolve));
 
     expect(exitCode).toBe(0);
+    expect(capturedScheduleArguments).toEqual({
+      route: "schedule.entries.byMember",
+      memberId: 149,
+      startDate: "2026-09-01",
+      endDate: "2026-09-07",
+    });
     expect(output).toContain(
       "PASS: supplied-token read-only staging subset passed (OAuth login and token issuance not tested).",
     );
@@ -398,6 +473,8 @@ await fetch(callback);
         SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
         SMOKE_ACCESS_TOKEN: "",
         SMOKE_LOGIN_TIMEOUT_MS: "5000",
+        SMOKE_SCHEDULE_START_DATE: "2026-09-01",
+        SMOKE_SCHEDULE_END_DATE: "2026-09-07",
       },
     });
     let output = "";
