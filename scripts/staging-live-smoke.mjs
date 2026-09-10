@@ -22,6 +22,8 @@
  *   SMOKE_EXPECT_RESOURCE   (required with a non-default base URL)
  *   SMOKE_EXPECT_MEMBER_ID  (default: 149)
  *   SMOKE_BOARD_ID          (default: 32)
+ *   SMOKE_SCHEDULE_START_DATE (required; YYYY-MM-DD)
+ *   SMOKE_SCHEDULE_END_DATE   (required; YYYY-MM-DD; at most 7 days inclusive)
  *   SMOKE_NO_BROWSER        (fail closed instead of opening a browser)
  *
  * Tests may set SMOKE_ALLOW_INSECURE_LOCALHOST=1 for an HTTP loopback mock.
@@ -54,6 +56,45 @@ function parsePositiveInteger(name, fallback, maximum) {
     fail(`${name} is outside the allowed range`);
   }
   return value;
+}
+
+function parseCalendarDate(name, raw) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!match) fail(`${name} must be a valid YYYY-MM-DD date`);
+
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const date = new Date(timestamp);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    fail(`${name} must be a valid YYYY-MM-DD date`);
+  }
+  return { input: raw, timestamp };
+}
+
+function parseScheduleRange() {
+  const startRaw = process.env.SMOKE_SCHEDULE_START_DATE;
+  const endRaw = process.env.SMOKE_SCHEDULE_END_DATE;
+  if (!startRaw || !endRaw) {
+    fail("SMOKE_SCHEDULE_START_DATE and SMOKE_SCHEDULE_END_DATE are required");
+  }
+
+  const start = parseCalendarDate("SMOKE_SCHEDULE_START_DATE", startRaw);
+  const end = parseCalendarDate("SMOKE_SCHEDULE_END_DATE", endRaw);
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (end.timestamp < start.timestamp) {
+    fail("SMOKE_SCHEDULE_END_DATE must not precede SMOKE_SCHEDULE_START_DATE");
+  }
+  if (end.timestamp - start.timestamp > 6 * dayMs) {
+    fail("smoke schedule range must not exceed 7 days inclusive");
+  }
+  return { startDate: start.input, endDate: end.input };
 }
 
 function parseTarget() {
@@ -126,6 +167,8 @@ const LOGIN_TIMEOUT_MS = parsePositiveInteger(
 if (LOGIN_TIMEOUT_MS < 1_000) {
   fail("SMOKE_LOGIN_TIMEOUT_MS is outside the allowed range");
 }
+const { startDate: SCHEDULE_START_DATE, endDate: SCHEDULE_END_DATE } =
+  parseScheduleRange();
 
 const smokeFetch = (input, init = {}) =>
   globalThis.fetch(input, {
@@ -540,8 +583,8 @@ log("calling call_connectwise schedule.entries.byMember (date range) ...");
 const schedule = await callTool("call_connectwise", {
   route: "schedule.entries.byMember",
   memberId: EXPECT_MEMBER_ID,
-  startDate: "2026-08-31",
-  endDate: "2026-09-06",
+  startDate: SCHEDULE_START_DATE,
+  endDate: SCHEDULE_END_DATE,
 });
 const scheduleList = Array.isArray(schedule.data) ? schedule.data : [];
 if (!schedule.ok || scheduleList.length === 0) {
