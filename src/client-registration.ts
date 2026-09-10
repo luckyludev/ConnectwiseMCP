@@ -83,6 +83,14 @@ export function isApprovedClientRedirectUri(
   );
 }
 
+export function isConfiguredClientRedirectUri(
+  value: string,
+  configuredUris: string,
+): boolean {
+  const allowlist = allowedUris(configuredUris);
+  return allowlist.length > 0 && matchesAllowedRedirect(value, allowlist);
+}
+
 export function validateClientRegistration(
   metadata: Record<string, unknown>,
   configuredUris: string,

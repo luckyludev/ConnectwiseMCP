@@ -11,7 +11,7 @@
 - Strict ID-token validation: `RS256`, issuer, audience, tenant, `exp`, `nbf`, `iat`, `tid`, and `oid`.
 - Fail-closed group/app-role eligibility and exact `<tid>:<oid> → profile alias` mapping.
 - Browser-bound signed state, local consent, and secure cookie attributes.
-- CIMD support and allowlisted dynamic client redirect origins.
+- CIMD support with deployment-allowlisted redirects enforced again at authorization, plus allowlisted dynamic client registration.
 - Stateless MCP transport with a purpose-built catalog of 38 registered tools, of which 37 are model-visible and `upload_connectwise_image` is app-only. Every tool requires `mcp:read`; the 11 write-capable tools additionally require `mcp:write` before profile-secret lookup or ConnectWise client creation.
 - Per-request ConnectWise client creation from exactly one validated `CW_PROFILE_<ALIAS>` secret; no caller-supplied profile or credential headers and no shared fallback.
 - Fixed ConnectWise endpoint construction, strict input/result bounds, allowlisted response projections, GET-only retries, no automatic write retry, and sanitized errors.
@@ -29,7 +29,7 @@ Set non-secret variables in `wrangler.jsonc` or environment-specific Wrangler co
 - `ENTRA_CLIENT_ID`
 - `ALLOWED_GROUP_IDS` — JSON array
 - `ALLOWED_APP_ROLES` — JSON array
-- `ALLOWED_CLIENT_REDIRECT_URIS` — JSON array of exact HTTPS callback URIs; loopback HTTP callback paths must be explicitly allowed, while the port may vary for local clients
+- `ALLOWED_CLIENT_REDIRECT_URIS` — JSON array of exact HTTPS callback URIs; HTTP callbacks are limited to explicitly allowed paths on `127.0.0.1`, `[::1]`, or `localhost`, with only the port permitted to vary for local clients
 
 Provision these as Worker secrets; do not place values in Git, `.dev.vars`, command arguments, or ordinary request headers:
 
