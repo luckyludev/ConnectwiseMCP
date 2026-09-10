@@ -18,10 +18,13 @@
  * Usage:
  *   node scripts/staging-live-smoke.mjs
  * Env:
- *   SMOKE_BASE_URL        (default: staging worker)
- *   SMOKE_EXPECT_MEMBER_ID (default: 149)
- *   SMOKE_BOARD_ID         (default: 32)
- *   SMOKE_NO_BROWSER       (fail closed instead of opening a browser)
+ *   SMOKE_BASE_URL          (default: staging worker; canonical HTTPS origin)
+ *   SMOKE_EXPECT_RESOURCE   (required with a non-default base URL)
+ *   SMOKE_EXPECT_MEMBER_ID  (default: 149)
+ *   SMOKE_BOARD_ID          (default: 32)
+ *   SMOKE_NO_BROWSER        (fail closed instead of opening a browser)
+ *
+ * Tests may set SMOKE_ALLOW_INSECURE_LOCALHOST=1 for an HTTP loopback mock.
  */
 
 import { createServer } from "node:http";
@@ -30,16 +33,100 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 import { readBoundedJson, readBoundedText } from "./smoke-response.mjs";
 
-const BASE_URL = (
-  process.env.SMOKE_BASE_URL ??
-  "https://connectwise-mcp-v2-staging.funcshun.workers.dev"
-).replace(/\/+$/, "");
-const EXPECT_MEMBER_ID = Number(process.env.SMOKE_EXPECT_MEMBER_ID ?? "149");
-const BOARD_ID = Number(process.env.SMOKE_BOARD_ID ?? "32");
-const LOGIN_TIMEOUT_MS = Number(process.env.SMOKE_LOGIN_TIMEOUT_MS ?? 420_000);
+const DEFAULT_BASE_URL =
+  "https://connectwise-mcp-v2-staging.funcshun.workers.dev";
+const DEFAULT_RESOURCE = `${DEFAULT_BASE_URL}/mcp`;
 const HTTP_TIMEOUT_MS = 30_000;
-
 const log = (...parts) => console.log("[smoke]", ...parts);
+
+function fail(message) {
+  log("FAIL", message);
+  process.exit(1);
+}
+
+function parsePositiveInteger(name, fallback, maximum) {
+  const raw = process.env[name] ?? String(fallback);
+  if (!/^[1-9]\d*$/.test(raw)) {
+    fail(`${name} must be a positive integer`);
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value > maximum) {
+    fail(`${name} is outside the allowed range`);
+  }
+  return value;
+}
+
+function parseTarget() {
+  const configured = process.env.SMOKE_BASE_URL ?? DEFAULT_BASE_URL;
+  let base;
+  try {
+    base = new URL(configured);
+  } catch {
+    fail("SMOKE_BASE_URL must be a canonical HTTPS origin");
+  }
+
+  const insecureLoopbackAllowed =
+    process.env.NODE_ENV === "test" &&
+    process.env.SMOKE_ALLOW_INSECURE_LOCALHOST === "1" &&
+    base.protocol === "http:" &&
+    (base.hostname === "127.0.0.1" || base.hostname === "[::1]");
+  if (
+    (base.protocol !== "https:" && !insecureLoopbackAllowed) ||
+    base.username ||
+    base.password ||
+    base.pathname !== "/" ||
+    base.search ||
+    base.hash ||
+    configured !== base.origin
+  ) {
+    fail("SMOKE_BASE_URL must be a canonical HTTPS origin");
+  }
+
+  const expected = process.env.SMOKE_EXPECT_RESOURCE;
+  if (base.origin !== DEFAULT_BASE_URL && !expected) {
+    fail("SMOKE_EXPECT_RESOURCE is required with a non-default base URL");
+  }
+  let resource;
+  try {
+    resource = new URL(expected ?? DEFAULT_RESOURCE);
+  } catch {
+    fail("SMOKE_EXPECT_RESOURCE must be the target origin plus /mcp");
+  }
+  if (
+    resource.username ||
+    resource.password ||
+    resource.search ||
+    resource.hash ||
+    resource.origin !== base.origin ||
+    resource.pathname !== "/mcp" ||
+    resource.toString() !== `${base.origin}/mcp`
+  ) {
+    fail("SMOKE_EXPECT_RESOURCE must be the target origin plus /mcp");
+  }
+  return { baseUrl: base.origin, expectedResource: resource.toString() };
+}
+
+if (process.env.SMOKE_NO_BROWSER && !process.env.SMOKE_ACCESS_TOKEN) {
+  fail("browser launch disabled; provide an approved access token instead");
+}
+
+const { baseUrl: BASE_URL, expectedResource: EXPECTED_RESOURCE } =
+  parseTarget();
+const EXPECT_MEMBER_ID = parsePositiveInteger(
+  "SMOKE_EXPECT_MEMBER_ID",
+  149,
+  2_147_483_647,
+);
+const BOARD_ID = parsePositiveInteger("SMOKE_BOARD_ID", 32, 2_147_483_647);
+const LOGIN_TIMEOUT_MS = parsePositiveInteger(
+  "SMOKE_LOGIN_TIMEOUT_MS",
+  420_000,
+  900_000,
+);
+if (LOGIN_TIMEOUT_MS < 1_000) {
+  fail("SMOKE_LOGIN_TIMEOUT_MS is outside the allowed range");
+}
+
 const smokeFetch = (input, init = {}) =>
   globalThis.fetch(input, {
     ...init,
@@ -54,21 +141,12 @@ function base64url(bytes) {
     .replace(/=+$/, "");
 }
 
-function fail(message) {
-  log("FAIL", message);
-  process.exit(1);
-}
-
 function failUnexpectedly() {
   log("FAIL unexpected smoke failure");
   process.exit(1);
 }
 process.on("uncaughtException", failUnexpectedly);
 process.on("unhandledRejection", failUnexpectedly);
-
-if (process.env.SMOKE_NO_BROWSER && !process.env.SMOKE_ACCESS_TOKEN) {
-  fail("browser launch disabled; provide an approved access token instead");
-}
 
 // 1. Loopback server to receive the OAuth callback.
 const loopback = await new Promise((resolve, reject) => {
@@ -114,7 +192,7 @@ try {
 } catch {
   fail("protected-resource discovery returned invalid metadata");
 }
-const expectedResource = new URL("/mcp", `${BASE_URL}/`);
+const expectedResource = new URL(EXPECTED_RESOURCE);
 if (
   canonicalResource.username ||
   canonicalResource.password ||
