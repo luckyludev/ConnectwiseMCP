@@ -864,8 +864,6 @@ describe("authenticated MCP transport", () => {
       new ConnectWiseRequestError(400, {
         method: "GET",
         path: "/company/configurations",
-        bodyPreview:
-          '{"privateKey":"secret value with spaces","token":"short"}',
       }),
       new Error("CW_PROFILE_LUIS contains private-key and secret value"),
       new Error("secret value explicit timezone offset privateKey"),

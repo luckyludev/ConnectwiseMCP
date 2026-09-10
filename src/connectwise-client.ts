@@ -210,7 +210,6 @@ export type ConnectWiseClient = {
 export type ConnectWiseRequestDiagnostics = {
   method: string;
   path: string;
-  bodyPreview?: string;
 };
 
 export type ConnectWiseUserErrorCode =
@@ -235,74 +234,9 @@ export class ConnectWiseRequestError extends Error {
     readonly diagnostics?: ConnectWiseRequestDiagnostics,
   ) {
     super(
-      `ConnectWise request failed (${status})${diagnostics ? ` at ${diagnostics.method} ${diagnostics.path}` : ""}${diagnostics?.bodyPreview ? `: ${diagnostics.bodyPreview}` : ""}`,
+      `ConnectWise request failed (${status})${diagnostics ? ` at ${diagnostics.method} ${diagnostics.path}` : ""}`,
     );
     this.name = "ConnectWiseRequestError";
-  }
-}
-
-const SECRET_KEY_PATTERN = [
-  "authorization",
-  "client_secret",
-  "clientSecret",
-  "private_key",
-  "privateKey",
-  "api_key",
-  "apiKey",
-  "access_token",
-  "accessToken",
-  "refresh_token",
-  "credential",
-  "password",
-  "token",
-].join("|");
-
-function scrubSecrets(value: string): string {
-  return value
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/g, "$1 [REDACTED]")
-    .replace(
-      new RegExp(
-        `["']?(?:${SECRET_KEY_PATTERN})["']?\\s*[:=]\\s*["']?[A-Za-z0-9._~+/=-]{8,}`,
-        "g",
-      ),
-      "[REDACTED]",
-    );
-}
-
-async function readErrorBodyPreview(
-  response: Response,
-  timeoutMs: number = 1_000,
-): Promise<string | undefined> {
-  try {
-    if (!response.body) return undefined;
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let text = "";
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const remainingMs = Math.max(1, deadline - Date.now());
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const result = await Promise.race<ReadableStreamReadResult<Uint8Array>>([
-        reader.read(),
-        new Promise((resolve) => {
-          timer = setTimeout(
-            () => resolve({ done: true, value: undefined }),
-            remainingMs,
-          );
-        }),
-      ]);
-      if (timer) clearTimeout(timer);
-      if (result.done) break;
-      text += decoder.decode(result.value, { stream: true });
-      if (text.length >= 600) break;
-    }
-    await cancelReader(reader);
-    const cleaned = scrubSecrets(
-      text.replace(/[\u0000-\u001F\u007F]/g, " ").trim(),
-    );
-    return cleaned.length > 0 ? cleaned.slice(0, 500) : undefined;
-  } catch {
-    return undefined;
   }
 }
 
@@ -866,12 +800,11 @@ export function createConnectWiseClient(
         continue;
       }
       if (!response.ok) {
-        const bodyPreview = await readErrorBodyPreview(response);
+        await cancelResponseBody(response);
         emitRequestLog(method, response.status, startedAtMs, "upstream_error");
         throw new ConnectWiseRequestError(response.status, {
           method,
           path,
-          ...(bodyPreview ? { bodyPreview } : {}),
         });
       }
       emitRequestLog(method, response.status, startedAtMs, "success");
@@ -1238,12 +1171,11 @@ export function createConnectWiseClient(
         );
       }
       if (!response.ok) {
-        const bodyPreview = await readErrorBodyPreview(response);
+        await cancelResponseBody(response);
         emitRequestLog("POST", response.status, startedAtMs, "upstream_error");
         throw new ConnectWiseRequestError(response.status, {
           method: "POST",
           path: "/system/documents",
-          ...(bodyPreview ? { bodyPreview } : {}),
         });
       }
       emitRequestLog("POST", response.status, startedAtMs, "success");
