@@ -39,7 +39,12 @@ export class AuthorizationPolicyError extends Error {
   }
 }
 
-function parseJsonObject(value: string): Record<string, unknown> {
+const PROFILE_ALIAS_PATTERN = /^[A-Z][A-Z0-9_]{0,31}$/;
+
+function parseIdentityProfileMap(
+  value: string,
+  configuredTenantId: string,
+): Record<string, string> {
   try {
     const parsed: unknown = JSON.parse(value);
     if (
@@ -49,7 +54,24 @@ function parseJsonObject(value: string): Record<string, unknown> {
     ) {
       throw new Error("not an object");
     }
-    return parsed as Record<string, unknown>;
+
+    const entries = Object.entries(parsed as Record<string, unknown>);
+    const aliases = new Set<string>();
+    const tenantPrefix = `${configuredTenantId}:`;
+    for (const [identity, alias] of entries) {
+      if (
+        !identity.startsWith(tenantPrefix) ||
+        identity.length === tenantPrefix.length ||
+        typeof alias !== "string" ||
+        !PROFILE_ALIAS_PATTERN.test(alias) ||
+        aliases.has(alias)
+      ) {
+        throw new Error("invalid identity profile map");
+      }
+      aliases.add(alias);
+    }
+
+    return Object.fromEntries(entries) as Record<string, string>;
   } catch {
     throw new AuthorizationPolicyError("invalid_configuration");
   }
@@ -116,23 +138,14 @@ export function resolveCredentialProfile(
     throw new AuthorizationPolicyError("not_authorized");
   }
 
-  const profileMap = parseJsonObject(config.identityProfileMap);
-  const mapped = profileMap[`${tenantId}:${objectId}`];
-  let profileAlias: string | undefined;
-  if (typeof mapped === "string") {
-    profileAlias = mapped;
-  } else if (Array.isArray(mapped)) {
-    if (mapped.length !== 1 || typeof mapped[0] !== "string") {
-      throw new AuthorizationPolicyError("ambiguous_identity");
-    }
-    profileAlias = mapped[0];
-  }
+  const profileMap = parseIdentityProfileMap(
+    config.identityProfileMap,
+    config.tenantId,
+  );
+  const profileAlias = profileMap[`${tenantId}:${objectId}`];
 
   if (!profileAlias) {
     throw new AuthorizationPolicyError("unmapped_identity");
-  }
-  if (!/^[A-Z][A-Z0-9_]{0,31}$/.test(profileAlias)) {
-    throw new AuthorizationPolicyError("invalid_configuration");
   }
 
   return { tenantId, objectId, profileAlias };
