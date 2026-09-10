@@ -49,7 +49,7 @@ npx wrangler secret put CW_PROFILE_LUIS
 }
 ```
 
-Each alias in `IDENTITY_PROFILE_MAP` must match `^[A-Z][A-Z0-9_]{0,31}$` and have exactly one corresponding `CW_PROFILE_<ALIAS>` Worker secret. Each profile secret is strict JSON with these fields:
+Each map value must be a single string; arrays and other value types are rejected. Every key must use the configured Entra tenant ID and a non-empty object ID, and each alias may appear only once, enforcing a one-to-one Entra identity-to-profile mapping. Each alias must match `^[A-Z][A-Z0-9_]{0,31}$` and have exactly one corresponding `CW_PROFILE_<ALIAS>` Worker secret. Each profile secret is strict JSON with these fields:
 
 ```json
 {

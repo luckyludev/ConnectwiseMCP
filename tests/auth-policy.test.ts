@@ -90,7 +90,7 @@ describe("resolveCredentialProfile", () => {
     ).toThrowError(new AuthorizationPolicyError("group_overage"));
   });
 
-  it("rejects ambiguous identity mappings", () => {
+  it("rejects array-valued identity mappings", () => {
     expect(() =>
       resolveCredentialProfile(
         {
@@ -101,10 +101,72 @@ describe("resolveCredentialProfile", () => {
         {
           ...config,
           identityProfileMap: JSON.stringify({
-            "tenant-a:user-1": ["LUIS", "ADMIN"],
+            "tenant-a:user-1": ["LUIS"],
           }),
         },
       ),
-    ).toThrowError(new AuthorizationPolicyError("ambiguous_identity"));
+    ).toThrowError(new AuthorizationPolicyError("invalid_configuration"));
+  });
+
+  it("rejects a profile alias shared by multiple identities", () => {
+    expect(() =>
+      resolveCredentialProfile(
+        {
+          tid: "tenant-a",
+          oid: "user-1",
+          groups: ["group-mcp-users"],
+        },
+        {
+          ...config,
+          identityProfileMap: JSON.stringify({
+            "tenant-a:user-1": "LUIS",
+            "tenant-a:user-2": "LUIS",
+          }),
+        },
+      ),
+    ).toThrowError(new AuthorizationPolicyError("invalid_configuration"));
+  });
+
+  it("fails closed when an unrelated mapping is invalid", () => {
+    expect(() =>
+      resolveCredentialProfile(
+        {
+          tid: "tenant-a",
+          oid: "user-1",
+          groups: ["group-mcp-users"],
+        },
+        {
+          ...config,
+          identityProfileMap: JSON.stringify({
+            "tenant-a:user-1": "LUIS",
+            "tenant-b:user-2": "OTHER",
+          }),
+        },
+      ),
+    ).toThrowError(new AuthorizationPolicyError("invalid_configuration"));
+  });
+
+  it("resolves every identity in a unique per-user map", () => {
+    const identityProfileMap = JSON.stringify({
+      "tenant-a:user-1": "USER_1",
+      "tenant-a:user-2": "USER_2",
+      "tenant-a:user-3": "USER_3",
+      "tenant-a:user-4": "USER_4",
+      "tenant-a:user-5": "USER_5",
+      "tenant-a:user-6": "USER_6",
+    });
+
+    for (let user = 1; user <= 6; user += 1) {
+      expect(
+        resolveCredentialProfile(
+          {
+            tid: "tenant-a",
+            oid: `user-${user}`,
+            groups: ["group-mcp-users"],
+          },
+          { ...config, identityProfileMap },
+        ).profileAlias,
+      ).toBe(`USER_${user}`);
+    }
   });
 });
