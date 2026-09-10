@@ -10,7 +10,10 @@ import {
   resolveCredentialProfile,
   type EntraIdentityClaims,
 } from "./auth-policy";
-import { isApprovedClientRedirectUri } from "./client-registration";
+import {
+  isApprovedClientRedirectUri,
+  isConfiguredClientRedirectUri,
+} from "./client-registration";
 import { renderConsentPage } from "./consent";
 import { createEntraJwks, verifyEntraAccessToken } from "./entra-jwt";
 import {
@@ -153,7 +156,14 @@ async function beginAuthorization(
   }
   if (
     typeof oauthRequest.redirectUri !== "string" ||
-    !isApprovedClientRedirectUri(oauthRequest.redirectUri, client.redirectUris)
+    !isApprovedClientRedirectUri(
+      oauthRequest.redirectUri,
+      client.redirectUris,
+    ) ||
+    !isConfiguredClientRedirectUri(
+      oauthRequest.redirectUri,
+      env.ALLOWED_CLIENT_REDIRECT_URIS,
+    )
   ) {
     return new Response("Invalid client redirect URI", {
       status: 400,
@@ -337,6 +347,23 @@ async function completeEntraCallback(
       headers: { "X-Auth-Stage": "callback_state" },
     });
   }
+  const redirectUri = state.oauthRequest.redirectUri;
+  if (
+    typeof redirectUri !== "string" ||
+    !isConfiguredClientRedirectUri(
+      redirectUri,
+      env.ALLOWED_CLIENT_REDIRECT_URIS,
+    )
+  ) {
+    return new Response("Invalid client redirect URI", {
+      status: 400,
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "callback_redirect",
+      },
+    });
+  }
+
   const cookieNonce = readCookie(request, "__Host-CW_ENTRA_STATE");
   if (
     !cookieNonce ||

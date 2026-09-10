@@ -123,10 +123,53 @@ describe("Entra auth handler", () => {
     expect(await response.text()).toBe("Invalid client redirect URI");
   });
 
+  it("rejects a redirect supplied by client metadata when it is not deployment-allowlisted", async () => {
+    const env = {
+      OAUTH_STATE_SECRET: "0123456789abcdef0123456789abcdef",
+      MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+        "https://approved.example.com/callback",
+      ]),
+      OAUTH_PROVIDER: {
+        async parseAuthRequest() {
+          return {
+            responseType: "code",
+            clientId: "https://attacker.example/client-metadata.json",
+            redirectUri: "https://attacker.example/callback",
+            scope: ["mcp:read"],
+            state: "client-state",
+            codeChallenge: "challenge",
+            codeChallengeMethod: "S256",
+            resource: "https://mcp.example.com/mcp",
+          };
+        },
+        async lookupClient() {
+          return {
+            clientId: "https://attacker.example/client-metadata.json",
+            clientName: "Untrusted metadata client",
+            redirectUris: ["https://attacker.example/callback"],
+          };
+        },
+      },
+    } as unknown as WorkerEnv;
+
+    const response = await createEntraAuthHandler().fetch!(
+      new Request("https://mcp.example.com/authorize") as never,
+      env,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("Invalid client redirect URI");
+  });
+
   it("allows a canonical loopback authorization redirect with only port variance", async () => {
     const env = {
       OAUTH_STATE_SECRET: "0123456789abcdef0123456789abcdef",
       MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+        "http://127.0.0.1/callback",
+      ]),
       OAUTH_PROVIDER: {
         async parseAuthRequest() {
           return {
@@ -171,6 +214,9 @@ describe("Entra auth handler", () => {
       ENTRA_CLIENT_ID: "entra-client",
       ENTRA_CLIENT_SECRET: "secret",
       MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+        "https://client.example.com/callback",
+      ]),
       IDENTITY_PROFILE_MAP: "{}",
       ALLOWED_GROUP_IDS: "[]",
       ALLOWED_APP_ROLES: "[]",
@@ -233,6 +279,9 @@ describe("Entra auth handler", () => {
       ENTRA_CLIENT_ID: "entra-client",
       ENTRA_CLIENT_SECRET: "secret",
       MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+        "https://client.example.com/callback",
+      ]),
       IDENTITY_PROFILE_MAP: "{}",
       ALLOWED_GROUP_IDS: "[]",
       ALLOWED_APP_ROLES: "[]",
@@ -323,6 +372,9 @@ describe("Entra auth handler", () => {
       ENTRA_CLIENT_ID: "entra-client",
       ENTRA_CLIENT_SECRET: "secret",
       MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+        "https://client.example.com/callback",
+      ]),
       IDENTITY_PROFILE_MAP: JSON.stringify({ "tenant-a:user-1": "LUIS" }),
       ALLOWED_GROUP_IDS: JSON.stringify(["group-mcp-users"]),
       ALLOWED_APP_ROLES: "[]",
@@ -392,6 +444,26 @@ describe("Entra auth handler", () => {
       .setExpirationTime(now + 300)
       .sign(keys.privateKey);
 
+    env.ALLOWED_CLIENT_REDIRECT_URIS = JSON.stringify([
+      "https://replacement.example.com/callback",
+    ]);
+    const rejectedCallback = await handler.fetch!(
+      new Request(
+        `https://mcp.example.com/callback?code=entra-code&state=${encodeURIComponent(signedState)}`,
+        { headers: { Cookie: `__Host-CW_ENTRA_STATE=${browserNonce}` } },
+      ) as never,
+      env,
+      {} as ExecutionContext,
+    );
+    expect(rejectedCallback.status).toBe(400);
+    expect(rejectedCallback.headers.get("X-Auth-Stage")).toBe(
+      "callback_redirect",
+    );
+    expect(tokenRequestBody).toBe("");
+
+    env.ALLOWED_CLIENT_REDIRECT_URIS = JSON.stringify([
+      "https://client.example.com/callback",
+    ]);
     const callback = await handler.fetch!(
       new Request(
         `https://mcp.example.com/callback?code=entra-code&state=${encodeURIComponent(signedState)}`,
