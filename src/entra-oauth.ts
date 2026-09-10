@@ -19,6 +19,9 @@ export type EntraTokenSet = {
 
 type Fetcher = typeof fetch;
 
+const MAX_TOKEN_RESPONSE_BYTES = 65_536;
+const TOKEN_REQUEST_TIMEOUT_MS = 15_000;
+
 export class EntraOAuthError extends Error {
   constructor(
     readonly status: number,
@@ -33,21 +36,83 @@ function tokenEndpoint(config: EntraOAuthConfig): string {
   return `https://login.microsoftonline.com/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`;
 }
 
+async function cancelBody(
+  body: ReadableStream<Uint8Array> | null,
+): Promise<void> {
+  try {
+    await body?.cancel();
+  } catch {
+    // The stream may already be errored; rejection remains fail-closed.
+  }
+}
+
+async function readBoundedJson(response: Response): Promise<unknown> {
+  const declaredLength = response.headers.get("Content-Length");
+  if (declaredLength !== null) {
+    const length = Number(declaredLength);
+    if (
+      !Number.isSafeInteger(length) ||
+      length < 0 ||
+      length > MAX_TOKEN_RESPONSE_BYTES
+    ) {
+      await cancelBody(response.body);
+      throw new Error("invalid_entra_token_response");
+    }
+  }
+
+  if (!response.body) throw new Error("invalid_entra_token_response");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (total + value.byteLength > MAX_TOKEN_RESPONSE_BYTES) {
+        throw new Error("invalid_entra_token_response");
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } catch (error) {
+    try {
+      await reader.cancel();
+    } catch {
+      // The stream may already be errored; retain the original failure.
+    }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw new Error("invalid_entra_token_response");
+  }
+}
+
 async function parseTokenResponse(response: Response): Promise<EntraTokenSet> {
   if (!response.ok) {
     let code: string | undefined;
     try {
-      const body: unknown = await response.json();
+      const body = await readBoundedJson(response);
       if (typeof body === "object" && body !== null) {
         const error = (body as Record<string, unknown>).error;
         if (typeof error === "string") code = error;
       }
     } catch {
-      // Preserve the HTTP failure even when Entra returns a non-JSON body.
+      // Preserve the HTTP failure when Entra returns invalid or oversized JSON.
     }
     throw new EntraOAuthError(response.status, code);
   }
-  const data: unknown = await response.json();
+  const data = await readBoundedJson(response);
   if (typeof data !== "object" || data === null) {
     throw new Error("invalid_entra_token_response");
   }
@@ -86,8 +151,10 @@ export async function exchangeEntraAuthorizationCode(
   });
   const response = await fetcher(tokenEndpoint(config), {
     method: "POST",
+    redirect: "manual",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
+    signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
   });
   return parseTokenResponse(response);
 }
@@ -109,8 +176,10 @@ export async function refreshEntraTokens(
   });
   const response = await fetcher(tokenEndpoint(config), {
     method: "POST",
+    redirect: "manual",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
+    signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
   });
   return parseTokenResponse(response);
 }
