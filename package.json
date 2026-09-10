@@ -26,14 +26,17 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260830.1",
+    "@cloudflare/workers-types": "5.20260910.1",
     "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.30.0",
     "prettier": "3.9.6",
     "typescript": "6.0.3",
     "vite": "8.2.2",
     "vite-plugin-singlefile": "2.3.3",
-    "vitest": "4.1.10",
-    "wrangler": "4.127.1"
+    "vitest": "4.1.11",
+    "wrangler": "4.130.0"
+  },
+  "overrides": {
+    "sharp": "0.35.4"
   }
 }
