@@ -63,8 +63,51 @@ describe("staging smoke output safety", () => {
     expect(output).not.toContain(canary);
   });
 
-  it("sanitizes unexpected network failures on stderr", () => {
-    const canary = "CANARY_URL_CREDENTIAL_AND_PATH";
+  it("rejects unsafe targets before transmitting a supplied token", async () => {
+    const canary = "CANARY_BEARER_MUST_NOT_BE_SENT";
+    let requests = 0;
+    const mock = createServer((_request, response) => {
+      requests += 1;
+      response.end("{}");
+    });
+    await new Promise((resolve) => mock.listen(0, "127.0.0.1", resolve));
+    const baseUrl = `http://127.0.0.1:${mock.address().port}`;
+
+    const child = spawn(
+      process.execPath,
+      [new URL("../scripts/staging-live-smoke.mjs", import.meta.url).pathname],
+      {
+        env: {
+          ...process.env,
+          SMOKE_BASE_URL: baseUrl,
+          SMOKE_EXPECT_RESOURCE: `${baseUrl}/mcp`,
+          SMOKE_ALLOW_INSECURE_LOCALHOST: "",
+          SMOKE_ACCESS_TOKEN: canary,
+        },
+      },
+    );
+    let output = "";
+    child.stdout.on("data", (chunk) => (output += chunk));
+    child.stderr.on("data", (chunk) => (output += chunk));
+    const exitCode = await new Promise((resolve) =>
+      child.once("close", resolve),
+    );
+    await new Promise((resolve) => mock.close(resolve));
+
+    expect(exitCode).toBe(1);
+    expect(requests).toBe(0);
+    expect(output).toBe(
+      "[smoke] FAIL SMOKE_BASE_URL must be a canonical HTTPS origin\n",
+    );
+    expect(output).not.toContain(canary);
+    expect(output).not.toContain(baseUrl);
+  });
+
+  it.each([
+    ["https://example.invalid/path", "https://example.invalid/mcp"],
+    ["https://user@example.invalid", "https://example.invalid/mcp"],
+    ["https://example.invalid?query=1", "https://example.invalid/mcp"],
+  ])("rejects a non-origin base URL (%s)", (baseUrl, expectedResource) => {
     const run = spawnSync(
       process.execPath,
       [new URL("../scripts/staging-live-smoke.mjs", import.meta.url).pathname],
@@ -72,18 +115,66 @@ describe("staging smoke output safety", () => {
         encoding: "utf8",
         env: {
           ...process.env,
-          SMOKE_BASE_URL: `http://${canary}@127.0.0.1:1/${canary}`,
-          SMOKE_ACCESS_TOKEN: `TOKEN_${canary}`,
+          SMOKE_BASE_URL: baseUrl,
+          SMOKE_EXPECT_RESOURCE: expectedResource,
+          SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
         },
       },
     );
-    const output = `${run.stdout}${run.stderr}`;
     expect(run.status).toBe(1);
-    expect(output).toContain("[smoke] FAIL unexpected smoke failure");
-    expect(output).not.toContain(canary);
-    expect(output).not.toContain("TypeError");
-    expect(output).not.toContain("cause:");
+    expect(`${run.stdout}${run.stderr}`).toBe(
+      "[smoke] FAIL SMOKE_BASE_URL must be a canonical HTTPS origin\n",
+    );
   });
+
+  it("requires an independently configured resource for custom targets", () => {
+    const run = spawnSync(
+      process.execPath,
+      [new URL("../scripts/staging-live-smoke.mjs", import.meta.url).pathname],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          SMOKE_BASE_URL: "https://staging.example.invalid",
+          SMOKE_EXPECT_RESOURCE: "",
+          SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
+        },
+      },
+    );
+    expect(run.status).toBe(1);
+    expect(`${run.stdout}${run.stderr}`).toBe(
+      "[smoke] FAIL SMOKE_EXPECT_RESOURCE is required with a non-default base URL\n",
+    );
+  });
+
+  it.each([
+    ["SMOKE_EXPECT_MEMBER_ID", "0", "must be a positive integer"],
+    ["SMOKE_BOARD_ID", "1.5", "must be a positive integer"],
+    ["SMOKE_LOGIN_TIMEOUT_MS", "999", "is outside the allowed range"],
+  ])(
+    "rejects invalid bounded numeric configuration for %s",
+    (name, value, error) => {
+      const run = spawnSync(
+        process.execPath,
+        [
+          new URL("../scripts/staging-live-smoke.mjs", import.meta.url)
+            .pathname,
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
+            [name]: value,
+          },
+        },
+      );
+      expect(run.status).toBe(1);
+      expect(`${run.stdout}${run.stderr}`).toBe(
+        `[smoke] FAIL ${name} ${error}\n`,
+      );
+    },
+  );
 
   it("keeps successful mocked live-flow output free of response data", async () => {
     const canary = "CANARY_SECRET_MEMBER_AND_CONNECTWISE_DATA";
@@ -161,6 +252,9 @@ describe("staging smoke output safety", () => {
       env: {
         ...process.env,
         SMOKE_BASE_URL: baseUrl,
+        SMOKE_EXPECT_RESOURCE: `${baseUrl}/mcp`,
+        NODE_ENV: "test",
+        SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
         SMOKE_ACCESS_TOKEN: `TOKEN_${canary}`,
       },
     });
@@ -299,6 +393,9 @@ await fetch(callback);
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH}`,
         SMOKE_BASE_URL: baseUrl,
+        SMOKE_EXPECT_RESOURCE: `${baseUrl}/mcp`,
+        NODE_ENV: "test",
+        SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
         SMOKE_ACCESS_TOKEN: "",
         SMOKE_LOGIN_TIMEOUT_MS: "5000",
       },
