@@ -173,7 +173,16 @@ describe("staging smoke output safety", () => {
     await new Promise((resolve) => mock.close(resolve));
 
     expect(exitCode).toBe(0);
-    expect(output).toContain("PASS: staging worker is fully operational");
+    expect(output).toContain(
+      "PASS: supplied-token read-only staging subset passed (OAuth login and token issuance not tested).",
+    );
+    expect(output).toContain(
+      "using supplied access token; skipping DCR, consent, and Entra login",
+    );
+    expect(output).toContain(
+      "Manual staging acceptance checklist remains required.",
+    );
+    expect(output).not.toContain("fully operational");
     expect(output).not.toContain(canary);
     expect(output).not.toContain(baseUrl);
     expect(output).not.toContain("safe-session");
@@ -305,7 +314,15 @@ await fetch(callback);
 
     expect(exitCode).toBe(0);
     expect(capturedState).not.toBe("");
-    expect(output).toContain("PASS: staging worker is fully operational");
+    expect(output).toContain(
+      "PASS: interactive OAuth and read-only staging subset passed.",
+    );
+    expect(output).toContain(
+      "Manual staging acceptance checklist remains required.",
+    );
+    expect(output).not.toContain("OAuth login and token issuance not tested");
+    expect(output).not.toContain("fully operational");
+    expect(output).not.toContain("token ok (length");
     for (const value of [...Object.values(canaries), capturedState]) {
       expect(output).not.toContain(value);
     }

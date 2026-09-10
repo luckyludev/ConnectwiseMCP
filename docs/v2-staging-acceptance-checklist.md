@@ -38,7 +38,7 @@
 
 ## 4. Entra/OAuth protocol acceptance
 
-Perform these tests using approved staging identities and test clients; retain only sanitized evidence.
+Perform these tests using approved staging identities and test clients; retain only sanitized evidence. `npm run test:live-staging` is a narrow read-path probe: interactive mode covers one OAuth login, while `SMOKE_ACCESS_TOKEN` mode skips the OAuth login and token-acquisition flow. A pass in either mode does not complete this section or any other checklist gate.
 
 - [ ] Start login from the literal canonical MCP resource URL. Confirm Entra authorization uses S256 PKCE and OIDC nonce.
 - [ ] Complete login for each of the six mapped identities. Confirm only each identity's own server-selected profile alias is returned by `whoami`.

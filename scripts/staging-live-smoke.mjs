@@ -2,14 +2,15 @@
 /**
  * Live staging smoke test.
  *
- * Runs the FULL user flow against a deployed ConnectWise MCP worker:
- * DCR -> consent -> Microsoft login (browser) -> callback -> token -> MCP
- * `initialize` -> `get_my_member` -> `call_connectwise service.boards.statuses`.
+ * Runs either the interactive user flow against a deployed ConnectWise MCP
+ * Worker (DCR -> consent -> Microsoft login -> callback -> token), or a
+ * supplied-token mode that skips the OAuth login and token-acquisition flow.
+ * Both modes then run MCP `initialize`, `get_my_member`,
+ * `call_connectwise service.boards.statuses`, and a bounded schedule read.
  *
- * Success criteria (the "data is flowing" gate):
- *   1. get_my_member returns a member with id 149 (Luis) by default;
- *      with SMOKE_EXPECT_MEMBER_ID set, that id is required.
- *   2. service.boards.statuses for board 32 returns at least one status.
+ * This is a narrow read-path probe, not full staging acceptance. Success does
+ * not cover multi-user isolation, revocation, permission denial, audit review,
+ * or any other manual acceptance-checklist gate.
  *
  * Security: output is allowlisted. It never prints response bodies, access
  * tokens, authorization URLs/codes, client secrets, state, or business data.
@@ -134,9 +135,7 @@ if (process.env.SMOKE_ACCESS_TOKEN) {
     access_token: process.env.SMOKE_ACCESS_TOKEN,
     scope: "mcp:read",
   };
-  log(
-    `using SMOKE_ACCESS_TOKEN (length ${token.access_token.length}) - skipping DCR/consent`,
-  );
+  log("using supplied access token; skipping DCR, consent, and Entra login");
 } else {
   // 3a. Dynamic client registration (loopback).
   const registerResponse = await smokeFetch(`${BASE_URL}/oauth/register`, {
@@ -241,7 +240,7 @@ if (process.env.SMOKE_ACCESS_TOKEN) {
   if (!token.access_token) {
     fail("token response missing access_token");
   }
-  log(`token ok (length ${token.access_token.length})`);
+  log("token exchange ok");
 }
 if (!token?.access_token) {
   fail(
@@ -472,8 +471,15 @@ if (!schedule.ok || scheduleList.length === 0) {
 }
 log("schedule.entries.byMember ok");
 
-// 13. Done. The smoke remains read-only; write acceptance requires a separately
-// authorized staging procedure and an access token carrying mcp:write.
+// 13. Done. This smoke remains read-only and does not satisfy the remaining
+// manual staging acceptance gates.
 server.close();
-log("PASS: staging worker is fully operational (auth + ConnectWise data).");
+if (process.env.SMOKE_ACCESS_TOKEN) {
+  log(
+    "PASS: supplied-token read-only staging subset passed (OAuth login and token issuance not tested).",
+  );
+} else {
+  log("PASS: interactive OAuth and read-only staging subset passed.");
+}
+log("Manual staging acceptance checklist remains required.");
 process.exit(0);
