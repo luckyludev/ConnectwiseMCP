@@ -1726,7 +1726,7 @@ describe("authenticated MCP transport", () => {
     expect(puts).toBe(1);
   });
 
-  it("update_service_ticket removes board-move ghosts and reports it", async () => {
+  it("update_service_ticket never heuristically deletes schedule entries", async () => {
     const bodies: Array<{ method: string; url: string }> = [];
     const fetcher: typeof fetch = async (input, init) => {
       const method = (init as { method?: string } | undefined)?.method ?? "GET";
@@ -1755,23 +1755,6 @@ describe("authenticated MCP transport", () => {
       }
       if (method === "PUT") {
         return Response.json({ id: 1927963, board: { id: 64 } });
-      }
-      if (
-        method === "GET" &&
-        String(input).includes("/schedule/entries") &&
-        String(input).includes("objectId")
-      ) {
-        return Response.json([
-          {
-            id: 247139,
-            dateStart: "2026-09-03T00:00:00Z",
-            dateEnd: "2026-09-03T00:00:00Z",
-            hours: 0,
-          },
-        ]);
-      }
-      if (method === "DELETE") {
-        return new Response(null, { status: 204 });
       }
       return Response.json([]);
     };
@@ -1811,9 +1794,14 @@ describe("authenticated MCP transport", () => {
     );
     const text = await response.text();
     expect(bodies.filter((b) => b.method === "PUT").length).toBe(1);
-    expect(bodies.filter((b) => b.method === "DELETE").length).toBe(1);
-    expect(text).toContain("247139");
-    expect(text).toContain("ghost");
+    expect(
+      bodies.some(
+        (b) => b.method === "GET" && b.url.includes("/schedule/entries"),
+      ),
+    ).toBe(false);
+    expect(bodies.some((b) => b.method === "DELETE")).toBe(false);
+    expect(text).toContain('\\"id\\":1927963');
+    expect(text).not.toContain("ghostScheduleEntryIdsRemoved");
   });
 
   it("whereId reaches the schedule create/update wire body", async () => {

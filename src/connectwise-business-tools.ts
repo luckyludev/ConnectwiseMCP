@@ -8,7 +8,6 @@ import {
   ConnectWiseUserError,
   MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
-  ghostScheduleEntries,
   type ConnectWiseClient,
 } from "./connectwise-client";
 import {
@@ -1609,7 +1608,7 @@ export function registerConnectWiseBusinessTools(
     "update_service_ticket",
     {
       description:
-        "Update an existing ConnectWise service ticket. Only the fields you pass change: the client GETs the ticket first, merges, then PUTs — unpassed fields (company, contact, dates, costs) survive. A board move auto-generates a zero-hour ghost schedule entry on the ticket; this tool detects it and removes it in the same operation (reported in the response). Status is board-scoped: a status that is not valid on the target board is rejected with the valid statuses listed.",
+        "Update an existing ConnectWise service ticket. Only the fields you pass change: the client GETs the ticket first, merges, then PUTs — unpassed fields (company, contact, dates, costs) survive. Board moves do not automatically delete schedule entries; remove a confirmed unwanted entry separately with delete_schedule_entry. Status is board-scoped: a status that is not valid on the target board is rejected with the valid statuses listed.",
       inputSchema: {
         ticketId: positiveId,
         ownerId: positiveId.optional(),
@@ -1659,24 +1658,7 @@ export function registerConnectWiseBusinessTools(
               ...(summary !== undefined ? { summary } : {}),
               ...(contactId !== undefined ? { contactId } : {}),
             })
-            .then(async (updated) => {
-              // A board move auto-generates a zero-hour ghost schedule entry
-              // on the ticket. Detect it and remove it in the same operation.
-              if (boardId !== undefined) {
-                const entries =
-                  await client.openScheduleEntriesForObject(ticketId);
-                const ghosts = ghostScheduleEntries(entries);
-                for (const ghost of ghosts) {
-                  await client.deleteScheduleEntry(ghost.id);
-                }
-                if (ghosts.length > 0)
-                  return {
-                    ...ticket(updated),
-                    ghostScheduleEntryIdsRemoved: ghosts.map((g) => g.id),
-                  };
-              }
-              return ticket(updated);
-            });
+            .then(ticket);
         },
         dependencies,
       ),
