@@ -151,6 +151,90 @@ describe("Entra auth handler", () => {
     expect(response.headers.get("Location")).toBeNull();
   });
 
+  it("rejects a consent body with an oversized declared length before reading it", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("sensitive-flow-state"));
+      },
+      cancel() {
+        cancelled = true;
+        throw new Error("simulated cancellation failure");
+      },
+    });
+    const request = new Request("https://mcp.example.com/authorize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": "16385",
+      },
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+
+    const response = await createEntraAuthHandler().fetch!(
+      request as never,
+      {} as WorkerEnv,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.text()).toBe("Request body too large");
+    expect(cancelled).toBe(true);
+  });
+
+  it("enforces the consent body limit while streaming despite a small declared length", async () => {
+    let cancelled = false;
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(9_000));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const request = new Request("https://mcp.example.com/authorize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Content-Length": "1",
+      },
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+
+    const response = await createEntraAuthHandler().fetch!(
+      request as never,
+      {} as WorkerEnv,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(cancelled).toBe(true);
+  });
+
+  it("rejects lookalike consent media types without reading the body", async () => {
+    const response = await createEntraAuthHandler().fetch!(
+      new Request("https://mcp.example.com/authorize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded-evil",
+        },
+        body: "flow_state=sensitive-flow-state&csrf_token=sensitive-csrf",
+      }) as never,
+      {} as WorkerEnv,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.text()).toBe("Invalid request");
+  });
+
   it("rechecks scope in callback state before token or profile access", async () => {
     const secret = "0123456789abcdef0123456789abcdef";
     const browserNonce = "callback-browser-nonce";
