@@ -389,24 +389,31 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[1]!).pathname).toBe(
       "/v4_6_release/apis/3.0/service/boards/32/statuses",
     );
+    expect(new URL(urls[1]!).searchParams.get("pageSize")).toBe("50");
+
+    await client.getBoardTypes(32);
+    expect(new URL(urls[2]!).pathname).toBe(
+      "/v4_6_release/apis/3.0/service/boards/32/types",
+    );
+    expect(new URL(urls[2]!).searchParams.get("pageSize")).toBe("50");
 
     await client.listBoardTickets(32, 10);
-    expect(new URL(urls[2]!).searchParams.get("conditions")).toBe(
+    expect(new URL(urls[3]!).searchParams.get("conditions")).toBe(
       "board/id=32",
     );
 
     await client.getServiceStatuses();
-    expect(new URL(urls[3]!).pathname).toBe(
+    expect(new URL(urls[4]!).pathname).toBe(
       "/v4_6_release/apis/3.0/service/statuses",
     );
 
     await client.getMyMember();
-    expect(new URL(urls[4]!).pathname).toBe(
+    expect(new URL(urls[5]!).pathname).toBe(
       "/v4_6_release/apis/3.0/system/members/149",
     );
 
     await client.listTimeEntries(5);
-    expect(new URL(urls[5]!).pathname).toBe(
+    expect(new URL(urls[6]!).pathname).toBe(
       "/v4_6_release/apis/3.0/time/entries",
     );
   });
