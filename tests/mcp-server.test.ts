@@ -435,53 +435,61 @@ describe("get_service_ticket", () => {
     });
   });
 
-  it("does not read secrets or construct a client without mcp:read", async () => {
-    const reads: string[] = [];
-    const auditMessages: string[] = [];
-    const times = [3_000, 3_010];
-    const env = new Proxy(
-      { CW_PROFILE_LUIS: "must-not-be-read" },
-      {
-        get(target, property, receiver) {
-          reads.push(String(property));
-          return Reflect.get(target, property, receiver);
+  it.each([[], "mcp:read", "mcp:read mcp:write", null, {}, ["mcp:read", 1]])(
+    "does not read secrets or construct a client for malformed scopes %#",
+    async (scopes) => {
+      const reads: string[] = [];
+      const auditMessages: string[] = [];
+      const times = [3_000, 3_010];
+      const env = new Proxy(
+        { CW_PROFILE_LUIS: "must-not-be-read" },
+        {
+          get(target, property, receiver) {
+            reads.push(String(property));
+            return Reflect.get(target, property, receiver);
+          },
         },
-      },
-    );
+      );
 
-    const result = await getServiceTicketResult(
-      { tenantId, objectId, profileAlias: "LUIS", scopes: [] },
-      env,
-      123,
-      {
-        audit: {
-          logger: (message) => auditMessages.push(message),
-          now: () => times.shift()!,
-          createCorrelationId: () => correlationId,
+      const result = await getServiceTicketResult(
+        {
+          tenantId,
+          objectId,
+          profileAlias: "LUIS",
+          scopes,
+        } as Parameters<typeof getServiceTicketResult>[0],
+        env,
+        123,
+        {
+          audit: {
+            logger: (message) => auditMessages.push(message),
+            now: () => times.shift()!,
+            createCorrelationId: () => correlationId,
+          },
+          createClient: () => {
+            throw new Error("must not construct client");
+          },
         },
-        createClient: () => {
-          throw new Error("must not construct client");
-        },
-      },
-    );
+      );
 
-    expect(result).toMatchObject({
-      isError: true,
-      content: [{ type: "text", text: "Insufficient scope" }],
-    });
-    expect(reads).toEqual([]);
-    expect(auditMessages).toHaveLength(1);
-    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
-      correlationId,
-      tenantId,
-      objectId,
-      profileAlias: "LUIS",
-      tool: "get_service_ticket",
-      outcome: "denied",
-      reason: "insufficient_scope",
-      durationMs: 10,
-    });
-  });
+      expect(result).toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: "Insufficient scope" }],
+      });
+      expect(reads).toEqual([]);
+      expect(auditMessages).toHaveLength(1);
+      expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+        correlationId,
+        tenantId,
+        objectId,
+        profileAlias: "LUIS",
+        tool: "get_service_ticket",
+        outcome: "denied",
+        reason: "insufficient_scope",
+        durationMs: 10,
+      });
+    },
+  );
 
   it("constructs separate clients from separate authenticated profiles", async () => {
     const profile = (companyId: string) =>

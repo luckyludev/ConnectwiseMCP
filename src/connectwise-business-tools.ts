@@ -16,6 +16,7 @@ import {
   type ConnectWiseCredentials,
 } from "./connectwise-profile";
 import type { EntraAccessTokenProps } from "./auth-handler";
+import { hasMcpScopes, type McpScope } from "./auth-scopes";
 import {
   emitToolAudit,
   getAuditStartTime,
@@ -273,10 +274,10 @@ async function runBusinessTool(
   dependencies: BusinessToolDependencies,
 ): Promise<CallToolResult> {
   const startedAtMs = getAuditStartTime(dependencies.audit);
-  if (
-    !props?.scopes?.includes("mcp:read") ||
-    (WRITE_TOOLS.has(tool) && !props.scopes.includes("mcp:write"))
-  ) {
+  const requiredScopes: McpScope[] = WRITE_TOOLS.has(tool)
+    ? ["mcp:read", "mcp:write"]
+    : ["mcp:read"];
+  if (!hasMcpScopes(props, requiredScopes)) {
     emitToolAudit(
       {
         props,
