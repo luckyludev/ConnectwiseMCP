@@ -75,6 +75,67 @@ function readCookie(request: Request, name: string): string | undefined {
   return undefined;
 }
 
+const MAX_CONSENT_BODY_BYTES = 16 * 1024;
+
+class ConsentBodyTooLargeError extends Error {}
+
+async function cancelConsentBody(
+  body: { cancel(reason?: unknown): Promise<void> } | null,
+): Promise<void> {
+  try {
+    await body?.cancel();
+  } catch {
+    // Cancellation is best-effort; preserve the sanitized validation response.
+  }
+}
+
+async function readConsentForm(request: Request): Promise<URLSearchParams> {
+  const declaredLength = request.headers.get("Content-Length");
+  if (declaredLength !== null) {
+    if (!/^\d+$/.test(declaredLength)) {
+      await cancelConsentBody(request.body);
+      throw new Error("invalid_content_length");
+    }
+    const length = Number(declaredLength);
+    if (!Number.isSafeInteger(length)) {
+      await cancelConsentBody(request.body);
+      throw new Error("invalid_content_length");
+    }
+    if (length > MAX_CONSENT_BODY_BYTES) {
+      await cancelConsentBody(request.body);
+      throw new ConsentBodyTooLargeError();
+    }
+  }
+
+  if (!request.body) return new URLSearchParams();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_CONSENT_BODY_BYTES) {
+        await cancelConsentBody(reader);
+        throw new ConsentBodyTooLargeError();
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  return new URLSearchParams(text);
+}
+
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -224,14 +285,32 @@ async function continueAuthorization(
   request: Request,
   env: WorkerEnv,
 ): Promise<Response> {
-  if (
-    !(request.headers.get("Content-Type") ?? "").startsWith(
-      "application/x-www-form-urlencoded",
-    )
-  ) {
-    return new Response("Invalid request", { status: 400 });
+  const mediaType = (request.headers.get("Content-Type") ?? "")
+    .split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (mediaType !== "application/x-www-form-urlencoded") {
+    return new Response("Invalid request", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
   }
-  const form = await request.formData();
+
+  let form: URLSearchParams;
+  try {
+    form = await readConsentForm(request);
+  } catch (error) {
+    if (error instanceof ConsentBodyTooLargeError) {
+      return new Response("Request body too large", {
+        status: 413,
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+    return new Response("Invalid request", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
   const signedConsent = form.get("flow_state");
   const csrfFromForm = form.get("csrf_token");
   const csrfFromCookie = readCookie(request, "__Host-CW_CSRF");
