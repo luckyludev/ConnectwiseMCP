@@ -658,42 +658,6 @@ function toUtcIso(value: string, label: string): string {
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-// A board move auto-generates a zero-hour schedule entry on the moved ticket
-// (hours is null, dateStart == dateEnd). Returns those entries so the caller
-// can decide to delete them.
-export function ghostScheduleEntries(
-  entries: unknown[],
-): Array<{ id: number; dateStart?: string; dateEnd?: string }> {
-  return (Array.isArray(entries) ? entries : [])
-    .filter(
-      (entry): entry is Record<string, unknown> =>
-        Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
-    )
-    .filter((entry) => {
-      const hours = entry.hours;
-      const zeroHours =
-        hours === null || hours === undefined || Number(hours) === 0;
-      if (!zeroHours) return false;
-      // The spec's real ghost (246998) has dateStart == dateEnd. Some CW
-      // board-move ghosts come back with null dates but zero hours, so catch
-      // any zero-hour entry attached to the moved ticket.
-      const dateStart =
-        typeof entry.dateStart === "string" ? entry.dateStart : "";
-      const dateEnd = typeof entry.dateEnd === "string" ? entry.dateEnd : "";
-      return (
-        (dateStart !== "" && dateStart === dateEnd) ||
-        (dateStart === "" && dateEnd === "")
-      );
-    })
-    .map((entry) => ({
-      id: Number(entry.id),
-      ...(typeof entry.dateStart === "string"
-        ? { dateStart: entry.dateStart }
-        : {}),
-      ...(typeof entry.dateEnd === "string" ? { dateEnd: entry.dateEnd } : {}),
-    }));
-}
-
 export function createConnectWiseClient(
   credentials: ConnectWiseCredentials,
   dependencies: ConnectWiseClientDependencies = {},
@@ -1392,8 +1356,6 @@ export function createConnectWiseClient(
       }
       if (input.boardId !== undefined) {
         positiveId(input.boardId, "board ID");
-        // Board moves auto-generate zero-hour ghost schedule entries; the
-        // caller checks + cleans those up after the PUT.
         merged.board = { id: input.boardId };
       }
       if (input.priorityId !== undefined) {
