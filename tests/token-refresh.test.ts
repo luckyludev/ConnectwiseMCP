@@ -7,6 +7,41 @@ import {
 } from "../src/auth-handler";
 
 describe("Entra token refresh reauthorization", () => {
+  it.each([
+    { scope: ["mcp:read"], requestedScope: [] },
+    { scope: [], requestedScope: ["mcp:read"] },
+    { scope: ["mcp:read", "mcp:write"], requestedScope: ["mcp:read"] },
+    { scope: ["mcp:read"], requestedScope: ["mcp:write"] },
+  ])(
+    "rejects invalid effective scopes before callback grant-prop access: %j",
+    async ({ scope, requestedScope }) => {
+      let propsRead = false;
+      const options = {
+        grantType: "refresh_token" as never,
+        clientId: "mcp-client",
+        userId: "tenant-a:user-1",
+        grantId: "grant-1",
+        scope,
+        requestedScope,
+      };
+      Object.defineProperty(options, "props", {
+        get() {
+          propsRead = true;
+          throw new Error("grant secrets accessed");
+        },
+      });
+
+      await expect(
+        createTokenExchangeCallback({} as WorkerEnv)(options as never),
+      ).rejects.toMatchObject({
+        code: "invalid_scope",
+        description: "mcp:read is required",
+        statusCode: 400,
+      });
+      expect(propsRead).toBe(false);
+    },
+  );
+
   it("separates grant secrets from authorization-code access-token props", async () => {
     const props: EntraGrantProps = {
       tenantId: "tenant-a",
