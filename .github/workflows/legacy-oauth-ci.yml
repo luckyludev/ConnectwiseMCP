@@ -55,6 +55,8 @@ jobs:
           deploy/http-gateway/app
           deploy/http-gateway/tests
           deploy/cwm-mcp
+      - name: Validate rollback image smoke script
+        run: bash -n deploy/http-gateway/tests/smoke_rollback_image.sh
       - name: Run core Python checks
         run: >-
           ruff check --select E4,E7,E9,F
@@ -80,3 +82,5 @@ jobs:
         run: >-
           docker run --rm --entrypoint sh connectwise-legacy-rollback-ci
           -c 'test ! -e /app/mcp-server/.env'
+      - name: Smoke-test rollback image startup and auth boundary
+        run: bash deploy/http-gateway/tests/smoke_rollback_image.sh
