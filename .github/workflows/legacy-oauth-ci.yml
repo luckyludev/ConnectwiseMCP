@@ -70,5 +70,13 @@ jobs:
         run: |
           npm ci --prefix deploy/cwm-mcp
           npm audit --prefix deploy/cwm-mcp --audit-level=moderate
+      - name: Seed ignored build-context canary
+        run: printf '%s\n' build-context-canary > deploy/cwm-mcp/.env
       - name: Build rollback image
-        run: docker build --file deploy/http-gateway/Dockerfile deploy
+        run: >-
+          docker build --tag connectwise-legacy-rollback-ci
+          --file deploy/http-gateway/Dockerfile deploy
+      - name: Verify local environment is absent from image
+        run: >-
+          docker run --rm --entrypoint sh connectwise-legacy-rollback-ci
+          -c 'test ! -e /app/mcp-server/.env'

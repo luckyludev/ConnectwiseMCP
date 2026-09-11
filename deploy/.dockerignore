@@ -1,4 +1,6 @@
 **/.DS_Store
+.env
+**/.env
 cwm-mcp/node_modules
 cwm-mcp/venv
 cwm-mcp/api_gateway/api_gateway.log
