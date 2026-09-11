@@ -963,12 +963,16 @@ export function createConnectWiseClient(
 
     async getBoardStatuses(boardId: number): Promise<unknown> {
       positiveId(boardId, "board ID");
-      return requestJson("GET", `/service/boards/${boardId}/statuses`);
+      return requestJson("GET", `/service/boards/${boardId}/statuses`, {
+        pageSize: 50,
+      });
     },
 
     async getBoardTypes(boardId: number): Promise<unknown> {
       positiveId(boardId, "board ID");
-      return requestJson("GET", `/service/boards/${boardId}/types`);
+      return requestJson("GET", `/service/boards/${boardId}/types`, {
+        pageSize: 50,
+      });
     },
 
     async listBoardTickets(
