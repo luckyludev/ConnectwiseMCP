@@ -7,6 +7,14 @@ import {
 } from "jose";
 import { describe, expect, it } from "vitest";
 import { createEntraAuthHandler, type WorkerEnv } from "../src/auth-handler";
+import { signFlowState } from "../src/flow-state";
+
+const INVALID_OAUTH_SCOPES: { scope: string[] }[] = [
+  { scope: [] },
+  { scope: ["mcp:write"] },
+  { scope: ["mcp:read", "mcp:write"] },
+  { scope: ["mcp:read", "mcp:read"] },
+];
 
 describe("Entra auth handler", () => {
   it.each([
@@ -50,6 +58,157 @@ describe("Entra auth handler", () => {
       expect(lookedUp).toBe(false);
     },
   );
+
+  it.each(INVALID_OAUTH_SCOPES)(
+    "rejects unsupported authorization scopes before handler client processing: %j",
+    async ({ scope }) => {
+      let lookedUp = false;
+      const env = {
+        MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        OAUTH_PROVIDER: {
+          async parseAuthRequest() {
+            return {
+              responseType: "code",
+              clientId: "mcp-client",
+              redirectUri: "https://client.example.com/callback",
+              scope,
+              state: "client-state",
+              codeChallenge: "challenge",
+              codeChallengeMethod: "S256",
+              resource: "https://mcp.example.com/mcp",
+            };
+          },
+          async lookupClient() {
+            lookedUp = true;
+            return undefined;
+          },
+        },
+      } as unknown as WorkerEnv;
+
+      const response = await createEntraAuthHandler().fetch!(
+        new Request("https://mcp.example.com/authorize") as never,
+        env,
+        {} as ExecutionContext,
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("X-Auth-Stage")).toBe("authorize_scope");
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(await response.text()).toBe("Invalid authorization scope");
+      expect(lookedUp).toBe(false);
+    },
+  );
+
+  it("rechecks scope in signed consent state before starting Entra login", async () => {
+    const secret = "0123456789abcdef0123456789abcdef";
+    const browserNonce = "consent-browser-nonce";
+    const signedState = await signFlowState(
+      {
+        purpose: "consent",
+        browserNonce,
+        oauthRequest: {
+          responseType: "code",
+          clientId: "mcp-client",
+          redirectUri: "https://client.example.com/callback",
+          scope: ["mcp:write"],
+          state: "client-state",
+          codeChallenge: "challenge",
+          codeChallengeMethod: "S256",
+          resource: "https://mcp.example.com/mcp",
+        },
+      },
+      secret,
+      "https://mcp.example.com",
+    );
+    const env = {
+      OAUTH_STATE_SECRET: secret,
+      MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      ENTRA_TENANT_ID: "tenant-a",
+      ENTRA_CLIENT_ID: "entra-client",
+      ENTRA_CLIENT_SECRET: "secret",
+    } as unknown as WorkerEnv;
+
+    const response = await createEntraAuthHandler().fetch!(
+      new Request("https://mcp.example.com/authorize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Cookie: "__Host-CW_CSRF=csrf-token",
+        },
+        body: new URLSearchParams({
+          flow_state: signedState,
+          csrf_token: "csrf-token",
+        }),
+      }) as never,
+      env,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("X-Auth-Stage")).toBe(
+      "authorize_consent_scope",
+    );
+    expect(response.headers.get("Location")).toBeNull();
+  });
+
+  it("rechecks scope in callback state before token or profile access", async () => {
+    const secret = "0123456789abcdef0123456789abcdef";
+    const browserNonce = "callback-browser-nonce";
+    const signedState = await signFlowState(
+      {
+        purpose: "entra_callback",
+        browserNonce,
+        pkceVerifier: "pkce-verifier",
+        oidcNonce: "oidc-nonce",
+        oauthRequest: {
+          responseType: "code",
+          clientId: "mcp-client",
+          redirectUri: "https://client.example.com/callback",
+          scope: [],
+          state: "client-state",
+          codeChallenge: "challenge",
+          codeChallengeMethod: "S256",
+          resource: "https://mcp.example.com/mcp",
+        },
+      },
+      secret,
+      "https://mcp.example.com",
+    );
+    let fetched = false;
+    let completed = false;
+    const env = {
+      OAUTH_STATE_SECRET: secret,
+      MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+        "https://client.example.com/callback",
+      ]),
+      OAUTH_PROVIDER: {
+        async completeAuthorization() {
+          completed = true;
+          return { redirectTo: "https://client.example.com/callback" };
+        },
+      },
+    } as unknown as WorkerEnv;
+
+    const response = await createEntraAuthHandler({
+      fetcher: async () => {
+        fetched = true;
+        throw new Error("must not fetch");
+      },
+    }).fetch!(
+      new Request(
+        `https://mcp.example.com/callback?code=entra-code&state=${encodeURIComponent(signedState)}`,
+        { headers: { Cookie: `__Host-CW_ENTRA_STATE=${browserNonce}` } },
+      ) as never,
+      env,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("X-Auth-Stage")).toBe("callback_scope");
+    expect(fetched).toBe(false);
+    expect(completed).toBe(false);
+  });
 
   it("rejects a non-canonical configured resource before client lookup", async () => {
     let lookedUp = false;

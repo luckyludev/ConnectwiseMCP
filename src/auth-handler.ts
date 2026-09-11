@@ -1,3 +1,4 @@
+import { OAuthError } from "@cloudflare/workers-oauth-provider";
 import type {
   OAuthHelpers,
   AuthRequest,
@@ -124,6 +125,26 @@ function isCanonicalHttpsUrl(value: string): boolean {
   }
 }
 
+const REQUIRED_OAUTH_SCOPE = "mcp:read";
+
+function hasExactReadScope(scopes: unknown): boolean {
+  return (
+    Array.isArray(scopes) &&
+    scopes.length === 1 &&
+    scopes[0] === REQUIRED_OAUTH_SCOPE
+  );
+}
+
+function invalidScopeResponse(stage: string): Response {
+  return new Response("Invalid authorization scope", {
+    status: 400,
+    headers: {
+      "Cache-Control": "no-store",
+      "X-Auth-Stage": stage,
+    },
+  });
+}
+
 async function beginAuthorization(
   request: Request,
   env: WorkerEnv,
@@ -148,6 +169,9 @@ async function beginAuthorization(
 
   if (oauthRequest.resource !== env.MCP_CANONICAL_URL) {
     return new Response("Invalid authorization resource", { status: 400 });
+  }
+  if (!hasExactReadScope(oauthRequest.scope)) {
+    return invalidScopeResponse("authorize_scope");
   }
 
   const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
@@ -245,6 +269,9 @@ async function continueAuthorization(
       status: 400,
       headers: { "X-Auth-Stage": "authorize_consent_state" },
     });
+  }
+  if (!hasExactReadScope(consent.oauthRequest.scope)) {
+    return invalidScopeResponse("authorize_consent_scope");
   }
 
   const { verifier, challenge } = await createPkce();
@@ -347,6 +374,9 @@ async function completeEntraCallback(
       headers: { "X-Auth-Stage": "callback_state" },
     });
   }
+  if (!hasExactReadScope(state.oauthRequest.scope)) {
+    return invalidScopeResponse("callback_scope");
+  }
   const redirectUri = state.oauthRequest.redirectUri;
   if (
     typeof redirectUri !== "string" ||
@@ -428,7 +458,7 @@ async function completeEntraCallback(
       request: state.oauthRequest,
       userId: oauthUserId(profile.tenantId, profile.objectId),
       metadata: { label: profile.profileAlias },
-      scope: state.oauthRequest.scope.filter((scope) => scope === "mcp:read"),
+      scope: [REQUIRED_OAUTH_SCOPE],
       props,
     });
     const headers = new Headers({
@@ -458,6 +488,14 @@ export function createTokenExchangeCallback(
   options: TokenExchangeCallbackOptions,
 ) => Promise<TokenExchangeCallbackResult | void> {
   return async (options) => {
+    if (
+      !hasExactReadScope(options.scope) ||
+      !hasExactReadScope(options.requestedScope)
+    ) {
+      throw new OAuthError("invalid_scope", {
+        description: "mcp:read is required",
+      });
+    }
     const props = options.props as EntraGrantProps;
     if (options.grantType === "authorization_code") {
       return {
