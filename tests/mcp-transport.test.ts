@@ -152,28 +152,45 @@ describe("authenticated MCP transport", () => {
     expect(body).toContain('"visibility":["app"]');
   });
 
-  it("denies every write tool without mcp:write before resolving a profile", async () => {
-    const auditMessages: string[] = [];
-    let clientCreated = false;
-    const handler = createMcpHandler(
-      () =>
-        createMcpServer(env, {
-          audit: { logger: (message) => auditMessages.push(message) },
-          createBusinessClient: () => {
-            clientCreated = true;
-            return businessClient();
-          },
-        }),
-      {
-        route: "/mcp",
-        corsOptions: false,
-        authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+  it.each([
+    { label: "missing mcp:write", scopes: ["mcp:read"] },
+    { label: "malformed string scopes", scopes: "mcp:read mcp:write" },
+  ])(
+    "denies every write tool with $label before resolving a profile",
+    async ({ scopes }) => {
+      const auditMessages: string[] = [];
+      const bindingReads: string[] = [];
+      let clientCreated = false;
+      const guardedEnv = new Proxy(env, {
+        get(target, property, receiver) {
+          bindingReads.push(String(property));
+          return Reflect.get(target, property, receiver);
         },
-      },
-    );
-    const writes: Array<{ name: string; arguments: Record<string, unknown> }> =
-      [
+      });
+      const handler = createMcpHandler(
+        () =>
+          createMcpServer(guardedEnv, {
+            audit: { logger: (message) => auditMessages.push(message) },
+            createBusinessClient: () => {
+              clientCreated = true;
+              return businessClient();
+            },
+          }),
+        {
+          route: "/mcp",
+          corsOptions: false,
+          authContext: {
+            props: {
+              profileAlias: "LUIS",
+              scopes: scopes as string[],
+            },
+          },
+        },
+      );
+      const writes: Array<{
+        name: string;
+        arguments: Record<string, unknown>;
+      }> = [
         {
           name: "upload_connectwise_image",
           arguments: {
@@ -231,41 +248,45 @@ describe("authenticated MCP transport", () => {
         },
       ];
 
-    for (const [index, write] of writes.entries()) {
-      const response = await handler.fetch(
-        new Request("http://localhost/mcp", {
-          method: "POST",
-          headers: {
-            Accept: "application/json, text/event-stream",
-            "Content-Type": "application/json",
-            Host: "localhost",
-            "MCP-Protocol-Version": "2025-06-18",
-          },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 20 + index,
-            method: "tools/call",
-            params: write,
+      for (const [index, write] of writes.entries()) {
+        const response = await handler.fetch(
+          new Request("http://localhost/mcp", {
+            method: "POST",
+            headers: {
+              Accept: "application/json, text/event-stream",
+              "Content-Type": "application/json",
+              Host: "localhost",
+              "MCP-Protocol-Version": "2025-06-18",
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 20 + index,
+              method: "tools/call",
+              params: write,
+            }),
           }),
-        }),
-      );
-      expect(await response.text(), write.name).toContain("Insufficient scope");
-    }
+        );
+        expect(await response.text(), write.name).toContain(
+          "Insufficient scope",
+        );
+      }
 
-    expect(clientCreated).toBe(false);
-    expect(auditMessages).toHaveLength(writes.length);
-    expect(auditMessages.map((message) => JSON.parse(message).tool)).toEqual(
-      writes.map((write) => write.name),
-    );
-    for (const message of auditMessages) {
-      expect(JSON.parse(message)).toMatchObject({
-        profileAlias: "LUIS",
-        outcome: "denied",
-        reason: "insufficient_scope",
-      });
-      expect(message).not.toContain("must not be sent");
-    }
-  });
+      expect(clientCreated).toBe(false);
+      expect(bindingReads).toEqual([]);
+      expect(auditMessages).toHaveLength(writes.length);
+      expect(auditMessages.map((message) => JSON.parse(message).tool)).toEqual(
+        writes.map((write) => write.name),
+      );
+      for (const message of auditMessages) {
+        expect(JSON.parse(message)).toMatchObject({
+          profileAlias: "LUIS",
+          outcome: "denied",
+          reason: "insufficient_scope",
+        });
+        expect(message).not.toContain("must not be sent");
+      }
+    },
+  );
 
   it("executes a write with only the authenticated user's ConnectWise profile", async () => {
     const auditMessages: string[] = [];

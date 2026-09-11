@@ -16,6 +16,7 @@ import {
   type ToolAuditDependencies,
 } from "./audit";
 import { registerConnectWiseBusinessTools } from "./connectwise-business-tools";
+import { hasMcpScopes } from "./auth-scopes";
 
 export type AuditedToolDependencies = {
   audit?: ToolAuditDependencies;
@@ -26,7 +27,7 @@ export function whoamiResult(
   dependencies: AuditedToolDependencies = {},
 ): CallToolResult {
   const startedAtMs = getAuditStartTime(dependencies.audit);
-  if (!props?.scopes?.includes("mcp:read")) {
+  if (!hasMcpScopes(props, ["mcp:read"])) {
     emitToolAudit(
       {
         props,
@@ -100,7 +101,7 @@ export async function getServiceTicketResult(
   dependencies: ServiceTicketDependencies = {},
 ): Promise<CallToolResult> {
   const startedAtMs = getAuditStartTime(dependencies.audit);
-  if (!props?.scopes?.includes("mcp:read")) {
+  if (!hasMcpScopes(props, ["mcp:read"])) {
     emitToolAudit(
       {
         props,
