@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   isConfiguredClientRedirectUri,
-  validateClientRegistration,
+  validateClientRegistration as validateRegistration,
 } from "../src/client-registration";
+
+function validateClientRegistration(
+  metadata: Record<string, unknown>,
+  configuredUris: string,
+) {
+  return validateRegistration(
+    metadata,
+    configuredUris,
+    new TextEncoder().encode(JSON.stringify(metadata)).byteLength,
+  );
+}
 
 describe("validateClientRegistration", () => {
   it("allows only exact configured HTTPS redirect URIs", () => {
@@ -96,6 +107,87 @@ describe("validateClientRegistration", () => {
       validateClientRegistration(
         { redirect_uris: ["http://127.0.0.2:49152/callback"] },
         JSON.stringify(["http://127.0.0.1/callback"]),
+      ),
+    ).toMatchObject({ code: "invalid_redirect_uri", status: 400 });
+  });
+
+  it("bounds registration metadata, redirect counts, URI lengths, and duplicates", () => {
+    const approved = "https://client.example/callback";
+    const configured = JSON.stringify([approved]);
+
+    const exactMetadata = { redirect_uris: [approved], padding: "" };
+    exactMetadata.padding = "x".repeat(
+      16 * 1024 -
+        new TextEncoder().encode(JSON.stringify(exactMetadata)).length,
+    );
+    expect(
+      new TextEncoder().encode(JSON.stringify(exactMetadata)),
+    ).toHaveLength(16 * 1024);
+    expect(
+      validateClientRegistration(exactMetadata, configured),
+    ).toBeUndefined();
+    expect(
+      validateClientRegistration(
+        { ...exactMetadata, padding: `${exactMetadata.padding}x` },
+        configured,
+      ),
+    ).toMatchObject({ code: "invalid_client_metadata", status: 400 });
+
+    const compactMetadata = JSON.stringify({ redirect_uris: [approved] });
+    const paddedRawBody = `${" ".repeat(16 * 1024 + 1 - compactMetadata.length)}${compactMetadata}`;
+    expect(new TextEncoder().encode(paddedRawBody).length).toBe(16 * 1024 + 1);
+    expect(
+      validateRegistration(
+        { redirect_uris: [approved] },
+        configured,
+        new TextEncoder().encode(paddedRawBody).byteLength,
+      ),
+    ).toMatchObject({ code: "invalid_client_metadata", status: 400 });
+
+    const tenUris = Array.from(
+      { length: 10 },
+      (_, index) => `https://client.example/callback/${index}`,
+    );
+    expect(
+      validateClientRegistration(
+        { redirect_uris: tenUris },
+        JSON.stringify(tenUris),
+      ),
+    ).toBeUndefined();
+    const elevenUris = [...tenUris, "https://client.example/callback/10"];
+    expect(
+      validateClientRegistration(
+        { redirect_uris: elevenUris },
+        JSON.stringify(elevenUris),
+      ),
+    ).toMatchObject({ code: "invalid_redirect_uri", status: 400 });
+
+    expect(
+      validateClientRegistration(
+        { redirect_uris: [approved, approved] },
+        configured,
+      ),
+    ).toMatchObject({ code: "invalid_redirect_uri", status: 400 });
+    expect(
+      validateClientRegistration(
+        { redirect_uris: [approved] },
+        JSON.stringify([approved, approved]),
+      ),
+    ).toMatchObject({ code: "invalid_redirect_uri", status: 400 });
+
+    const prefix = "https://client.example/";
+    const exactUri = `${prefix}${"a".repeat(2_048 - prefix.length)}`;
+    expect(new TextEncoder().encode(exactUri)).toHaveLength(2_048);
+    expect(
+      validateClientRegistration(
+        { redirect_uris: [exactUri] },
+        JSON.stringify([exactUri]),
+      ),
+    ).toBeUndefined();
+    expect(
+      validateClientRegistration(
+        { redirect_uris: [`${exactUri}a`] },
+        JSON.stringify([`${exactUri}a`]),
       ),
     ).toMatchObject({ code: "invalid_redirect_uri", status: 400 });
   });

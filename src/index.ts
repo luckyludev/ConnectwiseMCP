@@ -40,9 +40,10 @@ export default new OAuthProvider({
   allowPlainPKCE: false,
   allowImplicitFlow: false,
   tokenExchangeCallback: createTokenExchangeCallback(runtimeEnv),
-  clientRegistrationCallback: ({ clientMetadata }) =>
+  clientRegistrationCallback: async ({ clientMetadata, request }) =>
     validateClientRegistration(
       clientMetadata,
       runtimeEnv.ALLOWED_CLIENT_REDIRECT_URIS,
+      (await request.arrayBuffer()).byteLength,
     ),
 });
