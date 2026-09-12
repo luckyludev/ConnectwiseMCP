@@ -1,9 +1,20 @@
 import type { ClientRegistrationCallbackResult } from "@cloudflare/workers-oauth-provider";
 
-function reject(): ClientRegistrationCallbackResult {
+const maxClientMetadataBytes = 16 * 1024;
+const maxRedirectUriCount = 10;
+const maxRedirectUriLength = 2_048;
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function reject(
+  code = "invalid_redirect_uri",
+  description = "Client redirect URI is not approved",
+): ClientRegistrationCallbackResult {
   return {
-    code: "invalid_redirect_uri",
-    description: "Client redirect URI is not approved",
+    code,
+    description,
     status: 400,
   };
 }
@@ -18,10 +29,19 @@ function isLoopback(hostname: string): boolean {
 
 function allowedUris(value: string): AllowedUri[] {
   try {
+    if (byteLength(value) > maxClientMetadataBytes) return [];
     const parsed: unknown = JSON.parse(value);
     if (
       !Array.isArray(parsed) ||
-      !parsed.every((entry) => typeof entry === "string")
+      parsed.length === 0 ||
+      parsed.length > maxRedirectUriCount ||
+      !parsed.every(
+        (entry) =>
+          typeof entry === "string" &&
+          entry.length > 0 &&
+          byteLength(entry) <= maxRedirectUriLength,
+      ) ||
+      new Set(parsed).size !== parsed.length
     ) {
       return [];
     }
@@ -94,14 +114,29 @@ export function isConfiguredClientRedirectUri(
 export function validateClientRegistration(
   metadata: Record<string, unknown>,
   configuredUris: string,
+  rawBodyByteLength: number,
 ): ClientRegistrationCallbackResult | undefined {
+  if (
+    !Number.isSafeInteger(rawBodyByteLength) ||
+    rawBodyByteLength < 0 ||
+    rawBodyByteLength > maxClientMetadataBytes
+  ) {
+    return reject("invalid_client_metadata", "Client metadata is too large");
+  }
   const allowlist = allowedUris(configuredUris);
   const redirectUris = metadata.redirect_uris;
   if (
     allowlist.length === 0 ||
     !Array.isArray(redirectUris) ||
     redirectUris.length === 0 ||
-    !redirectUris.every((value) => typeof value === "string")
+    redirectUris.length > maxRedirectUriCount ||
+    !redirectUris.every(
+      (value) =>
+        typeof value === "string" &&
+        value.length > 0 &&
+        byteLength(value) <= maxRedirectUriLength,
+    ) ||
+    new Set(redirectUris).size !== redirectUris.length
   ) {
     return reject();
   }
