@@ -5,6 +5,8 @@ export type EntraOAuthConfig = {
   callbackUrl: string;
 };
 
+export type EntraAuthorizationConfig = Omit<EntraOAuthConfig, "clientSecret">;
+
 export type EntraAuthorizationParameters = {
   state: string;
   codeChallenge: string;
@@ -185,7 +187,7 @@ export async function refreshEntraTokens(
 }
 
 export function buildEntraAuthorizationUrl(
-  config: EntraOAuthConfig,
+  config: EntraAuthorizationConfig,
   parameters: EntraAuthorizationParameters,
 ): URL {
   const url = new URL(
