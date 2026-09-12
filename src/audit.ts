@@ -13,6 +13,8 @@ const toolAuditNames = [
   "search_tickets_by_content",
   "get_ticket_notes_with_content",
   "get_ticket_attachments_with_details",
+  "list_ticket_tasks",
+  "list_ticket_time_entries",
   "get_complete_ticket_content",
   "create_ticket_note",
   "attach_image_to_ticket",

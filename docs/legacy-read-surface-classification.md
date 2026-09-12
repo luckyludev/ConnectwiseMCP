@@ -13,7 +13,7 @@ V2 never accepts caller-selected ConnectWise hosts, endpoints, methods, credenti
 The Worker exposes these bounded business tools:
 
 - Identity and ticket metadata: `whoami`, `get_service_ticket`.
-- Ticket reads: `search_tickets_by_content`, `get_ticket_notes_with_content`, `get_ticket_attachments_with_details`, `get_complete_ticket_content`.
+- Ticket reads: `search_tickets_by_content`, `get_ticket_notes_with_content`, `get_ticket_attachments_with_details`, `list_ticket_tasks`, `list_ticket_time_entries`, `get_complete_ticket_content`.
 - Ticket writes: `create_ticket_note`.
 - Ticket and attachment writes: `attach_image_to_ticket`, `attach_image_to_time_entry`, `create_service_ticket`, `update_service_ticket`.
 - Service/reference reads: `get_service_boards`, `get_board_options`, `list_board_tickets`, `get_service_statuses`, `get_service_priorities`, `get_service_sources`.
@@ -25,7 +25,7 @@ The Worker exposes these bounded business tools:
 - Attachment UI: `open_attachment_uploader` is model-visible; `upload_connectwise_image` is app-only and attaches a bounded image to a Ticket or TimeEntry.
 - Schedule/time writes: `create_schedule_entry`, `update_schedule_entry`, `delete_schedule_entry`, `create_time_entry`.
 
-Ticket-note text and commercial fields are returned only when the mapped ConnectWise API member can retrieve them. All list sections are capped at 50 items. Document downloads return bounded base64 without download URLs or GUIDs. The registered catalog contains 38 tools (37 model-visible and one app-only); 11 are dormant write-capable tools that require the currently unissued `mcp:write` scope. All writes are non-idempotent and are never retried.
+Ticket-note text and commercial fields are returned only when the mapped ConnectWise API member can retrieve them. All list sections are capped at 50 items. Document downloads return bounded base64 without download URLs or GUIDs. The registered catalog contains 40 tools (39 model-visible and one app-only); 11 are dormant write-capable tools that require the currently unissued `mcp:write` scope. All writes are non-idempotent and are never retried.
 
 ## Active legacy tool decisions
 
@@ -37,7 +37,7 @@ Ticket-note text and commercial fields are returned only when the mapped Connect
 | `debug_notes_endpoint`, `try_notes_with_conditions`, `check_api_user_permissions`, `test_notes_crud_operations`                    | **Excluded**             | Diagnostics and permission probing are operational functions, not production MCP tools.                                                               |
 | `get_ticket_notes_with_content`                                                                                                    | **Migrated with bounds** | Fixed note endpoints, 50-item cap, 8,000-character per-note cap, visibility filtering, and allowlisted output.                                        |
 | `get_ticket_attachments_with_details`                                                                                              | **Migrated as metadata** | Fixed document lookup with a 50-item cap; no URL, GUID, download instruction, or binary content is exposed.                                           |
-| `get_complete_ticket_content`                                                                                                      | **Migrated with bounds** | Composes fixed ticket, note, attachment-metadata, task, and time-entry reads with independent per-section caps.                                       |
+| `get_complete_ticket_content`, `list_ticket_tasks`, `list_ticket_time_entries`                                                     | **Migrated with bounds** | Fixed task and time-entry routes are available independently or in the aggregate ticket view, with allowlisted projections and 50-item caps.          |
 | `download_ticket_attachment`                                                                                                       | **Migrated narrowly**    | `download_document` returns bounded base64 with an 8 MB cap, no redirect following, no URL/GUID exposure, and sanitized failures.                     |
 | Image attachment from chat                                                                                                         | **Added narrowly**       | Inline MCP App with local resize, 1 MB server cap, four image MIME types, magic-byte validation, fixed Ticket/TimeEntry targets, and no URL fetching. |
 | `create_ticket_note`                                                                                                               | **Migrated**             | Fixed payload, 8,000-character cap, explicit visibility flags, no automatic write retry, and an allowlisted receipt.                                  |

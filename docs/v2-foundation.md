@@ -12,7 +12,7 @@
 - Fail-closed group/app-role eligibility and exact `<tid>:<oid> → profile alias` mapping.
 - Browser-bound signed state, local consent, and secure cookie attributes.
 - CIMD support with deployment-allowlisted redirects enforced again at authorization, plus allowlisted dynamic client registration.
-- Stateless MCP transport with a purpose-built catalog of 38 registered tools, of which 37 are model-visible and `upload_connectwise_image` is app-only. Every tool requires `mcp:read`; the 11 write-capable tools additionally require `mcp:write` before profile-secret lookup or ConnectWise client creation.
+- Stateless MCP transport with a purpose-built catalog of 40 registered tools, of which 39 are model-visible and `upload_connectwise_image` is app-only. Every tool requires `mcp:read`; the 11 write-capable tools additionally require `mcp:write` before profile-secret lookup or ConnectWise client creation.
 - Per-request ConnectWise client creation from exactly one validated `CW_PROFILE_<ALIAS>` secret; no caller-supplied profile or credential headers and no shared fallback.
 - Fixed ConnectWise endpoint construction, strict input/result bounds, allowlisted response projections, GET-only retries, no automatic write retry, and sanitized errors.
 - Bounded document handling: downloads stop at 8 MB. The app-only `upload_connectwise_image` path accepts only PNG, JPEG, GIF, or WebP, stops at 1 MB, verifies MIME signatures and file extensions, never fetches caller-supplied URLs, and uses a fixed multipart `POST /system/documents` for Ticket or TimeEntry records. The dormant direct-attachment write tools have different limits and must not be enabled without separate hardening and acceptance.
