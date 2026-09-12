@@ -662,6 +662,48 @@ export function registerConnectWiseBusinessTools(
   );
 
   server.registerTool(
+    "list_ticket_tasks",
+    {
+      description: "List bounded task details for one service ticket.",
+      inputSchema: { ticketId: positiveId, maxResults: pageSize },
+      annotations: readAnnotations,
+    },
+    ({ ticketId, maxResults }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "list_ticket_tasks",
+        async (client) =>
+          list(
+            await client.getTicketTasks(ticketId, maxResults),
+            maxResults,
+          ).map(task),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
+    "list_ticket_time_entries",
+    {
+      description: "List bounded time-entry details for one service ticket.",
+      inputSchema: { ticketId: positiveId, maxResults: pageSize },
+      annotations: readAnnotations,
+    },
+    ({ ticketId, maxResults }) =>
+      runBusinessTool(
+        getProps(),
+        env,
+        "list_ticket_time_entries",
+        async (client) =>
+          list(
+            await client.getTicketTimeEntries(ticketId, maxResults),
+            maxResults,
+          ).map(timeEntry),
+        dependencies,
+      ),
+  );
+
+  server.registerTool(
     "get_complete_ticket_content",
     {
       description:

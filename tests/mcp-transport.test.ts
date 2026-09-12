@@ -117,6 +117,8 @@ describe("authenticated MCP transport", () => {
       "search_tickets_by_content",
       "get_ticket_notes_with_content",
       "get_ticket_attachments_with_details",
+      "list_ticket_tasks",
+      "list_ticket_time_entries",
       "get_complete_ticket_content",
       "create_ticket_note",
       "get_agreement_additions",
@@ -150,6 +152,98 @@ describe("authenticated MCP transport", () => {
     expect(body).toContain('"idempotentHint":false');
     expect(body).toContain("ui://connectwise/attachment-uploader.html");
     expect(body).toContain('"visibility":["app"]');
+  });
+
+  it.each([
+    {
+      name: "list_ticket_tasks",
+      clientMethod: "getTicketTasks",
+      upstream: {
+        id: 7,
+        summary: "Replace switch",
+        priority: { id: 2, name: "High", secret: "drop" },
+        status: { id: 3, name: "Open" },
+        dueDate: "2026-09-15T12:00:00Z",
+        notes: "n".repeat(4_100),
+        privateField: "drop",
+      },
+      expected: '\\"summary\\":\\"Replace switch\\"',
+      truncated: `\\"notes\\":\\"${"n".repeat(4_000)}\\"`,
+    },
+    {
+      name: "list_ticket_time_entries",
+      clientMethod: "getTicketTimeEntries",
+      upstream: {
+        id: 8,
+        actualHours: 1.5,
+        timeStart: "2026-09-12T12:00:00Z",
+        member: { id: 4, name: "Alex", secret: "drop" },
+        notes: "worked",
+        workType: { id: 5, name: "Remote" },
+        privateField: "drop",
+      },
+      expected: '\\"actualHours\\":1.5',
+      truncated: '\\"notes\\":\\"worked\\"',
+    },
+  ])("returns bounded allowlisted projections from $name", async (testCase) => {
+    const calls: Array<{ ticketId: number; maxResults: number }> = [];
+    const client = businessClient({
+      async getTicketTasks(ticketId: number, maxResults: number) {
+        if (testCase.clientMethod !== "getTicketTasks") {
+          throw new Error("unexpected task read");
+        }
+        calls.push({ ticketId, maxResults });
+        return Array.from({ length: 3 }, () => testCase.upstream);
+      },
+      async getTicketTimeEntries(ticketId: number, maxResults: number) {
+        if (testCase.clientMethod !== "getTicketTimeEntries") {
+          throw new Error("unexpected time-entry read");
+        }
+        calls.push({ ticketId, maxResults });
+        return Array.from({ length: 3 }, () => testCase.upstream);
+      },
+    });
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () => client,
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: {
+            name: testCase.name,
+            arguments: { ticketId: 123, maxResults: 2 },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(response.status, body).toBe(200);
+    expect(calls).toEqual([{ ticketId: 123, maxResults: 2 }]);
+    expect(body).toContain(testCase.expected);
+    expect(body).toContain(testCase.truncated);
+    expect(body).not.toContain("privateField");
+    expect(body).not.toContain("secret");
+    expect(body.match(/\\\"id\\\":/g)).toHaveLength(6);
   });
 
   it.each([

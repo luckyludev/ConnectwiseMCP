@@ -254,7 +254,7 @@ describe("staging smoke output safety", () => {
     const toolNames = [...(toolBlock ?? "").matchAll(/"([^"]+)"/g)].map(
       (match) => match[1],
     );
-    expect(toolNames.length).toBe(38);
+    expect(toolNames.length).toBe(40);
 
     let baseUrl = "";
     let capturedScheduleArguments;
