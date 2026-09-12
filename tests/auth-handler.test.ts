@@ -516,11 +516,10 @@ describe("Entra auth handler", () => {
       codeChallengeMethod: "S256",
       resource: "https://mcp.example.com/mcp",
     };
-    const env = {
+    const baseEnv = {
       OAUTH_STATE_SECRET: "0123456789abcdef0123456789abcdef",
       ENTRA_TENANT_ID: "tenant-a",
       ENTRA_CLIENT_ID: "entra-client",
-      ENTRA_CLIENT_SECRET: "secret",
       MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
       ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
         "https://client.example.com/callback",
@@ -540,7 +539,15 @@ describe("Entra auth handler", () => {
           };
         },
       },
-    } as unknown as WorkerEnv;
+    };
+    const env = new Proxy(baseEnv, {
+      get(target, property, receiver) {
+        if (property === "ENTRA_CLIENT_SECRET") {
+          throw new Error("client secret must not be read before callback");
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    }) as unknown as WorkerEnv;
     const handler = createEntraAuthHandler();
     const consent = await handler.fetch!(
       new Request("https://mcp.example.com/authorize") as never,

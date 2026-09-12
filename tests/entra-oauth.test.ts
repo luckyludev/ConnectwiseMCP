@@ -12,7 +12,6 @@ describe("buildEntraAuthorizationUrl", () => {
       {
         tenantId: "tenant-a",
         clientId: "entra-client",
-        clientSecret: "not-used-by-authorization-url",
         callbackUrl: "https://mcp.example.com/callback",
       },
       {

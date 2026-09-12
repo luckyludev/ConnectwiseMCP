@@ -371,7 +371,6 @@ async function continueAuthorization(
     {
       tenantId: env.ENTRA_TENANT_ID,
       clientId: env.ENTRA_CLIENT_ID,
-      clientSecret: env.ENTRA_CLIENT_SECRET,
       callbackUrl: `${origin}/callback`,
     },
     { state: upstreamState, codeChallenge: challenge, nonce: oidcNonce },
