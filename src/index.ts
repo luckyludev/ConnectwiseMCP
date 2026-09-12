@@ -11,6 +11,7 @@ import {
   validateClientRegistration,
 } from "./client-registration";
 import { createMcpServer } from "./mcp-server";
+import { prepareMcpRequest } from "./mcp-request";
 
 const runtimeEnv = cloudflareEnv as unknown as WorkerEnv;
 const mcpHandler = createMcpHandler(() => createMcpServer(runtimeEnv), {
@@ -19,8 +20,10 @@ const mcpHandler = createMcpHandler(() => createMcpServer(runtimeEnv), {
 });
 
 const apiHandler = {
-  fetch(request: Request, env: WorkerEnv, context: ExecutionContext) {
-    return mcpHandler(request, env, context);
+  async fetch(request: Request, env: WorkerEnv, context: ExecutionContext) {
+    const prepared = await prepareMcpRequest(request);
+    if (prepared instanceof Response) return prepared;
+    return mcpHandler(prepared, env, context);
   },
 } satisfies Pick<Required<ExportedHandler<WorkerEnv>>, "fetch">;
 
