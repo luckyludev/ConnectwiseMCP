@@ -24,6 +24,27 @@ const env = {
   CW_PROFILE_MAYA: profile("company-maya"),
 };
 
+function parseSseJsonRpcResponse(
+  eventStream: string,
+  expectedId: number,
+): unknown {
+  for (const event of eventStream.replaceAll("\r\n", "\n").split("\n\n")) {
+    const data = event
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice("data:".length).replace(/^ /, ""))
+      .join("\n");
+    if (!data || data === "[DONE]") continue;
+    try {
+      const message = JSON.parse(data) as { id?: unknown };
+      if (message.id === expectedId) return message;
+    } catch {
+      // Ignore non-JSON events and keep looking for the requested response.
+    }
+  }
+  throw new Error(`Missing JSON-RPC response for id ${expectedId}`);
+}
+
 function businessClient(
   overrides: Partial<ConnectWiseClient> = {},
 ): ConnectWiseClient {
@@ -110,48 +131,110 @@ describe("authenticated MCP transport", () => {
         }),
       }),
     );
-    const body = await response.text();
-    for (const name of [
-      "whoami",
-      "get_service_ticket",
-      "search_tickets_by_content",
-      "get_ticket_notes_with_content",
-      "get_ticket_attachments_with_details",
-      "list_ticket_tasks",
-      "list_ticket_time_entries",
-      "get_complete_ticket_content",
+    const eventStream = await response.text();
+    const body = parseSseJsonRpcResponse(eventStream, 1) as {
+      result: {
+        tools: Array<{
+          name: string;
+          annotations?: { readOnlyHint?: boolean; idempotentHint?: boolean };
+          _meta?: { ui?: { visibility?: string[]; resourceUri?: string } };
+        }>;
+      };
+    };
+    const expectedNames = [
+      "attach_image_to_ticket",
+      "attach_image_to_time_entry",
+      "call_connectwise",
+      "create_agreement_addition",
+      "create_schedule_entry",
+      "create_service_ticket",
       "create_ticket_note",
+      "create_time_entry",
+      "delete_schedule_entry",
+      "download_document",
       "get_agreement_additions",
       "get_agreement_additions_summary",
-      "create_agreement_addition",
-      "search_agreement_additions",
       "get_agreement_billing_summary",
-      "get_service_boards",
       "get_board_options",
-      "list_board_tickets",
-      "get_service_statuses",
+      "get_complete_ticket_content",
+      "get_document",
+      "get_my_member",
+      "get_service_boards",
       "get_service_priorities",
       "get_service_sources",
-      "get_my_member",
+      "get_service_statuses",
+      "get_service_ticket",
+      "get_ticket_attachments_with_details",
+      "get_ticket_notes_with_content",
+      "get_time_sheets",
+      "list_board_tickets",
       "list_members",
+      "list_schedule_entries",
+      "list_ticket_tasks",
+      "list_ticket_time_entries",
+      "list_time_entries",
+      "open_attachment_uploader",
+      "search_agreement_additions",
       "search_companies",
       "search_contacts",
-      "list_time_entries",
-      "list_schedule_entries",
-      "get_time_sheets",
-      "get_document",
-      "download_document",
-      "open_attachment_uploader",
+      "search_tickets_by_content",
+      "update_schedule_entry",
+      "update_service_ticket",
       "upload_connectwise_image",
-      "call_connectwise",
-    ]) {
-      expect(body).toContain(`"name":"${name}"`);
+      "whoami",
+    ];
+    const names = body.result.tools.map(({ name }) => name);
+    expect(names).toHaveLength(expectedNames.length);
+    expect(new Set(names).size).toBe(expectedNames.length);
+    expect([...names].sort()).toEqual(expectedNames);
+
+    const appOnlyTools = body.result.tools.filter(
+      (tool) =>
+        tool._meta?.ui?.visibility !== undefined &&
+        !tool._meta.ui.visibility.includes("model"),
+    );
+    expect(appOnlyTools).toHaveLength(1);
+    expect(appOnlyTools[0]).toMatchObject({
+      name: "upload_connectwise_image",
+      _meta: { ui: { visibility: ["app"] } },
+    });
+
+    const writeNames = [
+      "attach_image_to_ticket",
+      "attach_image_to_time_entry",
+      "create_agreement_addition",
+      "create_schedule_entry",
+      "create_service_ticket",
+      "create_ticket_note",
+      "create_time_entry",
+      "delete_schedule_entry",
+      "update_schedule_entry",
+      "update_service_ticket",
+      "upload_connectwise_image",
+    ];
+    for (const name of writeNames) {
+      expect(
+        body.result.tools.find((tool) => tool.name === name),
+      ).toMatchObject({
+        annotations: { readOnlyHint: false, idempotentHint: false },
+      });
     }
-    expect(body).not.toContain('"name":"execute_api_call"');
-    expect(body).toContain('"readOnlyHint":false');
-    expect(body).toContain('"idempotentHint":false');
-    expect(body).toContain("ui://connectwise/attachment-uploader.html");
-    expect(body).toContain('"visibility":["app"]');
+
+    expect(
+      body.result.tools.find(({ name }) => name === "open_attachment_uploader"),
+    ).toMatchObject({
+      annotations: { readOnlyHint: true },
+      _meta: {
+        ui: { resourceUri: "ui://connectwise/attachment-uploader.html" },
+      },
+    });
+    for (const excluded of [
+      "execute_api_call",
+      "search_api_endpoints",
+      "get_api_endpoint_details",
+    ]) {
+      expect(names).not.toContain(excluded);
+    }
   });
 
   it.each([
