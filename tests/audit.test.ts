@@ -41,6 +41,43 @@ describe("emitToolAudit", () => {
     expect(messages).toEqual([]);
   });
 
+  it.each([
+    {
+      name: "tool name",
+      field: "tool",
+      value: "get_service_ticket\nauthorization=tool-secret",
+    },
+    {
+      name: "outcome",
+      field: "outcome",
+      value: "success authorization=outcome-secret",
+    },
+    {
+      name: "reason",
+      field: "reason",
+      value: "upstream response contained reason-secret",
+    },
+  ])("suppresses an event with an unrecognized $name", ({ field, value }) => {
+    const messages: string[] = [];
+    const input = {
+      props: { tenantId, objectId, profileAlias: "LUIS" },
+      tool: "get_service_ticket",
+      outcome: "success",
+      reason: "ok",
+      startedAtMs: 0,
+      [field]: value,
+    };
+
+    expect(() =>
+      emitToolAudit(input as unknown as Parameters<typeof emitToolAudit>[0], {
+        logger: (message) => messages.push(message),
+        now: () => 1,
+        createCorrelationId: () => correlationId,
+      }),
+    ).not.toThrow();
+    expect(messages).toEqual([]);
+  });
+
   it("bounds the emitted duration", () => {
     const messages: string[] = [];
 
@@ -111,6 +148,45 @@ describe("emitToolAudit", () => {
     expect(event).not.toHaveProperty("profileAlias");
     expect(messages[0]!).not.toContain("authorization");
     expect(messages[0]!).not.toContain("../OTHER");
+  });
+
+  it("snapshots validated fields before serialization", () => {
+    const messages: string[] = [];
+    let toolReads = 0;
+    let tenantReads = 0;
+    const props = Object.defineProperty({}, "tenantId", {
+      enumerable: true,
+      get: () => (++tenantReads === 1 ? tenantId : "tenant-secret"),
+    });
+    const input = Object.defineProperties(
+      {
+        props,
+        outcome: "success",
+        reason: "ok",
+        startedAtMs: 900,
+      },
+      {
+        tool: {
+          enumerable: true,
+          get: () => (++toolReads === 1 ? "get_service_ticket" : "tool-secret"),
+        },
+      },
+    );
+
+    emitToolAudit(input as Parameters<typeof emitToolAudit>[0], {
+      logger: (message) => messages.push(message),
+      now: () => 1_000,
+      createCorrelationId: () => correlationId,
+    });
+
+    expect(messages).toHaveLength(1);
+    expect(JSON.parse(messages[0]!)).toMatchObject({
+      tenantId,
+      tool: "get_service_ticket",
+    });
+    expect(toolReads).toBe(1);
+    expect(tenantReads).toBe(1);
+    expect(messages[0]!).not.toContain("secret");
   });
 
   it("emits only the allowlisted structured fields", () => {
