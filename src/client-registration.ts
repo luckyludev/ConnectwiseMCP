@@ -1,8 +1,103 @@
 import type { ClientRegistrationCallbackResult } from "@cloudflare/workers-oauth-provider";
 
-const maxClientMetadataBytes = 16 * 1024;
+export const MAX_CLIENT_METADATA_BYTES = 16 * 1024;
 const maxRedirectUriCount = 10;
 const maxRedirectUriLength = 2_048;
+
+function metadataErrorResponse(
+  request: Request,
+  status: 400 | 413,
+  description: string,
+): Response {
+  const headers = new Headers({
+    "cache-control": "no-store",
+    "content-type": "application/json",
+    pragma: "no-cache",
+  });
+  const origin = request.headers.get("origin");
+  if (origin) {
+    headers.set("access-control-allow-origin", origin);
+    headers.set("access-control-allow-methods", "*");
+    headers.set("access-control-allow-headers", "Authorization, *");
+    headers.set("access-control-max-age", "86400");
+  }
+  return Response.json(
+    {
+      error: "invalid_client_metadata",
+      error_description: description,
+    },
+    { status, headers },
+  );
+}
+
+export async function prepareClientRegistrationRequest(
+  request: Request,
+): Promise<Request | Response> {
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^(0|[1-9]\d*)$/.test(declaredLength)) {
+      return metadataErrorResponse(
+        request,
+        400,
+        "Invalid client metadata length",
+      );
+    }
+    const parsedLength = Number(declaredLength);
+    if (!Number.isSafeInteger(parsedLength)) {
+      return metadataErrorResponse(
+        request,
+        413,
+        "Client metadata is too large",
+      );
+    }
+    if (parsedLength > MAX_CLIENT_METADATA_BYTES) {
+      return metadataErrorResponse(
+        request,
+        413,
+        "Client metadata is too large",
+      );
+    }
+  }
+
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  const reader = request.body?.getReader();
+  if (reader) {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (byteLength + value.byteLength > MAX_CLIENT_METADATA_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          return metadataErrorResponse(
+            request,
+            413,
+            "Client metadata is too large",
+          );
+        }
+        byteLength += value.byteLength;
+        chunks.push(value);
+      }
+    } catch {
+      await reader.cancel().catch(() => undefined);
+      return metadataErrorResponse(
+        request,
+        400,
+        "Invalid client metadata body",
+      );
+    }
+  }
+
+  const body = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const headers = new Headers(request.headers);
+  headers.set("content-length", String(byteLength));
+  return new Request(request, { headers, body: body.buffer });
+}
 
 function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
@@ -29,7 +124,7 @@ function isLoopback(hostname: string): boolean {
 
 function allowedUris(value: string): AllowedUri[] {
   try {
-    if (byteLength(value) > maxClientMetadataBytes) return [];
+    if (byteLength(value) > MAX_CLIENT_METADATA_BYTES) return [];
     const parsed: unknown = JSON.parse(value);
     if (
       !Array.isArray(parsed) ||
@@ -119,7 +214,7 @@ export function validateClientRegistration(
   if (
     !Number.isSafeInteger(rawBodyByteLength) ||
     rawBodyByteLength < 0 ||
-    rawBodyByteLength > maxClientMetadataBytes
+    rawBodyByteLength > MAX_CLIENT_METADATA_BYTES
   ) {
     return reject("invalid_client_metadata", "Client metadata is too large");
   }

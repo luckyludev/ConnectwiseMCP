@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   isConfiguredClientRedirectUri,
+  MAX_CLIENT_METADATA_BYTES,
+  prepareClientRegistrationRequest,
   validateClientRegistration as validateRegistration,
 } from "../src/client-registration";
 
@@ -14,6 +16,118 @@ function validateClientRegistration(
     new TextEncoder().encode(JSON.stringify(metadata)).byteLength,
   );
 }
+
+describe("prepareClientRegistrationRequest", () => {
+  it("rejects a declared oversized body without consuming it", async () => {
+    const request = new Request("https://worker.example/oauth/register", {
+      method: "POST",
+      headers: {
+        "content-length": String(MAX_CLIENT_METADATA_BYTES + 1),
+        "content-type": "application/json",
+        origin: "https://client.example",
+      },
+      body: "{}",
+    });
+
+    const result = await prepareClientRegistrationRequest(request);
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(413);
+    expect((result as Response).headers.get("cache-control")).toBe("no-store");
+    expect((result as Response).headers.get("pragma")).toBe("no-cache");
+    expect(
+      (result as Response).headers.get("access-control-allow-origin"),
+    ).toBe("https://client.example");
+    expect(
+      (result as Response).headers.get("access-control-allow-methods"),
+    ).toBe("*");
+    expect(
+      (result as Response).headers.get("access-control-allow-headers"),
+    ).toBe("Authorization, *");
+    expect(await (result as Response).json()).toEqual({
+      error: "invalid_client_metadata",
+      error_description: "Client metadata is too large",
+    });
+    expect(request.bodyUsed).toBe(false);
+  });
+
+  it("cancels a streamed body as soon as its actual size exceeds the limit", async () => {
+    let pulls = 0;
+    let cancellations = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(
+          new Uint8Array(pulls === 1 ? MAX_CLIENT_METADATA_BYTES : 1),
+        );
+      },
+      cancel() {
+        cancellations += 1;
+      },
+    });
+    const request = new Request("https://worker.example/oauth/register", {
+      method: "POST",
+      headers: { "content-length": "1" },
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+
+    const result = await prepareClientRegistrationRequest(request);
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(413);
+    expect(pulls).toBe(2);
+    expect(cancellations).toBe(1);
+  });
+
+  it("rebuilds an accepted request with its verified byte length", async () => {
+    const rawBody = JSON.stringify({
+      redirect_uris: ["https://client.example/callback"],
+    });
+    const request = new Request(
+      "https://worker.example/oauth/register?version=1",
+      {
+        method: "POST",
+        headers: {
+          "content-length": "1",
+          "content-type": "application/json",
+          "x-request-marker": "kept",
+        },
+        body: rawBody,
+      },
+    );
+
+    const result = await prepareClientRegistrationRequest(request);
+
+    expect(result).toBeInstanceOf(Request);
+    const bounded = result as Request;
+    expect(bounded.url).toBe(request.url);
+    expect(bounded.method).toBe("POST");
+    expect(bounded.headers.get("content-type")).toBe("application/json");
+    expect(bounded.headers.get("x-request-marker")).toBe("kept");
+    expect(bounded.headers.get("content-length")).toBe(
+      String(new TextEncoder().encode(rawBody).byteLength),
+    );
+    expect(await bounded.text()).toBe(rawBody);
+  });
+
+  it.each(["invalid", "01", "+1"])(
+    "rejects malformed declared length %s without consuming the body",
+    async (contentLength) => {
+      const request = new Request("https://worker.example/oauth/register", {
+        method: "POST",
+        headers: { "content-length": contentLength },
+        body: "{}",
+      });
+
+      const result = await prepareClientRegistrationRequest(request);
+
+      expect(result).toBeInstanceOf(Response);
+      expect((result as Response).status).toBe(400);
+      expect(request.bodyUsed).toBe(false);
+    },
+  );
+});
 
 describe("validateClientRegistration", () => {
   it("allows only exact configured HTTPS redirect URIs", () => {

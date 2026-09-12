@@ -6,7 +6,10 @@ import {
   createTokenExchangeCallback,
   type WorkerEnv,
 } from "./auth-handler";
-import { validateClientRegistration } from "./client-registration";
+import {
+  prepareClientRegistrationRequest,
+  validateClientRegistration,
+} from "./client-registration";
 import { createMcpServer } from "./mcp-server";
 
 const runtimeEnv = cloudflareEnv as unknown as WorkerEnv;
@@ -21,7 +24,7 @@ const apiHandler = {
   },
 } satisfies Pick<Required<ExportedHandler<WorkerEnv>>, "fetch">;
 
-export default new OAuthProvider({
+const oauthProvider = new OAuthProvider({
   apiRoute: "/mcp",
   apiHandler,
   defaultHandler: createEntraAuthHandler(),
@@ -40,10 +43,24 @@ export default new OAuthProvider({
   allowPlainPKCE: false,
   allowImplicitFlow: false,
   tokenExchangeCallback: createTokenExchangeCallback(runtimeEnv),
-  clientRegistrationCallback: async ({ clientMetadata, request }) =>
+  clientRegistrationCallback: ({ clientMetadata, request }) =>
     validateClientRegistration(
       clientMetadata,
       runtimeEnv.ALLOWED_CLIENT_REDIRECT_URIS,
-      (await request.arrayBuffer()).byteLength,
+      Number(request.headers.get("content-length")),
     ),
 });
+
+export default {
+  async fetch(request: Request, env: WorkerEnv, context: ExecutionContext) {
+    if (
+      request.method === "POST" &&
+      new URL(request.url).pathname === "/oauth/register"
+    ) {
+      const prepared = await prepareClientRegistrationRequest(request);
+      if (prepared instanceof Response) return prepared;
+      request = prepared;
+    }
+    return oauthProvider.fetch(request, env, context);
+  },
+} satisfies Pick<Required<ExportedHandler<WorkerEnv>>, "fetch">;
