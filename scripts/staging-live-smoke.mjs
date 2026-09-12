@@ -34,6 +34,7 @@ import { randomBytes, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import process from "node:process";
 import { readBoundedJson, readBoundedText } from "./smoke-response.mjs";
+import { bearerResourceMetadata } from "./www-authenticate.mjs";
 
 const DEFAULT_BASE_URL =
   "https://connectwise-mcp-v2-staging.funcshun.workers.dev";
@@ -245,6 +246,39 @@ if (
   fail("protected-resource discovery returned unexpected metadata");
 }
 canonicalResource = canonicalResource.toString();
+
+const expectedResourceMetadataUrl = new URL(
+  "/.well-known/oauth-protected-resource/mcp",
+  BASE_URL,
+).toString();
+const unauthenticatedResponse = await smokeFetch(`${BASE_URL}/mcp`, {
+  method: "POST",
+  redirect: "manual",
+  headers: {
+    Accept: "application/json, text/event-stream",
+    "Content-Type": "application/json",
+    "MCP-Protocol-Version": "2025-06-18",
+  },
+  body: JSON.stringify({
+    jsonrpc: "2.0",
+    id: "unauthenticated-boundary-check",
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "staging-boundary-check", version: "1" },
+    },
+  }),
+});
+const authenticate = unauthenticatedResponse.headers.get("www-authenticate");
+await unauthenticatedResponse.body?.cancel();
+if (
+  unauthenticatedResponse.status !== 401 ||
+  bearerResourceMetadata(authenticate) !== expectedResourceMetadataUrl
+) {
+  fail("unauthenticated MCP endpoint returned an invalid OAuth challenge");
+}
+log("unauthenticated MCP OAuth challenge ok");
 
 // 3. Token acquisition.
 //

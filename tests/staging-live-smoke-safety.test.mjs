@@ -10,11 +10,51 @@ import {
   readBoundedJson,
   readBoundedText,
 } from "../scripts/smoke-response.mjs";
+import { bearerResourceMetadata } from "../scripts/www-authenticate.mjs";
 
 describe("staging smoke output safety", () => {
   it("reads bounded response bodies and parses JSON", async () => {
     const response = new Response(JSON.stringify({ ok: true }));
     await expect(readBoundedJson(response, {})).resolves.toEqual({ ok: true });
+  });
+
+  it("parses the Bearer resource metadata parameter without crossing challenges", () => {
+    const metadata =
+      "https://worker.example/.well-known/oauth-protected-resource/mcp";
+    expect(
+      bearerResourceMetadata(
+        `Basic realm="other", bearer realm="mcp", resource_metadata = "${metadata}"`,
+      ),
+    ).toBe(metadata);
+    expect(
+      bearerResourceMetadata(`BEARER resource_metadata="${metadata}"`),
+    ).toBe(metadata);
+    expect(
+      bearerResourceMetadata(
+        `Bearer realm="alpha, Basic decoy", resource_metadata="${metadata}"`,
+      ),
+    ).toBe(metadata);
+    expect(
+      bearerResourceMetadata(
+        `Bearer realm="one", Bearer resource_metadata="${metadata}"`,
+      ),
+    ).toBe(metadata);
+
+    for (const header of [
+      null,
+      `Bearer xresource_metadata="${metadata}"`,
+      `Basic resource_metadata="${metadata}", Bearer realm="mcp"`,
+      `Basic realm="x, Bearer fake", resource_metadata="${metadata}", Digest realm="d"`,
+      `Bearer resource_metadata=${metadata}`,
+      `Bearer, resource_metadata="${metadata}"`,
+      `Bearer resource_metadata=bogus, resource_metadata="${metadata}"`,
+      `Bearer resource_metadata="${metadata}"junk`,
+      `Bearer scope="a", scope="b", resource_metadata="${metadata}"`,
+      `Digest nonsense@@, Bearer resource_metadata="${metadata}"`,
+      `Bearer resource_metadata="${metadata}", resource_metadata="${metadata}"`,
+    ]) {
+      expect(bearerResourceMetadata(header)).toBeNull();
+    }
   });
 
   it("rejects and cancels declared or streamed oversized response bodies", async () => {
@@ -264,6 +304,15 @@ describe("staging smoke output safety", () => {
         response.end(JSON.stringify({ resource: `${baseUrl}/mcp` }));
         return;
       }
+      if (request.url === "/mcp" && !request.headers.authorization) {
+        response.statusCode = 401;
+        response.setHeader(
+          "WWW-Authenticate",
+          `Basic realm="staging", bearer realm="mcp", resource_metadata = "${baseUrl}/.well-known/oauth-protected-resource/mcp"`,
+        );
+        response.end("{}");
+        return;
+      }
 
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
@@ -389,6 +438,15 @@ describe("staging smoke output safety", () => {
       }
       if (requestUrl.pathname === "/.well-known/oauth-protected-resource") {
         response.end(JSON.stringify({ resource: `${baseUrl}/mcp` }));
+        return;
+      }
+      if (requestUrl.pathname === "/mcp" && !request.headers.authorization) {
+        response.statusCode = 401;
+        response.setHeader(
+          "WWW-Authenticate",
+          `Basic realm="staging", bearer realm="mcp", resource_metadata = "${baseUrl}/.well-known/oauth-protected-resource/mcp"`,
+        );
+        response.end("{}");
         return;
       }
       if (requestUrl.pathname === "/oauth/register") {
