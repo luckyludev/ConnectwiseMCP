@@ -12,6 +12,7 @@ import {
 } from "./client-registration";
 import { createMcpServer } from "./mcp-server";
 import { prepareMcpRequest } from "./mcp-request";
+import { prepareOAuthTokenRequest } from "./oauth-token-request";
 
 const runtimeEnv = cloudflareEnv as unknown as WorkerEnv;
 const mcpHandler = createMcpHandler(() => createMcpServer(runtimeEnv), {
@@ -56,11 +57,14 @@ const oauthProvider = new OAuthProvider({
 
 export default {
   async fetch(request: Request, env: WorkerEnv, context: ExecutionContext) {
-    if (
-      request.method === "POST" &&
-      new URL(request.url).pathname === "/oauth/register"
-    ) {
+    const pathname = new URL(request.url).pathname;
+    if (request.method === "POST" && pathname === "/oauth/register") {
       const prepared = await prepareClientRegistrationRequest(request);
+      if (prepared instanceof Response) return prepared;
+      request = prepared;
+    }
+    if (request.method === "POST" && pathname === "/oauth/token") {
+      const prepared = await prepareOAuthTokenRequest(request);
       if (prepared instanceof Response) return prepared;
       request = prepared;
     }
