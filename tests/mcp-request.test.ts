@@ -51,7 +51,7 @@ describe("prepareMcpRequest", () => {
     expect(request.bodyUsed).toBe(false);
   });
 
-  it.each(["invalid", "01", "+1", "-1"])(
+  it.each(["invalid", "+1", "-1", "1.0"])(
     "rejects malformed declared length %s without consuming the body",
     async (contentLength) => {
       const request = new Request("https://worker.example/mcp", {
@@ -67,6 +67,15 @@ describe("prepareMcpRequest", () => {
       expect(request.bodyUsed).toBe(false);
     },
   );
+
+  it("accepts a digit-only declared length with leading zeroes", async () => {
+    const streamed = streamedRequest([new TextEncoder().encode("{}")], "00010");
+
+    const result = await prepareMcpRequest(streamed.request);
+
+    expect(result).toBeInstanceOf(Request);
+    expect(await (result as Request).text()).toBe("{}");
+  });
 
   it("cancels a chunked body immediately after it crosses the limit", async () => {
     const streamed = streamedRequest([

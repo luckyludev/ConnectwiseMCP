@@ -18,7 +18,7 @@ export async function prepareMcpRequest(
 
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null) {
-    if (!/^(0|[1-9]\d*)$/.test(declaredLength)) {
+    if (!/^\d+$/.test(declaredLength)) {
       return errorResponse(400, "Invalid request length");
     }
     const parsedLength = Number(declaredLength);
