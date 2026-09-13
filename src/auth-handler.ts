@@ -171,13 +171,17 @@ async function equalTokens(left: string, right: string): Promise<boolean> {
   return difference === 0;
 }
 
-function isCanonicalHttpsUrl(value: string): boolean {
+export function isCanonicalMcpResource(value: unknown): value is string {
+  if (typeof value !== "string") return false;
   try {
     const url = new URL(value);
     return (
       url.protocol === "https:" &&
       !url.username &&
       !url.password &&
+      !url.port &&
+      url.pathname === "/mcp" &&
+      !url.search &&
       !url.hash &&
       url.href === value
     );
@@ -210,7 +214,7 @@ async function beginAuthorization(
   request: Request,
   env: WorkerEnv,
 ): Promise<Response> {
-  if (!isCanonicalHttpsUrl(env.MCP_CANONICAL_URL)) {
+  if (!isCanonicalMcpResource(env.MCP_CANONICAL_URL)) {
     return new Response("Invalid server configuration", {
       status: 500,
       headers: { "Cache-Control": "no-store" },

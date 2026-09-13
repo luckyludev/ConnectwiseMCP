@@ -4,6 +4,7 @@ import { env as cloudflareEnv } from "cloudflare:workers";
 import {
   createEntraAuthHandler,
   createTokenExchangeCallback,
+  isCanonicalMcpResource,
   type WorkerEnv,
 } from "./auth-handler";
 import {
@@ -57,6 +58,12 @@ const oauthProvider = new OAuthProvider({
 
 export default {
   async fetch(request: Request, env: WorkerEnv, context: ExecutionContext) {
+    if (!isCanonicalMcpResource(env.MCP_CANONICAL_URL)) {
+      return new Response("Invalid server configuration", {
+        status: 500,
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
     const pathname = new URL(request.url).pathname;
     if (request.method === "POST" && pathname === "/oauth/register") {
       const prepared = await prepareClientRegistrationRequest(request);
