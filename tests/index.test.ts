@@ -28,6 +28,33 @@ import worker from "../src/index";
 import type { WorkerEnv } from "../src/auth-handler";
 
 describe("Worker entrypoint configuration boundary", () => {
+  it.each(["", "{", "not-json", "null", "[]", '"metadata"', "7", "true"])(
+    "rejects invalid registration metadata %# before OAuth provider handling",
+    async (body) => {
+      downstream.mcpHandler.mockClear();
+      downstream.oauthProviderFetch.mockClear();
+      const response = await worker.fetch(
+        new Request("https://mcp.example.com/oauth/register", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        }),
+        {
+          MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        } as WorkerEnv,
+        {} as ExecutionContext,
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toMatchObject({
+        error: "invalid_client_metadata",
+      });
+      expect(downstream.oauthProviderFetch).not.toHaveBeenCalled();
+      expect(downstream.mcpHandler).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     ["GET", "/mcp"],
     ["POST", "/oauth/token"],

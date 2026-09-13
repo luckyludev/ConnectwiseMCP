@@ -111,6 +111,52 @@ describe("prepareClientRegistrationRequest", () => {
     expect(cancellations).toBe(1);
   });
 
+  it.each(["null", "[]", '"metadata"', "7", "true"])(
+    "rejects non-object JSON metadata %s before downstream handling",
+    async (rawBody) => {
+      const request = new Request("https://worker.example/oauth/register", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://client.example",
+        },
+        body: rawBody,
+      });
+
+      const result = await prepareClientRegistrationRequest(request);
+
+      expect(result).toBeInstanceOf(Response);
+      expect((result as Response).status).toBe(400);
+      expect((result as Response).headers.get("cache-control")).toBe(
+        "no-store",
+      );
+      expect(await (result as Response).json()).toEqual({
+        error: "invalid_client_metadata",
+        error_description: "Client metadata must be a JSON object",
+      });
+    },
+  );
+
+  it.each(["", "{", "not-json"])(
+    "rejects malformed JSON metadata %# before downstream handling",
+    async (rawBody) => {
+      const request = new Request("https://worker.example/oauth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: rawBody,
+      });
+
+      const result = await prepareClientRegistrationRequest(request);
+
+      expect(result).toBeInstanceOf(Response);
+      expect((result as Response).status).toBe(400);
+      expect(await (result as Response).json()).toEqual({
+        error: "invalid_client_metadata",
+        error_description: "Invalid client metadata body",
+      });
+    },
+  );
+
   it("rebuilds an accepted request with its verified byte length", async () => {
     const rawBody = JSON.stringify({
       redirect_uris: ["https://client.example/callback"],

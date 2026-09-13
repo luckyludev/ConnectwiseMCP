@@ -101,6 +101,26 @@ export async function prepareClientRegistrationRequest(
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
+
+  try {
+    const metadata: unknown = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(body),
+    );
+    if (
+      metadata === null ||
+      typeof metadata !== "object" ||
+      Array.isArray(metadata)
+    ) {
+      return metadataErrorResponse(
+        request,
+        400,
+        "Client metadata must be a JSON object",
+      );
+    }
+  } catch {
+    return metadataErrorResponse(request, 400, "Invalid client metadata body");
+  }
+
   const headers = new Headers(request.headers);
   headers.set("content-length", String(byteLength));
   return new Request(request, { headers, body: body.buffer });
