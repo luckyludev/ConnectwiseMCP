@@ -55,6 +55,58 @@ describe("Worker entrypoint configuration boundary", () => {
     },
   );
 
+  it("rejects an alternate request origin before downstream handling or body consumption", async () => {
+    downstream.mcpHandler.mockClear();
+    downstream.oauthProviderFetch.mockClear();
+    const request = new Request("https://alternate.example/oauth/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "grant_type=authorization_code",
+    });
+
+    const response = await worker.fetch(
+      request,
+      {
+        MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      } as WorkerEnv,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(421);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe("Misdirected request");
+    expect(request.bodyUsed).toBe(false);
+    expect(downstream.oauthProviderFetch).not.toHaveBeenCalled();
+    expect(downstream.mcpHandler).not.toHaveBeenCalled();
+  });
+
+  it("forwards an exact canonical-origin request", async () => {
+    downstream.mcpHandler.mockClear();
+    downstream.oauthProviderFetch.mockReset();
+    downstream.oauthProviderFetch.mockResolvedValueOnce(
+      new Response("downstream", { status: 200 }),
+    );
+    const request = new Request("https://mcp.example.com/mcp", {
+      method: "GET",
+    });
+    const env = {
+      MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+    } as WorkerEnv;
+    const context = {} as ExecutionContext;
+
+    const response = await worker.fetch(request, env, context);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("downstream");
+    expect(downstream.oauthProviderFetch).toHaveBeenCalledOnce();
+    expect(downstream.oauthProviderFetch).toHaveBeenCalledWith(
+      request,
+      env,
+      context,
+    );
+    expect(downstream.mcpHandler).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["GET", "/mcp"],
     ["POST", "/oauth/token"],
