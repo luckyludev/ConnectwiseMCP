@@ -2330,4 +2330,69 @@ describe("authenticated MCP transport", () => {
     expect(badType.body).not.toContain('\\"id\\":1');
     expect(attachCalls).toBe(0);
   });
+
+  it("rejects reversed agreement search dates before a ConnectWise call", async () => {
+    let searchCalls = 0;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () =>
+            businessClient({
+              async getAgreementAdditions() {
+                searchCalls += 1;
+                return [];
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const post = async (
+      id: number,
+      dates: { dateFrom?: string; dateTo?: string },
+    ) => {
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            method: "tools/call",
+            params: {
+              name: "search_agreement_additions",
+              arguments: { agreementId: 17, maxResults: 10, ...dates },
+            },
+          }),
+        }),
+      );
+      return response.text();
+    };
+
+    const reversed = await post(8, {
+      dateFrom: "2026-09-02",
+      dateTo: "2026-09-01",
+    });
+    expect(reversed).toContain("dateFrom must not be after dateTo");
+    expect(searchCalls).toBe(0);
+
+    const equal = await post(9, {
+      dateFrom: "2026-09-02",
+      dateTo: "2026-09-02",
+    });
+    const oneSided = await post(10, { dateFrom: "2026-09-02" });
+    expect(equal).toContain('"text":"[]"');
+    expect(oneSided).toContain('"text":"[]"');
+    expect(searchCalls).toBe(2);
+  });
 });

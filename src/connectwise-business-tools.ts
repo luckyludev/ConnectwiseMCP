@@ -1005,18 +1005,29 @@ export function registerConnectWiseBusinessTools(
       ),
   );
 
+  const agreementSearchSchema = z
+    .object({
+      agreementId: positiveId,
+      productName: z.string().trim().min(1).max(100).optional(),
+      dateFrom: date.optional(),
+      dateTo: date.optional(),
+      maxResults: pageSize,
+    })
+    .refine(
+      ({ dateFrom, dateTo }) =>
+        dateFrom === undefined || dateTo === undefined || dateFrom <= dateTo,
+      {
+        message: "dateFrom must not be after dateTo",
+        path: ["dateTo"],
+      },
+    );
+
   server.registerTool(
     "search_agreement_additions",
     {
       description:
         "Search a bounded set of additions within one agreement by product or date. ConnectWise permissions remain authoritative.",
-      inputSchema: {
-        agreementId: positiveId,
-        productName: z.string().trim().min(1).max(100).optional(),
-        dateFrom: date.optional(),
-        dateTo: date.optional(),
-        maxResults: pageSize,
-      },
+      inputSchema: agreementSearchSchema,
       annotations: readAnnotations,
     },
     ({ agreementId, productName, dateFrom, dateTo, maxResults }) =>
