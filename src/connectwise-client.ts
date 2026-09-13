@@ -1,6 +1,7 @@
 import type { ConnectWiseCredentials } from "./connectwise-profile";
 
 const MAX_RESPONSE_BYTES = 1_000_000;
+export const MAX_CONNECTWISE_RESPONSE_CHUNKS = 4_096;
 export const MAX_IMAGE_UPLOAD_BYTES = 1_000_000;
 export const CONNECTWISE_IMAGE_MIME_TYPES = [
   "image/jpeg",
@@ -46,10 +47,16 @@ async function readBoundedResponse(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let total = 0;
+  let chunkCount = 0;
   let text = "";
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+    chunkCount += 1;
+    if (chunkCount > MAX_CONNECTWISE_RESPONSE_CHUNKS) {
+      await cancelReader(reader);
+      throw new Error(overflowMessage);
+    }
     total += value.byteLength;
     if (total > maxBytes) {
       await cancelReader(reader);
@@ -262,9 +269,15 @@ async function readBoundedBytes(
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let chunkCount = 0;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+    chunkCount += 1;
+    if (chunkCount > MAX_CONNECTWISE_RESPONSE_CHUNKS) {
+      await cancelReader(reader);
+      throw new Error("ConnectWise download too large");
+    }
     total += value.byteLength;
     if (total > maxBytes) {
       await cancelReader(reader);
