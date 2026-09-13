@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ConnectWiseRequestError,
+  MAX_CONNECTWISE_RESPONSE_CHUNKS,
   MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
 } from "../src/connectwise-client";
@@ -14,6 +15,39 @@ const credentials: ConnectWiseCredentials = {
   clientId: "partner-client-id",
   memberId: 149,
 };
+
+function fragmentedResponse(
+  firstChunk: Uint8Array,
+  chunkCount: number,
+  options: {
+    filler?: Uint8Array;
+    contentType?: string;
+    closeAfter?: boolean;
+    cancel?: () => void;
+  } = {},
+): Response {
+  let emitted = 0;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (emitted === chunkCount) {
+          if (options.closeAfter !== false) controller.close();
+          return;
+        }
+        controller.enqueue(
+          emitted === 0 ? firstChunk : (options.filler ?? new Uint8Array()),
+        );
+        emitted += 1;
+      },
+      cancel() {
+        options.cancel?.();
+      },
+    }),
+    options.contentType
+      ? { headers: { "Content-Type": options.contentType } }
+      : undefined,
+  );
+}
 
 describe("ConnectWiseClient", () => {
   it("gets one service ticket with request-scoped authentication", async () => {
@@ -195,6 +229,43 @@ describe("ConnectWiseClient", () => {
     await expect(client.getServiceTicket(123)).rejects.toThrow(
       "ConnectWise response too large",
     );
+  });
+
+  it("accepts a JSON response at the stream chunk limit", async () => {
+    const payload = new TextEncoder().encode('{"id":123}');
+    const whitespace = new TextEncoder().encode(" ");
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        fragmentedResponse(payload, MAX_CONNECTWISE_RESPONSE_CHUNKS, {
+          filler: whitespace,
+        }),
+    });
+
+    await expect(client.getServiceTicket(123)).resolves.toEqual({ id: 123 });
+  });
+
+  it("cancels a fragmented JSON response beyond the stream chunk limit", async () => {
+    let cancelled = false;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        fragmentedResponse(
+          new TextEncoder().encode('{"id":123}'),
+          MAX_CONNECTWISE_RESPONSE_CHUNKS + 1,
+          {
+            filler: new TextEncoder().encode(" "),
+            closeAfter: false,
+            cancel: () => {
+              cancelled = true;
+              throw new Error("sensitive cancellation details");
+            },
+          },
+        ),
+    });
+
+    await expect(client.getServiceTicket(123)).rejects.toThrow(
+      "ConnectWise response too large",
+    );
+    expect(cancelled).toBe(true);
   });
 
   it("retries one safe transient response with a bounded delay", async () => {
@@ -842,6 +913,37 @@ describe("ConnectWiseClient", () => {
     await expect(oversized.downloadDocument(400)).rejects.toThrow(
       "ConnectWise download too large",
     );
+  });
+
+  it("bounds fragmented document downloads by stream chunk count", async () => {
+    const payload = new TextEncoder().encode("ABC");
+    const atLimit = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        fragmentedResponse(payload, MAX_CONNECTWISE_RESPONSE_CHUNKS, {
+          contentType: "application/pdf",
+        }),
+    });
+    await expect(atLimit.downloadDocument(400)).resolves.toEqual({
+      base64: btoa("ABC"),
+      mimeType: "application/pdf",
+      byteLength: 3,
+    });
+
+    let cancelled = false;
+    const overLimit = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        fragmentedResponse(payload, MAX_CONNECTWISE_RESPONSE_CHUNKS + 1, {
+          closeAfter: false,
+          cancel: () => {
+            cancelled = true;
+            throw new Error("sensitive cancellation details");
+          },
+        }),
+    });
+    await expect(overLimit.downloadDocument(400)).rejects.toThrow(
+      "ConnectWise download too large",
+    );
+    expect(cancelled).toBe(true);
   });
 
   it("uploads a bounded image document with multipart fields and no manual content type", async () => {
