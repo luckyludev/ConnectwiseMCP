@@ -1,6 +1,7 @@
 import type { ClientRegistrationCallbackResult } from "@cloudflare/workers-oauth-provider";
 
 export const MAX_CLIENT_METADATA_BYTES = 16 * 1024;
+const MAX_CLIENT_METADATA_CHUNKS = 256;
 const maxRedirectUriCount = 10;
 const maxRedirectUriLength = 2_048;
 
@@ -61,13 +62,18 @@ export async function prepareClientRegistrationRequest(
 
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
+  let chunkCount = 0;
   const reader = request.body?.getReader();
   if (reader) {
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        if (byteLength + value.byteLength > MAX_CLIENT_METADATA_BYTES) {
+        chunkCount += 1;
+        if (
+          chunkCount > MAX_CLIENT_METADATA_CHUNKS ||
+          byteLength + value.byteLength > MAX_CLIENT_METADATA_BYTES
+        ) {
           await reader.cancel().catch(() => undefined);
           return metadataErrorResponse(
             request,
@@ -75,6 +81,7 @@ export async function prepareClientRegistrationRequest(
             "Client metadata is too large",
           );
         }
+        if (value.byteLength === 0) continue;
         byteLength += value.byteLength;
         chunks.push(value);
       }
