@@ -76,6 +76,8 @@ It still has material legacy limitations:
 
 Do not treat this gateway as the production target or leave it generally exposed after v2 cutover. Any rollback must be time-bounded, access-controlled, monitored, and reversed after the incident. Never commit `.env` or registration responses, and never copy real client, Entra, ConnectWise, Cloudflare, or JWT secrets into logs or issue reports.
 
+The rollback build uses hash-locked Python dependencies and digest-pinned Python and `cloudflared` images so the tested artifact can be rebuilt from the release commit. Dependency changes start in `deploy/http-gateway/requirements.txt` and `deploy/cwm-mcp/requirements.txt`; regenerate `requirements.lock` with the exact `uv pip compile` command recorded at the top of that file, review the resolved versions and hashes, and let `legacy-oauth-ci` rebuild, audit, and smoke-test the image. Image digest changes require the same reviewed CI path. Do not replace a digest with a floating image reference during an incident.
+
 ## Docker setup (gateway + tunnel)
 
 The Docker setup lives in `deploy/http-gateway/docker-compose.yml` and runs:
