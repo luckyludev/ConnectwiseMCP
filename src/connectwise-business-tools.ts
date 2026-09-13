@@ -1520,7 +1520,7 @@ export function registerConnectWiseBusinessTools(
       description:
         "Read-only ConnectWise catalog lookup. [BUILD-MARKER 4421014b-2026-08-30] Pick a route ID and provide its required parameters. Routes: " +
         CATALOG_ROUTE_IDS.join(", ") +
-        ". schedule.entries.byMember accepts optional startDate/endDate (YYYY-MM-DD, at most a 31-day span) and returns entries ordered by dateStart. service.tickets.byOwner filters on ticket OWNER (owner/id), not assigned resources; it returns open tickets by default (closedFlag=false) — pass includeClosed:'true' to include closed ones, and returns status, board, priority, owner, contact, closedDate and dateResolved. All routes are GET-only with allowlisted parameters and bounded output.",
+        ". schedule.entries.byMember accepts an optional startDate/endDate pair (valid YYYY-MM-DD dates, at most a 31-day span) and returns entries ordered by dateStart. service.tickets.byOwner filters on ticket OWNER (owner/id), not assigned resources; it returns open tickets by default (closedFlag=false) — pass includeClosed:'true' to include closed ones, and returns status, board, priority, owner, contact, closedDate and dateResolved. All routes are GET-only with route-specific allowlisted parameters and bounded output.",
       inputSchema: {
         route: z.enum(CATALOG_ROUTE_IDS),
         boardId: positiveId.optional(),
@@ -1539,14 +1539,8 @@ export function registerConnectWiseBusinessTools(
           .optional(),
         name: z.string().trim().min(1).max(100).optional(),
         query: z.string().trim().min(1).max(100).optional(),
-        startDate: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/)
-          .optional(),
-        endDate: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/)
-          .optional(),
+        startDate: date.optional(),
+        endDate: date.optional(),
         includeClosed: z.enum(["true", "false"]).optional(),
         pageSize: pageSize,
       },
