@@ -178,6 +178,7 @@ const { startDate: SCHEDULE_START_DATE, endDate: SCHEDULE_END_DATE } =
 const smokeFetch = (input, init = {}) =>
   globalThis.fetch(input, {
     ...init,
+    redirect: "manual",
     signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
   });
 
@@ -467,10 +468,13 @@ if (init.status !== 200 || !init.parsed?.result) {
 }
 log("MCP session established");
 
-await mcpCall(
+const initialized = await mcpCall(
   { jsonrpc: "2.0", method: "notifications/initialized" },
   init.sessionId,
 );
+if (initialized.status !== 200 && initialized.status !== 202) {
+  fail(`MCP initialized notification failed (${initialized.status})`);
+}
 
 // Gate 0: tools/list must expose every expected tool. A tool that passes its
 // own unit tests but is not registered looks identical to a nonexistent tool.

@@ -330,6 +330,59 @@ describe("staging smoke output safety", () => {
     );
   });
 
+  it("rejects discovery redirects without following them", async () => {
+    const canary = "CANARY_REDIRECT_TARGET_AND_TOKEN";
+    let redirectedRequests = 0;
+    let baseUrl = "";
+    const mock = createServer((request, response) => {
+      if (request.url === "/.well-known/oauth-protected-resource") {
+        response.statusCode = 302;
+        response.setHeader("Location", `${baseUrl}/redirected-${canary}`);
+        response.end();
+        return;
+      }
+      redirectedRequests += 1;
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({ resource: `${baseUrl}/mcp` }));
+    });
+    await new Promise((resolve) => mock.listen(0, "127.0.0.1", resolve));
+    baseUrl = `http://127.0.0.1:${mock.address().port}`;
+
+    const child = spawn(
+      process.execPath,
+      [new URL("../scripts/staging-live-smoke.mjs", import.meta.url).pathname],
+      {
+        env: {
+          ...process.env,
+          SMOKE_BASE_URL: baseUrl,
+          SMOKE_EXPECT_RESOURCE: `${baseUrl}/mcp`,
+          NODE_ENV: "test",
+          SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
+          SMOKE_ACCESS_TOKEN: canary,
+          SMOKE_SCHEDULE_START_DATE: "2026-09-01",
+          SMOKE_SCHEDULE_END_DATE: "2026-09-07",
+        },
+      },
+    );
+    let output = "";
+    child.stdout.on("data", (chunk) => (output += chunk));
+    child.stderr.on("data", (chunk) => (output += chunk));
+    const killTimer = setTimeout(() => child.kill("SIGKILL"), 4_000);
+    const exitCode = await new Promise((resolve) =>
+      child.once("close", resolve),
+    );
+    clearTimeout(killTimer);
+    await new Promise((resolve) => mock.close(resolve));
+
+    expect(exitCode).toBe(1);
+    expect(redirectedRequests).toBe(0);
+    expect(output).toBe(
+      "[smoke] FAIL protected-resource discovery failed (302)\n",
+    );
+    expect(output).not.toContain(canary);
+    expect(output).not.toContain(baseUrl);
+  });
+
   it("keeps successful mocked live-flow output free of response data", async () => {
     const canary = "CANARY_SECRET_MEMBER_AND_CONNECTWISE_DATA";
     const smokePath = new URL(
