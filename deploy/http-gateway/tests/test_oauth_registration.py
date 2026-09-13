@@ -2,6 +2,7 @@ import asyncio
 import importlib.util
 import logging
 import os
+import subprocess
 import sys
 import time
 import types
@@ -49,6 +50,51 @@ def client(gateway_module):
 CALLBACK_URI = "https://client.example.com/callback"
 RESOURCE_URI = "https://gateway.example.com"
 PKCE_VERIFIER = "A" * 43
+
+
+def test_connectwise_config_logging_exposes_presence_only():
+    canaries = {
+        "CONNECTWISE_API_URL": "https://config-url-canary.invalid",
+        "CONNECTWISE_COMPANY_ID": "company-id-canary",
+        "CONNECTWISE_PUBLIC_KEY": "public-key-canary",
+        "CONNECTWISE_PRIVATE_KEY": "private-key-canary-with-unique-length",
+        "CONNECTWISE_AUTH_PREFIX": "auth-prefix-canary",
+    }
+    env = os.environ.copy()
+    env.update(canaries)
+    package_root = Path(__file__).parents[2] / "cwm-mcp"
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(package_root), env.get("PYTHONPATH", "")])
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import logging, logging.handlers; "
+                "logging.FileHandler = "
+                "lambda *_args, **_kwargs: logging.NullHandler(); "
+                "from api_gateway import server; "
+                "print(server.setup_config())"
+            ),
+        ],
+        capture_output=True,
+        check=False,
+        env=env,
+        text=True,
+        timeout=20,
+    )
+    output = result.stdout + result.stderr
+
+    assert result.returncode == 0, output
+    assert result.stdout.strip() == "True"
+    assert all(value not in output for value in canaries.values())
+    assert "*" * len(canaries["CONNECTWISE_PRIVATE_KEY"]) not in output
+    assert (
+        "ConnectWise API configuration loaded "
+        "(api_url=configured, company_id=configured, public_key=configured, "
+        "private_key=configured, auth_prefix=configured)"
+    ) in output
 
 
 def register_client(client):

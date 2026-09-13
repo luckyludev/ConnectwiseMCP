@@ -87,12 +87,15 @@ def setup_config() -> bool:
     PRIVATE_KEY = os.environ.get('CONNECTWISE_PRIVATE_KEY')
     AUTH_PREFIX = os.environ.get('CONNECTWISE_AUTH_PREFIX', '')
 
-    logger.info("ConnectWise API Configuration:")
-    logger.info(f"API_URL: {API_URL}")
-    logger.info(f"COMPANY_ID: {COMPANY_ID}")
-    logger.info(f"PUBLIC_KEY: {PUBLIC_KEY}")
-    logger.info(f"PRIVATE_KEY: {'*' * len(PRIVATE_KEY) if PRIVATE_KEY else 'Missing'}")
-    logger.info(f"AUTH_PREFIX: {AUTH_PREFIX}")
+    logger.info(
+        "ConnectWise API configuration loaded "
+        "(api_url=%s, company_id=%s, public_key=%s, private_key=%s, auth_prefix=%s)",
+        "configured" if API_URL else "missing",
+        "configured" if COMPANY_ID else "missing",
+        "configured" if PUBLIC_KEY else "missing",
+        "configured" if PRIVATE_KEY else "missing",
+        "configured" if AUTH_PREFIX else "not_set",
+    )
 
     if not all([API_URL, COMPANY_ID, PUBLIC_KEY, PRIVATE_KEY]):
         logger.error("Incomplete API configuration. Check environment variables.")
