@@ -6,7 +6,11 @@ import {
   generateKeyPair,
 } from "jose";
 import { describe, expect, it } from "vitest";
-import { createEntraAuthHandler, type WorkerEnv } from "../src/auth-handler";
+import {
+  createEntraAuthHandler,
+  isCanonicalMcpResource,
+  type WorkerEnv,
+} from "../src/auth-handler";
 import { signFlowState } from "../src/flow-state";
 
 const INVALID_OAUTH_SCOPES: { scope: string[] }[] = [
@@ -15,6 +19,28 @@ const INVALID_OAUTH_SCOPES: { scope: string[] }[] = [
   { scope: ["mcp:read", "mcp:write"] },
   { scope: ["mcp:read", "mcp:read"] },
 ];
+
+describe("canonical MCP resource validation", () => {
+  it("accepts only a literal canonical HTTPS /mcp URL", () => {
+    expect(isCanonicalMcpResource("https://mcp.example.com/mcp")).toBe(true);
+  });
+
+  it.each([
+    undefined,
+    "",
+    "not-a-url",
+    "http://mcp.example.com/mcp",
+    "https://user@mcp.example.com/mcp",
+    "https://mcp.example.com:443/mcp",
+    "https://mcp.example.com:8443/mcp",
+    "https://mcp.example.com/",
+    "https://mcp.example.com/mcp/",
+    "https://mcp.example.com/mcp?mode=read",
+    "https://mcp.example.com/mcp#fragment",
+  ])("rejects a noncanonical resource value %s", (value) => {
+    expect(isCanonicalMcpResource(value)).toBe(false);
+  });
+});
 
 describe("Entra auth handler", () => {
   it.each([

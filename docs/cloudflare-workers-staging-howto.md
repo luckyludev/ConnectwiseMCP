@@ -70,7 +70,7 @@ For a Workers.dev staging Worker named `connectwise-mcp-v2-staging`, the canonic
 https://connectwise-mcp-v2-staging.<workers-dev-subdomain>.workers.dev/mcp
 ```
 
-The value must be literal and canonical: HTTPS only; `/mcp` path included; no redirect, credentials, query, fragment, port, or trailing-slash variation. Set the remote staging `MCP_CANONICAL_URL` before first publish. The Worker validates this URL during startup, so a non-URL placeholder prevents deployment.
+The value must be literal and canonical: HTTPS only; `/mcp` path included; no redirect, credentials, query, fragment, port, or trailing-slash variation. Set the remote staging `MCP_CANONICAL_URL` before first publish. A syntactically invalid value can prevent Worker-isolate initialization, while a parseable but noncanonical value may still publish. The request entry point rejects every request when the runtime value is noncanonical, before OAuth-provider handling or ConnectWise profile access; a successful publish therefore does not prove that this setting is valid.
 
 Configure these non-secret keys remotely through the approved Cloudflare workflow: `MCP_CANONICAL_URL`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ALLOWED_GROUP_IDS`, `ALLOWED_APP_ROLES`, `ALLOWED_CLIENT_REDIRECT_URIS`, and `CONNECTWISE_ALLOWED_ORIGINS`. Do not copy their live values into the repository.
 
