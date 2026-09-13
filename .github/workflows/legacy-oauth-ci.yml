@@ -66,9 +66,9 @@ jobs:
         run: >-
           ruff check --select E4,E7,E9,F
           deploy/http-gateway/app/main.py
-          deploy/http-gateway/tests/test_oauth_registration.py
+          deploy/http-gateway/tests
       - name: Run legacy OAuth security tests
-        run: python -m pytest -q deploy/http-gateway/tests/test_oauth_registration.py
+        run: python -m pytest -q deploy/http-gateway/tests
       - name: Audit Python rollback dependencies
         run: |
           pip-audit -r deploy/http-gateway/requirements.lock
@@ -79,10 +79,27 @@ jobs:
           npm audit --prefix deploy/cwm-mcp --audit-level=moderate
       - name: Seed ignored build-context canary
         run: printf '%s\n' build-context-canary > deploy/cwm-mcp/.env
-      - name: Validate rollback compose configuration and tunnel image
+      - name: Validate rollback compose configuration and secret isolation
+        env:
+          MCP_STATIC_TOKEN: compose-canary-mcp-static-token
+          SERVER_URL: compose-canary-server-url
+          MCP_RESOURCE_URL: compose-canary-mcp-resource-url
+          JWT_SECRET_KEY: compose-canary-jwt-secret-key
+          CONNECTWISE_API_URL: compose-canary-connectwise-api-url
+          CONNECTWISE_COMPANY_ID: compose-canary-connectwise-company-id
+          CONNECTWISE_PUBLIC_KEY: compose-canary-connectwise-public-key
+          CONNECTWISE_PRIVATE_KEY: compose-canary-connectwise-private-key
+          CONNECTWISE_AUTH_PREFIX: compose-canary-connectwise-auth-prefix
+          AZURE_TENANT_ID: compose-canary-azure-tenant-id
+          AZURE_CLIENT_ID: compose-canary-azure-client-id
+          AZURE_CLIENT_SECRET: compose-canary-azure-client-secret
+          AZURE_AUDIENCE: compose-canary-azure-audience
+          AZURE_SCOPES: compose-canary-azure-scopes
+          CLOUDFLARE_TUNNEL_TOKEN: compose-canary-cloudflare-tunnel-token
         run: |
           cp deploy/http-gateway/.env.example deploy/http-gateway/.env
-          docker compose --env-file deploy/http-gateway/.env --file deploy/http-gateway/docker-compose.yml config --quiet
+          docker compose --env-file deploy/http-gateway/.env --file deploy/http-gateway/docker-compose.yml config --format json > /tmp/rollback-compose.json
+          python deploy/http-gateway/tests/verify_compose_secret_isolation.py /tmp/rollback-compose.json --verify-canaries
           docker pull cloudflare/cloudflared:latest@sha256:b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4
           docker run --rm cloudflare/cloudflared:latest@sha256:b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4 --version
       - name: Build rollback image
