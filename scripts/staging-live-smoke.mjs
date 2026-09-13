@@ -34,6 +34,10 @@ import { randomBytes, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import process from "node:process";
 import { readBoundedJson, readBoundedText } from "./smoke-response.mjs";
+import {
+  EXPECTED_TOOL_NAMES,
+  validateStagingToolsListResult,
+} from "./staging-tool-catalog.mjs";
 import { bearerResourceMetadata } from "./www-authenticate.mjs";
 
 const DEFAULT_BASE_URL =
@@ -478,73 +482,16 @@ const toolsListResp = await mcpCall(
 if (
   toolsListResp.status !== 200 ||
   toolsListResp.parsed?.error ||
-  !Array.isArray(toolsListResp.parsed?.result?.tools)
+  !toolsListResp.parsed?.result
 ) {
   fail("tools/list failed");
 }
-const registeredTools = (toolsListResp.parsed?.result?.tools ?? []).map(
-  (t) => t.name,
+const catalogError = validateStagingToolsListResult(
+  toolsListResp.parsed.result,
 );
-const expectedTools = [
-  "whoami",
-  "get_service_ticket",
-  "search_tickets_by_content",
-  "get_ticket_notes_with_content",
-  "get_ticket_attachments_with_details",
-  "list_ticket_tasks",
-  "list_ticket_time_entries",
-  "get_complete_ticket_content",
-  "create_ticket_note",
-  "attach_image_to_ticket",
-  "attach_image_to_time_entry",
-  "get_service_boards",
-  "get_board_options",
-  "list_board_tickets",
-  "get_service_statuses",
-  "get_service_priorities",
-  "get_service_sources",
-  "get_my_member",
-  "list_members",
-  "search_companies",
-  "search_contacts",
-  "list_time_entries",
-  "list_schedule_entries",
-  "get_time_sheets",
-  "get_document",
-  "download_document",
-  "open_attachment_uploader",
-  "upload_connectwise_image",
-  "call_connectwise",
-  "get_agreement_additions",
-  "get_agreement_additions_summary",
-  "create_agreement_addition",
-  "search_agreement_additions",
-  "get_agreement_billing_summary",
-  "create_schedule_entry",
-  "update_schedule_entry",
-  "delete_schedule_entry",
-  "create_time_entry",
-  "create_service_ticket",
-  "update_service_ticket",
-];
-const missing = expectedTools.filter((name) => !registeredTools.includes(name));
-if (missing.length > 0) {
-  fail(`tools/list is missing ${missing.length} expected tool(s)`);
-}
-const forbidden = ["execute_api_call"].filter((name) =>
-  registeredTools.includes(name),
-);
-if (forbidden.length > 0) {
-  fail(`tools/list exposes forbidden generic tool(s): ${forbidden.join(", ")}`);
-}
-const unexpected = registeredTools.filter(
-  (name) => !expectedTools.includes(name),
-);
-if (unexpected.length > 0) {
-  fail(`tools/list exposes ${unexpected.length} unexpected tool(s)`);
-}
+if (catalogError) fail(catalogError);
 log(
-  `tools/list ok (${registeredTools.length} registered; expected catalog present)`,
+  `tools/list ok (${EXPECTED_TOOL_NAMES.length} registered; 39 model-visible, 1 app-only)`,
 );
 
 async function callTool(name, args) {

@@ -10,9 +10,58 @@ import {
   readBoundedJson,
   readBoundedText,
 } from "../scripts/smoke-response.mjs";
+import {
+  EXPECTED_TOOL_NAMES,
+  validateStagingToolCatalog,
+  validateStagingToolsListResult,
+} from "../scripts/staging-tool-catalog.mjs";
 import { bearerResourceMetadata } from "../scripts/www-authenticate.mjs";
 
+function expectedToolCatalog() {
+  return EXPECTED_TOOL_NAMES.map((name) =>
+    name === "upload_connectwise_image"
+      ? { name, _meta: { ui: { visibility: ["app"] } } }
+      : { name },
+  );
+}
+
 describe("staging smoke output safety", () => {
+  it("requires the exact 39 model-visible and one app-only tool catalog", () => {
+    const expected = expectedToolCatalog();
+    expect(expected).toHaveLength(40);
+    expect(validateStagingToolCatalog(expected)).toBeUndefined();
+    expect(
+      validateStagingToolsListResult({
+        tools: expected,
+        nextCursor: "CANARY_UNREAD_PAGE",
+      }),
+    ).toBe("tools/list pagination is not allowed for the fixed catalog");
+
+    const uploadVisibleToModels = structuredClone(expected);
+    uploadVisibleToModels
+      .find((tool) => tool.name === "upload_connectwise_image")
+      ._meta.ui.visibility.push("model");
+    expect(validateStagingToolCatalog(uploadVisibleToModels)).toBe(
+      "tools/list does not preserve the app-only upload boundary",
+    );
+
+    const uploadWithoutVisibility = structuredClone(expected);
+    delete uploadWithoutVisibility.find(
+      (tool) => tool.name === "upload_connectwise_image",
+    )._meta;
+    expect(validateStagingToolCatalog(uploadWithoutVisibility)).toBe(
+      "tools/list does not preserve the app-only upload boundary",
+    );
+
+    const secondAppOnlyTool = structuredClone(expected);
+    secondAppOnlyTool.find((tool) => tool.name === "whoami")._meta = {
+      ui: { visibility: ["app"] },
+    };
+    expect(validateStagingToolCatalog(secondAppOnlyTool)).toBe(
+      "tools/list hides an unexpected tool from model clients",
+    );
+  });
+
   it("reads bounded response bodies and parses JSON", async () => {
     const response = new Response(JSON.stringify({ ok: true }));
     await expect(readBoundedJson(response, {})).resolves.toEqual({ ok: true });
@@ -287,14 +336,8 @@ describe("staging smoke output safety", () => {
       "../scripts/staging-live-smoke.mjs",
       import.meta.url,
     );
-    const source = await readFile(smokePath, "utf8");
-    const toolBlock = source.match(
-      /const expectedTools = \[([\s\S]*?)\];/,
-    )?.[1];
-    const toolNames = [...(toolBlock ?? "").matchAll(/"([^"]+)"/g)].map(
-      (match) => match[1],
-    );
-    expect(toolNames.length).toBe(40);
+    const toolCatalog = expectedToolCatalog();
+    expect(toolCatalog).toHaveLength(40);
 
     let baseUrl = "";
     let capturedScheduleArguments;
@@ -333,7 +376,12 @@ describe("staging smoke output safety", () => {
           JSON.stringify({
             jsonrpc: "2.0",
             id: payload.id,
-            result: { tools: toolNames.map((name) => ({ name })) },
+            result: {
+              tools: toolCatalog,
+              ...(request.headers.authorization === "Bearer PAGINATED_CANARY"
+                ? { nextCursor: "CANARY_UNREAD_PAGE" }
+                : {}),
+            },
           }),
         );
         return;
@@ -364,17 +412,18 @@ describe("staging smoke output safety", () => {
     await new Promise((resolve) => mock.listen(0, "127.0.0.1", resolve));
     baseUrl = `http://127.0.0.1:${mock.address().port}`;
 
+    const smokeEnv = {
+      ...process.env,
+      SMOKE_BASE_URL: baseUrl,
+      SMOKE_EXPECT_RESOURCE: `${baseUrl}/mcp`,
+      NODE_ENV: "test",
+      SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
+      SMOKE_ACCESS_TOKEN: `TOKEN_${canary}`,
+      SMOKE_SCHEDULE_START_DATE: "2026-09-01",
+      SMOKE_SCHEDULE_END_DATE: "2026-09-07",
+    };
     const child = spawn(process.execPath, [smokePath.pathname], {
-      env: {
-        ...process.env,
-        SMOKE_BASE_URL: baseUrl,
-        SMOKE_EXPECT_RESOURCE: `${baseUrl}/mcp`,
-        NODE_ENV: "test",
-        SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
-        SMOKE_ACCESS_TOKEN: `TOKEN_${canary}`,
-        SMOKE_SCHEDULE_START_DATE: "2026-09-01",
-        SMOKE_SCHEDULE_END_DATE: "2026-09-07",
-      },
+      env: smokeEnv,
     });
     let output = "";
     child.stdout.on("data", (chunk) => (output += chunk));
@@ -382,8 +431,24 @@ describe("staging smoke output safety", () => {
     const exitCode = await new Promise((resolve) =>
       child.once("close", resolve),
     );
+
+    const paginatedChild = spawn(process.execPath, [smokePath.pathname], {
+      env: { ...smokeEnv, SMOKE_ACCESS_TOKEN: "PAGINATED_CANARY" },
+    });
+    let paginatedOutput = "";
+    paginatedChild.stdout.on("data", (chunk) => (paginatedOutput += chunk));
+    paginatedChild.stderr.on("data", (chunk) => (paginatedOutput += chunk));
+    const paginatedExitCode = await new Promise((resolve) =>
+      paginatedChild.once("close", resolve),
+    );
     await new Promise((resolve) => mock.close(resolve));
 
+    expect(paginatedExitCode).toBe(1);
+    expect(paginatedOutput).toContain(
+      "FAIL tools/list pagination is not allowed for the fixed catalog",
+    );
+    expect(paginatedOutput).not.toContain("CANARY_UNREAD_PAGE");
+    expect(paginatedOutput).not.toContain("PAGINATED_CANARY");
     expect(exitCode).toBe(0);
     expect(capturedScheduleArguments).toEqual({
       route: "schedule.entries.byMember",
@@ -411,13 +476,7 @@ describe("staging smoke output safety", () => {
       "../scripts/staging-live-smoke.mjs",
       import.meta.url,
     );
-    const source = await readFile(smokePath, "utf8");
-    const toolBlock = source.match(
-      /const expectedTools = \[([\s\S]*?)\];/,
-    )?.[1];
-    const toolNames = [...(toolBlock ?? "").matchAll(/"([^"]+)"/g)].map(
-      (match) => match[1],
-    );
+    const toolCatalog = expectedToolCatalog();
     const canaries = {
       clientId: "CANARY_CLIENT_ID",
       clientSecret: "CANARY_CLIENT_SECRET",
@@ -483,7 +542,7 @@ describe("staging smoke output safety", () => {
           JSON.stringify({
             jsonrpc: "2.0",
             id: payload.id,
-            result: { tools: toolNames.map((name) => ({ name })) },
+            result: { tools: toolCatalog },
           }),
         );
       } else if (payload.method === "tools/call") {
