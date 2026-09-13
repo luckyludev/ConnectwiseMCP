@@ -80,6 +80,37 @@ describe("prepareClientRegistrationRequest", () => {
     expect(cancellations).toBe(1);
   });
 
+  it("bounds streamed bodies by chunk count even when chunks are empty", async () => {
+    let pulls = 0;
+    let cancellations = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array());
+      },
+      cancel() {
+        cancellations += 1;
+      },
+    });
+    const request = new Request("https://worker.example/oauth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+
+    const result = await prepareClientRegistrationRequest(request);
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(413);
+    expect(await (result as Response).json()).toEqual({
+      error: "invalid_client_metadata",
+      error_description: "Client metadata is too large",
+    });
+    expect(pulls).toBe(257);
+    expect(cancellations).toBe(1);
+  });
+
   it("rebuilds an accepted request with its verified byte length", async () => {
     const rawBody = JSON.stringify({
       redirect_uris: ["https://client.example/callback"],
