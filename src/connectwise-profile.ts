@@ -15,6 +15,7 @@ function isApprovedConnectWiseOrigin(value: string): boolean {
       !url.search &&
       !url.hash &&
       !isIpLiteral &&
+      !hostname.endsWith(".") &&
       hostname !== "localhost" &&
       !hostname.endsWith(".localhost") &&
       !hostname.endsWith(".local")

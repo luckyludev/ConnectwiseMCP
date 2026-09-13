@@ -60,7 +60,10 @@ describe("resolveConnectWiseCredentials", () => {
     "https://169.254.169.254",
     "https://[::1]",
     "https://localhost",
+    "https://localhost.",
     "https://connectwise.local",
+    "https://connectwise.local.",
+    "https://api-na.myconnectwise.net.",
     "https://api-na.myconnectwise.net/path",
     "https://user@api-na.myconnectwise.net",
   ])("rejects unsafe allowed origin %s", (origin) => {
