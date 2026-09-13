@@ -394,6 +394,7 @@ describe("staging smoke output safety", () => {
 
     let baseUrl = "";
     let capturedScheduleArguments;
+    let rejectedPostInitializeRequests = 0;
     const mock = createServer(async (request, response) => {
       response.setHeader("Content-Type", "application/json");
       if (request.url === "/.well-known/oauth-protected-resource") {
@@ -413,13 +414,63 @@ describe("staging smoke output safety", () => {
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      const authorization = request.headers.authorization;
+      const rejectedInitializeTokens = new Set([
+        "Bearer MALFORMED_INIT_CANARY",
+        "Bearer UNSUPPORTED_INIT_CANARY",
+        "Bearer INVALID_ENVELOPE_CANARY",
+        "Bearer ERROR_INIT_CANARY",
+        "Bearer WRONG_ID_CANARY",
+        "Bearer NO_TOOLS_CAPABILITY_CANARY",
+      ]);
+      if (
+        payload.method !== "initialize" &&
+        rejectedInitializeTokens.has(authorization)
+      ) {
+        rejectedPostInitializeRequests += 1;
+      }
       if (payload.method === "initialize") {
         response.setHeader("Mcp-Session-Id", "safe-session");
+        if (authorization === "Bearer ERROR_INIT_CANARY") {
+          response.end(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: payload.id,
+              error: { code: -32603, message: "SERVER_DATA_CANARY" },
+            }),
+          );
+          return;
+        }
         response.end(
           JSON.stringify({
-            jsonrpc: "2.0",
-            id: payload.id,
-            result: { serverInfo: { name: canary } },
+            jsonrpc:
+              authorization === "Bearer INVALID_ENVELOPE_CANARY"
+                ? "1.0"
+                : "2.0",
+            id:
+              authorization === "Bearer WRONG_ID_CANARY"
+                ? payload.id + 1
+                : payload.id,
+            result:
+              authorization === "Bearer MALFORMED_INIT_CANARY"
+                ? {}
+                : {
+                    protocolVersion:
+                      authorization === "Bearer UNSUPPORTED_INIT_CANARY"
+                        ? "1900-01-01"
+                        : "2025-06-18",
+                    capabilities:
+                      authorization === "Bearer NO_TOOLS_CAPABILITY_CANARY"
+                        ? {}
+                        : { tools: {} },
+                    serverInfo: {
+                      name:
+                        authorization === "Bearer UNSUPPORTED_INIT_CANARY"
+                          ? "SERVER_DATA_CANARY"
+                          : "connectwise-mcp-v2",
+                      version: "test",
+                    },
+                  },
           }),
         );
         return;
@@ -494,7 +545,51 @@ describe("staging smoke output safety", () => {
     const paginatedExitCode = await new Promise((resolve) =>
       paginatedChild.once("close", resolve),
     );
+
+    const runRejectedInitialize = async (accessToken) => {
+      const rejectedChild = spawn(process.execPath, [smokePath.pathname], {
+        env: { ...smokeEnv, SMOKE_ACCESS_TOKEN: accessToken },
+      });
+      let rejectedOutput = "";
+      rejectedChild.stdout.on("data", (chunk) => (rejectedOutput += chunk));
+      rejectedChild.stderr.on("data", (chunk) => (rejectedOutput += chunk));
+      const rejectedExitCode = await new Promise((resolve) =>
+        rejectedChild.once("close", resolve),
+      );
+      return { exitCode: rejectedExitCode, output: rejectedOutput };
+    };
+    const malformedInitialize = await runRejectedInitialize(
+      "MALFORMED_INIT_CANARY",
+    );
+    const unsupportedInitialize = await runRejectedInitialize(
+      "UNSUPPORTED_INIT_CANARY",
+    );
+    const invalidEnvelope = await runRejectedInitialize(
+      "INVALID_ENVELOPE_CANARY",
+    );
+    const errorInitialize = await runRejectedInitialize("ERROR_INIT_CANARY");
+    const wrongIdInitialize = await runRejectedInitialize("WRONG_ID_CANARY");
+    const noToolsCapability = await runRejectedInitialize(
+      "NO_TOOLS_CAPABILITY_CANARY",
+    );
     await new Promise((resolve) => mock.close(resolve));
+
+    for (const rejected of [
+      malformedInitialize,
+      unsupportedInitialize,
+      invalidEnvelope,
+      errorInitialize,
+      wrongIdInitialize,
+      noToolsCapability,
+    ]) {
+      expect(rejected.exitCode).toBe(1);
+      expect(rejected.output).toContain("FAIL MCP initialize failed (200)");
+      expect(rejected.output).not.toContain("MCP session established");
+      expect(rejected.output).not.toContain("INIT_CANARY");
+      expect(rejected.output).not.toContain("SERVER_DATA_CANARY");
+      expect(rejected.output).not.toContain(baseUrl);
+    }
+    expect(rejectedPostInitializeRequests).toBe(0);
 
     expect(paginatedExitCode).toBe(1);
     expect(paginatedOutput).toContain(
@@ -588,7 +683,15 @@ describe("staging smoke output safety", () => {
       if (payload.method === "initialize") {
         response.setHeader("Mcp-Session-Id", "oauth-session");
         response.end(
-          JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: {} }),
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: payload.id,
+            result: {
+              protocolVersion: "2025-06-18",
+              capabilities: { tools: {} },
+              serverInfo: { name: "connectwise-mcp-v2", version: "test" },
+            },
+          }),
         );
       } else if (payload.method === "tools/list") {
         response.end(

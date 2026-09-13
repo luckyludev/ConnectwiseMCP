@@ -33,6 +33,10 @@ import { createServer } from "node:http";
 import { randomBytes, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import process from "node:process";
+import {
+  InitializeResultSchema,
+  JSONRPCResultResponseSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { readBoundedJson, readBoundedText } from "./smoke-response.mjs";
 import {
   EXPECTED_TOOL_NAMES,
@@ -463,7 +467,18 @@ const init = await mcpCall(
   },
   null,
 );
-if (init.status !== 200 || !init.parsed?.result) {
+const initializeEnvelope = JSONRPCResultResponseSchema.safeParse(init.parsed);
+const initializeResult = initializeEnvelope.success
+  ? InitializeResultSchema.safeParse(initializeEnvelope.data.result)
+  : null;
+if (
+  init.status !== 200 ||
+  !initializeEnvelope.success ||
+  initializeEnvelope.data.id !== 1 ||
+  !initializeResult?.success ||
+  initializeResult.data.protocolVersion !== "2025-06-18" ||
+  !initializeResult.data.capabilities.tools
+) {
   fail(`MCP initialize failed (${init.status})`);
 }
 log("MCP session established");
