@@ -64,7 +64,14 @@ export default {
         headers: { "Cache-Control": "no-store" },
       });
     }
-    const pathname = new URL(request.url).pathname;
+    const requestUrl = new URL(request.url);
+    if (requestUrl.origin !== new URL(env.MCP_CANONICAL_URL).origin) {
+      return new Response("Misdirected request", {
+        status: 421,
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+    const pathname = requestUrl.pathname;
     if (request.method === "POST" && pathname === "/oauth/register") {
       const prepared = await prepareClientRegistrationRequest(request);
       if (prepared instanceof Response) return prepared;
