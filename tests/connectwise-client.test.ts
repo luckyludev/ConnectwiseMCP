@@ -473,6 +473,15 @@ describe("ConnectWiseClient", () => {
     await expect(
       client.catalogGet("service.boards.statuses", { pageSize: 5 }),
     ).rejects.toThrow("Missing boardId");
+
+    await expect(
+      client.catalogGet("service.boards.statuses", {
+        boardId: 32,
+        query: "ignored before hardening",
+      }),
+    ).rejects.toThrow(
+      "Parameter query is not allowed for route service.boards.statuses",
+    );
   });
 
   it("bounds schedule.entries.byMember with an optional date range", async () => {
@@ -494,14 +503,13 @@ describe("ConnectWiseClient", () => {
       "member/id=149 and dateStart >= [2026-08-01] and dateStart <= [2026-08-15T23:59:59]",
     );
 
-    await client.catalogGet("schedule.entries.byMember", {
-      memberId: 149,
-      startDate: "2026-08-01",
-      pageSize: 20,
-    });
-    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
-      "member/id=149 and dateStart >= [2026-08-01]",
-    );
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-08-01",
+        pageSize: 20,
+      }),
+    ).rejects.toThrow("startDate and endDate must be provided together");
 
     await expect(
       client.catalogGet("schedule.entries.byMember", {
@@ -510,6 +518,23 @@ describe("ConnectWiseClient", () => {
         endDate: "2026-08-01",
       }),
     ).rejects.toThrow("endDate must be on or after startDate");
+
+    await client.catalogGet("schedule.entries.byMember", {
+      memberId: 149,
+      startDate: "2026-08-01",
+      endDate: "2026-08-31",
+    });
+    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
+      "member/id=149 and dateStart >= [2026-08-01] and dateStart <= [2026-08-31T23:59:59]",
+    );
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-08-01",
+        endDate: "2026-09-01",
+      }),
+    ).rejects.toThrow("Date range must be 31 days or less");
 
     await expect(
       client.catalogGet("schedule.entries.byMember", {
@@ -523,8 +548,17 @@ describe("ConnectWiseClient", () => {
       client.catalogGet("schedule.entries.byMember", {
         memberId: 149,
         startDate: "08/01/2026",
+        endDate: "2026-08-15",
       }),
     ).rejects.toThrow("Invalid startDate");
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-02-30",
+        endDate: "2026-03-01",
+      }),
+    ).rejects.toThrow("Invalid startDate calendar date");
   });
 
   it("sends no orderBy on schedule entries and sorts them in the worker", async () => {
@@ -777,6 +811,19 @@ describe("ConnectWiseClient", () => {
     await expect(client.downloadDocument(400)).resolves.toEqual({
       base64: btoa("ABC"),
       mimeType: "application/pdf",
+      byteLength: 3,
+    });
+
+    const unsafeMimeType = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        new Response("ABC", {
+          status: 200,
+          headers: { "Content-Type": `text/plain-${"x".repeat(200)}` },
+        }),
+    });
+    await expect(unsafeMimeType.downloadDocument(400)).resolves.toEqual({
+      base64: btoa("ABC"),
+      mimeType: "application/octet-stream",
       byteLength: 3,
     });
 

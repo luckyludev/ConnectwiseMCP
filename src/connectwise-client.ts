@@ -403,7 +403,8 @@ type CatalogRoute = {
   query?: (
     params: Record<string, string | number>,
   ) => Record<string, string | number>;
-  required: (string | number)[];
+  required: string[];
+  allowed: string[];
   transform?: (value: unknown) => unknown;
 };
 
@@ -446,10 +447,12 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
     path: (p) => `/service/boards/${p.boardId}/statuses`,
     required: ["boardId"],
+    allowed: ["boardId", "pageSize"],
   },
   "service.boards.types": {
     path: (p) => `/service/boards/${p.boardId}/types`,
     required: ["boardId"],
+    allowed: ["boardId", "pageSize"],
   },
   "service.tickets.byStatus": {
     path: () => "/service/tickets",
@@ -458,6 +461,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
       pageSize: p.pageSize ?? 20,
     }),
     required: ["statusId"],
+    allowed: ["statusId", "pageSize"],
   },
   "service.tickets.byOwner": {
     path: () => "/service/tickets",
@@ -481,6 +485,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
       };
     },
     required: ["memberId"],
+    allowed: ["memberId", "includeClosed", "pageSize"],
   },
   "company.configurations": {
     path: () => "/company/configurations",
@@ -491,6 +496,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
       pageSize: p.pageSize ?? 20,
     }),
     required: [],
+    allowed: ["query", "pageSize"],
   },
   "system.documents": {
     path: () => "/system/documents",
@@ -500,6 +506,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
       pageSize: p.pageSize ?? 20,
     }),
     required: ["recordId"],
+    allowed: ["recordId", "recordType", "pageSize"],
   },
   "finance.agreements.byName": {
     path: () => "/finance/agreements",
@@ -508,6 +515,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
       pageSize: p.pageSize ?? 20,
     }),
     required: ["name"],
+    allowed: ["name", "pageSize"],
   },
   "time.entries.byMember": {
     path: () => "/time/entries",
@@ -516,6 +524,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
       pageSize: p.pageSize ?? 20,
     }),
     required: ["memberId"],
+    allowed: ["memberId", "pageSize"],
   },
   "schedule.entries.byMember": {
     path: () => "/schedule/entries",
@@ -527,49 +536,51 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
       pageSize: p.pageSize ?? 20,
     }),
     required: ["memberId"],
+    allowed: ["memberId", "startDate", "endDate", "pageSize"],
     transform: sortByDateStart,
   },
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-function isoDateToUtcMs(value: string): number {
-  const [year, month, day] = value.split("-").map(Number);
-  if (year === undefined || month === undefined || day === undefined) {
-    throw new Error("Invalid date (expected YYYY-MM-DD)");
+function isoDateToUtcMs(value: string, label: string): number {
+  if (!ISO_DATE.test(value)) {
+    throw new Error(`Invalid ${label} (expected YYYY-MM-DD)`);
   }
-  return Date.UTC(year, month - 1, day);
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year!, month! - 1, day!));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() + 1 !== month ||
+    parsed.getUTCDate() !== day
+  ) {
+    throw new Error(`Invalid ${label} calendar date`);
+  }
+  return parsed.getTime();
 }
 
 function scheduleDateConditions(
   p: Readonly<Record<string, unknown>>,
 ): string[] {
-  const clauses: string[] = [];
-  for (const [key, operator] of [
-    ["startDate", ">="],
-    ["endDate", "<="],
-  ] as const) {
-    const value = p[key];
-    if (value === undefined) continue;
-    if (typeof value !== "string" || !ISO_DATE.test(value)) {
-      throw new Error(`Invalid ${key} (expected YYYY-MM-DD)`);
-    }
-    // CW requires the dateStart field and square-bracket datetime literals.
-    clauses.push(
-      `dateStart ${operator} [${value}${operator === "<=" ? "T23:59:59" : ""}]`,
-    );
+  const hasStart = p.startDate !== undefined;
+  const hasEnd = p.endDate !== undefined;
+  if (hasStart !== hasEnd) {
+    throw new Error("startDate and endDate must be provided together");
   }
-  if (clauses.length === 2) {
-    const startMs = isoDateToUtcMs(String(p.startDate));
-    const endMs = isoDateToUtcMs(String(p.endDate));
-    if (endMs < startMs) {
-      throw new Error("endDate must be on or after startDate");
-    }
-    if (endMs - startMs > 31 * 86_400_000) {
-      throw new Error("Date range must be 31 days or less");
-    }
+  if (!hasStart) return [];
+
+  const startDate = String(p.startDate);
+  const endDate = String(p.endDate);
+  const startMs = isoDateToUtcMs(startDate, "startDate");
+  const endMs = isoDateToUtcMs(endDate, "endDate");
+  if (endMs < startMs) {
+    throw new Error("endDate must be on or after startDate");
   }
-  return clauses;
+  if (endMs - startMs > 30 * 86_400_000) {
+    throw new Error("Date range must be 31 days or less");
+  }
+  // CW requires the dateStart field and square-bracket datetime literals.
+  return [`dateStart >= [${startDate}]`, `dateStart <= [${endDate}T23:59:59]`];
 }
 
 function positiveId(value: number, label: string): void {
@@ -592,6 +603,15 @@ const ATTACHMENT_MIME_TYPES = new Set([
 ]);
 
 const MAX_ATTACHMENT_BASE64_CHARS = Math.ceil((10_000_000 / 3) * 4);
+const SAFE_DOWNLOAD_MIME_TYPE =
+  /^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,62}$/;
+
+function downloadMimeType(contentType: string | null): string {
+  const mimeType = (contentType ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  return SAFE_DOWNLOAD_MIME_TYPE.test(mimeType)
+    ? mimeType
+    : "application/octet-stream";
+}
 
 function attachmentPayload(input: {
   filename: string;
@@ -1071,12 +1091,9 @@ export function createConnectWiseClient(
         throw new ConnectWiseDownloadError(response.status);
       }
       const bytes = await readBoundedBytes(response, MAX_DOWNLOAD_BYTES);
-      const contentType = response.headers.get("Content-Type") ?? "";
-      const mimeType =
-        contentType.split(";")[0]?.trim() || "application/octet-stream";
       return {
         base64: bytesToBase64(bytes),
-        mimeType,
+        mimeType: downloadMimeType(response.headers.get("Content-Type")),
         byteLength: bytes.byteLength,
       };
     },
@@ -1163,6 +1180,11 @@ export function createConnectWiseClient(
       const definition = CATALOG_ROUTES[route as CatalogRouteId];
       if (!definition) {
         throw new Error(`Unknown ConnectWise route: ${route}`);
+      }
+      for (const key of Object.keys(params)) {
+        if (!definition.allowed.includes(key)) {
+          throw new Error(`Parameter ${key} is not allowed for route ${route}`);
+        }
       }
       for (const key of definition.required) {
         const value = params[key];
