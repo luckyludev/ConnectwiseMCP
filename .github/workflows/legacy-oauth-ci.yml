@@ -37,7 +37,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
-            deploy/http-gateway/requirements.txt
+            deploy/http-gateway/requirements.lock
             deploy/cwm-mcp/requirements.txt
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -45,10 +45,15 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: deploy/cwm-mcp/package-lock.json
+      - name: Verify rollback dependency lock is current
+        run: |
+          python -m pip install uv==0.12.0
+          uv pip compile deploy/http-gateway/requirements.txt deploy/cwm-mcp/requirements.txt --python-version 3.12 --generate-hashes --no-emit-index-url --output-file deploy/http-gateway/requirements.lock
+          git diff --exit-code -- deploy/http-gateway/requirements.lock
       - name: Install gateway and verification dependencies
-        run: >-
-          python -m pip install -r deploy/http-gateway/requirements.txt
-          pytest==9.1.1 ruff==0.16.1 pip-audit==2.10.1
+        run: |
+          python -m pip install --require-hashes -r deploy/http-gateway/requirements.lock
+          python -m pip install pytest==9.1.1 ruff==0.16.1 pip-audit==2.10.1
       - name: Compile legacy rollback code
         run: >-
           python -m compileall -q
@@ -66,7 +71,7 @@ jobs:
         run: python -m pytest -q deploy/http-gateway/tests/test_oauth_registration.py
       - name: Audit Python rollback dependencies
         run: |
-          pip-audit -r deploy/http-gateway/requirements.txt
+          pip-audit -r deploy/http-gateway/requirements.lock
           pip-audit -r deploy/cwm-mcp/requirements.txt
       - name: Verify legacy Node dependencies
         run: |
@@ -74,6 +79,12 @@ jobs:
           npm audit --prefix deploy/cwm-mcp --audit-level=moderate
       - name: Seed ignored build-context canary
         run: printf '%s\n' build-context-canary > deploy/cwm-mcp/.env
+      - name: Validate rollback compose configuration and tunnel image
+        run: |
+          cp deploy/http-gateway/.env.example deploy/http-gateway/.env
+          docker compose --env-file deploy/http-gateway/.env --file deploy/http-gateway/docker-compose.yml config --quiet
+          docker pull cloudflare/cloudflared:latest@sha256:b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4
+          docker run --rm cloudflare/cloudflared:latest@sha256:b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4 --version
       - name: Build rollback image
         run: >-
           docker build --tag connectwise-legacy-rollback-ci
