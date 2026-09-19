@@ -780,6 +780,40 @@ describe("ConnectWiseClient", () => {
     expect(requests).toBe(0);
   });
 
+  it("scopes timesheet reads to the mapped profile member", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([{ id: 21 }]);
+      },
+    });
+
+    await expect(client.getTimeSheets(9)).resolves.toEqual([{ id: 21 }]);
+    const url = new URL(urls[0]!);
+    expect(url.searchParams.get("conditions")).toBe("member/id=149");
+    expect(url.searchParams.get("orderBy")).toBe("dateCreated desc");
+    expect(url.searchParams.get("pageSize")).toBe("9");
+  });
+
+  it("rejects timesheet reads without a mapped member before fetching", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(
+      { ...credentials, memberId: undefined },
+      {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json([]);
+        },
+      },
+    );
+
+    await expect(client.getTimeSheets(20)).rejects.toThrow(
+      "ConnectWise profile is missing memberId; add it to enable get_time_sheets",
+    );
+    expect(requests).toBe(0);
+  });
+
   it("sends no orderBy on schedule entries and sorts them in the worker", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
