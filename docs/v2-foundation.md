@@ -12,7 +12,7 @@
 - Fail-closed group/app-role eligibility and exact `<tid>:<oid> → profile alias` mapping.
 - Browser-bound signed state, local consent, and secure cookie attributes.
 - CIMD support with deployment-allowlisted redirects enforced again at authorization, plus allowlisted dynamic client registration.
-- Stateless MCP transport with a 16 MiB request-body cap and a purpose-built catalog of 40 registered tools, of which 39 are model-visible and `upload_connectwise_image` is app-only. Every tool requires `mcp:read`; the 11 write-capable tools additionally require `mcp:write` before profile-secret lookup or ConnectWise client creation.
+- Stateless MCP transport with a 16 MiB request-body cap and a purpose-built catalog of 39 registered tools, of which 38 are model-visible and `upload_connectwise_image` is app-only. Every tool requires `mcp:read`; the 11 write-capable tools additionally require `mcp:write` before profile-secret lookup or ConnectWise client creation.
 - Public dynamic-client-registration and OAuth token requests are stream-bounded before provider parsing; token issuance, refresh, and revocation forms have a 16 KiB body cap.
 - Per-request ConnectWise client creation from exactly one validated `CW_PROFILE_<ALIAS>` secret; no caller-supplied profile or credential headers and no shared fallback.
 - Fixed ConnectWise endpoint construction, strict input/result bounds, allowlisted response projections, GET-only retries, no automatic write retry, and sanitized errors.

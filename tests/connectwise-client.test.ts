@@ -79,6 +79,32 @@ describe("ConnectWiseClient", () => {
     expect(headers.get("Accept")).toBe("application/json");
   });
 
+  it("scopes attachment lookup to one ticket and a bounded page", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        capturedUrl = String(input);
+        capturedInit = init;
+        return Response.json([{ id: 400 }]);
+      },
+    });
+
+    await expect(client.getTicketAttachments(123, 50)).resolves.toEqual([
+      { id: 400 },
+    ]);
+    const url = new URL(capturedUrl);
+    expect(`${url.origin}${url.pathname}`).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/system/documents",
+    );
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      recordType: "Ticket",
+      recordId: "123",
+      pageSize: "50",
+    });
+    expect(capturedInit?.method).toBe("GET");
+  });
+
   it("rejects an invalid ticket ID without making a request", async () => {
     let requests = 0;
     const client = createConnectWiseClient(credentials, {

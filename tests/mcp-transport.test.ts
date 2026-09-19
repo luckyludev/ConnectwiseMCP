@@ -79,7 +79,6 @@ function businessClient(
     listTimeEntries: unused,
     listScheduleEntries: unused,
     getTimeSheets: unused,
-    getDocument: unused,
     downloadDocument: unusedDownload,
     uploadImageDocument: unused,
     attachImageToTicket: unused,
@@ -151,13 +150,12 @@ describe("authenticated MCP transport", () => {
       "create_ticket_note",
       "create_time_entry",
       "delete_schedule_entry",
-      "download_document",
+      "download_ticket_attachment",
       "get_agreement_additions",
       "get_agreement_additions_summary",
       "get_agreement_billing_summary",
       "get_board_options",
       "get_complete_ticket_content",
-      "get_document",
       "get_my_member",
       "get_service_boards",
       "get_service_priorities",
@@ -1119,15 +1117,20 @@ describe("authenticated MCP transport", () => {
     }
   });
 
-  it("downloads a document as bounded base64", async () => {
-    let received: { companyId: string; documentId: number } | undefined;
+  it("downloads only an attachment associated with the specified ticket", async () => {
+    const attachmentLookups: Array<{ ticketId: number; pageSize: number }> = [];
+    const downloads: number[] = [];
     const handler = createMcpHandler(
       () =>
         createMcpServer(env, {
-          createBusinessClient: (credentials) =>
+          createBusinessClient: () =>
             businessClient({
+              async getTicketAttachments(ticketId, pageSize) {
+                attachmentLookups.push({ ticketId, pageSize });
+                return [{ id: 400 }, { id: "400" }, { id: 401 }];
+              },
               async downloadDocument(documentId) {
-                received = { companyId: credentials.companyId, documentId };
+                downloads.push(documentId);
                 return {
                   base64: "QUJD",
                   mimeType: "application/pdf",
@@ -1140,34 +1143,48 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
         },
       },
     );
-    const response = await handler.fetch(
-      new Request("http://localhost/mcp", {
-        method: "POST",
-        headers: {
-          Accept: "application/json, text/event-stream",
-          "Content-Type": "application/json",
-          Host: "localhost",
-          "MCP-Protocol-Version": "2025-06-18",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 54,
-          method: "tools/call",
-          params: {
-            name: "download_document",
-            arguments: { documentId: 400 },
+
+    const callTool = (id: number, documentId: number) =>
+      handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
           },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            method: "tools/call",
+            params: {
+              name: "download_ticket_attachment",
+              arguments: { ticketId: 123, documentId },
+            },
+          }),
         }),
-      }),
-    );
-    expect(received).toEqual({ companyId: "company-luis", documentId: 400 });
-    const body = await response.text();
-    expect(body).toContain('\\"base64\\":\\"QUJD\\"');
-    expect(body).toContain('\\"mimeType\\":\\"application/pdf\\"');
+      );
+
+    const allowed = await callTool(54, 400);
+    const allowedBody = await allowed.text();
+    expect(allowedBody).toContain('\\"base64\\":\\"QUJD\\"');
+    expect(allowedBody).toContain('\\"mimeType\\":\\"application/pdf\\"');
+    expect(attachmentLookups).toEqual([{ ticketId: 123, pageSize: 50 }]);
+    expect(downloads).toEqual([400]);
+
+    const denied = await callTool(55, 402);
+    const deniedBody = await denied.text();
+    expect(deniedBody).toContain("Attachment not found for ticket");
+    expect(attachmentLookups).toEqual([
+      { ticketId: 123, pageSize: 50 },
+      { ticketId: 123, pageSize: 50 },
+    ]);
+    expect(downloads).toEqual([400]);
   });
 
   it("searches companies and contacts with bounded projections", async () => {

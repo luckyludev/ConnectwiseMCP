@@ -111,7 +111,6 @@ export type ConnectWiseClient = {
   listTimeEntries(pageSize: number): Promise<unknown>;
   listScheduleEntries(pageSize: number): Promise<unknown>;
   getTimeSheets(pageSize: number): Promise<unknown>;
-  getDocument(documentId: number): Promise<unknown>;
   downloadDocument(documentId: number): Promise<{
     base64: string;
     mimeType: string;
@@ -1064,11 +1063,6 @@ export function createConnectWiseClient(
         orderBy: "dateCreated desc",
         pageSize,
       });
-    },
-
-    async getDocument(documentId: number): Promise<unknown> {
-      positiveId(documentId, "document ID");
-      return requestJson("GET", `/system/documents/${documentId}`);
     },
 
     async downloadDocument(
