@@ -151,6 +151,59 @@ def _validated_scope(scope: Any) -> Optional[str]:
     return scope
 
 
+def _scope_set(value: Any, *, allow_roles: bool = False) -> Optional[frozenset[str]]:
+    if allow_roles:
+        if not isinstance(value, list) or not value or len(value) > 64:
+            return None
+        parts = value
+        if any(
+            not isinstance(part, str) or not part or len(part) > 256
+            for part in parts
+        ):
+            return None
+    else:
+        if not isinstance(value, str) or not value or len(value) > 2048:
+            return None
+        parts = value.split(" ")
+        if any(not part or len(part) > 256 for part in parts):
+            return None
+
+    if len(parts) != len(set(parts)):
+        return None
+    return frozenset(parts)
+
+
+def _insufficient_scope_error() -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail="Insufficient scope",
+        headers={
+            "WWW-Authenticate": 'Bearer error="insufficient_scope", scope="mcp:tools:execute"'
+        },
+    )
+
+
+def _require_mcp_execute(scopes: Any, *, allow_roles: bool = False) -> None:
+    scope_set = _scope_set(scopes, allow_roles=allow_roles)
+    if scope_set is None or "mcp:tools:execute" not in scope_set:
+        raise _insufficient_scope_error()
+
+
+def _require_azure_mcp_execute(payload: Dict[str, Any]) -> frozenset[str]:
+    combined: set[str] = set()
+    for claim, allow_roles in ((payload.get("scp"), False), (payload.get("roles"), True)):
+        if claim is None:
+            continue
+        parsed = _scope_set(claim, allow_roles=allow_roles)
+        if parsed is None:
+            raise _insufficient_scope_error()
+        combined.update(parsed)
+
+    if "mcp:tools:execute" not in combined:
+        raise _insufficient_scope_error()
+    return frozenset(combined)
+
+
 def _is_valid_azure_user_id(value: Any) -> bool:
     return isinstance(value, str) and bool(value) and len(value) <= _MAX_AZURE_USER_ID_LENGTH
 
@@ -470,19 +523,27 @@ async def verify_request(
     if _constant_time_text_equals(token, _static_token()):
         return {"auth": "static"}
 
-    # Local JWT tokens
+    # Local JWT tokens. The legacy catalog mixes broad read and write tools, so
+    # a read-only token cannot safely authorize either transport wholesale.
     local_payload = _verify_local_token(token)
     if local_payload:
-        return {"auth": "local_jwt", "user_id": local_payload.get("sub"), "scopes": local_payload.get("scope")}
+        local_scopes = local_payload.get("scope")
+        _require_mcp_execute(local_scopes)
+        return {
+            "auth": "local_jwt",
+            "user_id": local_payload.get("sub"),
+            "scopes": local_scopes,
+        }
 
     # Azure AD tokens
     azure_payload = await azure_token_verifier.verify(token)
     if azure_payload:
+        azure_scopes = _require_azure_mcp_execute(azure_payload)
         return {
             "auth": "azure_ad",
             "user_id": azure_payload.get("sub") or azure_payload.get("oid"),
             "tenant": azure_payload.get("tid"),
-            "scopes": azure_payload.get("scp") or azure_payload.get("roles"),
+            "scopes": sorted(azure_scopes),
         }
 
     raise HTTPException(
@@ -660,7 +721,7 @@ async def oauth_authorize(
     response_type: str = Query(...),
     client_id: str = Query(...),
     redirect_uri: str = Query(...),
-    scope: str = Query("openid profile email"),
+    scope: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     code_challenge: str = Query(...),
     code_challenge_method: str = Query("S256"),
@@ -683,7 +744,10 @@ async def oauth_authorize(
     if resource != expected_resource:
         raise HTTPException(status_code=400, detail="Invalid resource")
     validated_scope = _validated_scope(scope)
-    if validated_scope is None:
+    if (
+        validated_scope is None
+        or "mcp:tools:execute" not in validated_scope.split(" ")
+    ):
         raise HTTPException(status_code=400, detail="Invalid scope")
     if state is not None and len(state) > _MAX_CLIENT_STATE_LENGTH:
         raise HTTPException(status_code=400, detail="Invalid state")

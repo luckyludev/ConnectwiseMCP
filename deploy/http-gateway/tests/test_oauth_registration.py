@@ -126,7 +126,7 @@ def seed_authorization_code(gateway_module):
         "redirect_uri": CALLBACK_URI,
         "code_challenge": gateway_module._pkce_challenge(PKCE_VERIFIER),
         "code_challenge_method": "S256",
-        "scope": "mcp:tools:read",
+        "scope": "mcp:tools:execute",
         "resource": RESOURCE_URI,
         "user_id": "test-user",
         "expires_at": gateway_module.time.time() + 600,
@@ -160,7 +160,7 @@ def test_authorization_rejects_oversized_client_state(client):
             "response_type": "code",
             "client_id": registration["client_id"],
             "redirect_uri": CALLBACK_URI,
-            "scope": "mcp:tools:read",
+            "scope": "mcp:tools:execute",
             "state": "s" * 513,
             "code_challenge": "A" * 43,
             "code_challenge_method": "S256",
@@ -194,7 +194,7 @@ def test_authorization_rejects_when_request_store_is_at_capacity(
             "response_type": "code",
             "client_id": registration["client_id"],
             "redirect_uri": CALLBACK_URI,
-            "scope": "mcp:tools:read",
+            "scope": "mcp:tools:execute",
             "code_challenge": "A" * 43,
             "code_challenge_method": "S256",
             "resource": RESOURCE_URI,
@@ -283,6 +283,27 @@ def test_authorization_rejects_unapproved_or_malformed_scope(client, scope):
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Invalid scope"}
+
+
+@pytest.mark.parametrize("scope", [None, "mcp:tools:read", "openid profile email"])
+def test_authorization_requires_execute_scope(client, gateway_module, scope):
+    registration = register_client(client)
+    params = {
+        "response_type": "code",
+        "client_id": registration["client_id"],
+        "redirect_uri": CALLBACK_URI,
+        "code_challenge": "A" * 43,
+        "code_challenge_method": "S256",
+        "resource": RESOURCE_URI,
+    }
+    if scope is not None:
+        params["scope"] = scope
+
+    response = client.get("/oauth/authorize", params=params, follow_redirects=False)
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid scope"}
+    assert gateway_module._auth_requests == {}
 
 
 @pytest.mark.parametrize(
@@ -486,7 +507,7 @@ def test_oauth_callback_state_can_only_be_consumed_once(
         "redirect_uri": CALLBACK_URI,
         "code_challenge": gateway_module._pkce_challenge(PKCE_VERIFIER),
         "code_challenge_method": "S256",
-        "scope": "mcp:tools:read",
+        "scope": "mcp:tools:execute",
         "resource": RESOURCE_URI,
         "client_state": "client-state",
         "expires_at": gateway_module.time.time() + 600,
@@ -607,7 +628,7 @@ def test_redeemed_access_token_round_trips_through_local_verification(
     assert claims["iss"] == RESOURCE_URI
     assert claims["aud"] == RESOURCE_URI
     assert claims["client_id"] == "test-client"
-    assert claims["scope"] == "mcp:tools:read"
+    assert claims["scope"] == "mcp:tools:execute"
 
 
 def test_local_token_verifier_requires_exp_and_iat(gateway_module):
@@ -667,6 +688,137 @@ def test_non_ascii_static_bearer_is_rejected_without_exception(gateway_module):
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Invalid or expired token"
+
+
+def _verify_bearer(gateway_module, token):
+    credentials = gateway_module.HTTPAuthorizationCredentials(
+        scheme="Bearer", credentials=token
+    )
+    return asyncio.run(gateway_module.verify_request(None, credentials))
+
+
+def _local_access_token(gateway_module, scope):
+    return gateway_module._issue_local_token(
+        user_id="test-user",
+        scope=scope,
+        client_id="test-client",
+        audience=RESOURCE_URI,
+    )
+
+
+@pytest.mark.parametrize("path", ["/mcp", "/sse"])
+def test_legacy_mcp_transports_reject_read_only_local_token(
+    client, gateway_module, path
+):
+    token = _local_access_token(gateway_module, "mcp:tools:read")
+
+    response = client.post(
+        path,
+        headers={"authorization": f"Bearer {token}"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Insufficient scope"}
+    assert response.headers["www-authenticate"] == (
+        'Bearer error="insufficient_scope", scope="mcp:tools:execute"'
+    )
+
+
+def test_legacy_auth_accepts_execute_scoped_local_token(gateway_module):
+    token = _local_access_token(
+        gateway_module, "mcp:tools:read mcp:tools:execute"
+    )
+
+    auth = _verify_bearer(gateway_module, token)
+
+    assert auth == {
+        "auth": "local_jwt",
+        "user_id": "test-user",
+        "scopes": "mcp:tools:read mcp:tools:execute",
+    }
+
+
+def test_legacy_auth_preserves_privileged_static_token(gateway_module):
+    assert _verify_bearer(gateway_module, "s" * 32) == {"auth": "static"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"sub": "azure-user", "scp": "mcp:tools:read"},
+        {"sub": "azure-user", "roles": ["mcp:tools:read"]},
+        {"sub": "azure-user", "roles": "mcp:tools:execute"},
+        {"sub": "azure-user", "roles": ["mcp:tools:execute", 7]},
+        {"sub": "azure-user", "scp": ["mcp:tools:execute"]},
+        {"sub": "azure-user"},
+    ],
+)
+def test_legacy_auth_rejects_unprivileged_or_malformed_azure_scopes(
+    gateway_module, monkeypatch, payload
+):
+    async def verify(_token):
+        return payload
+
+    monkeypatch.setattr(gateway_module.azure_token_verifier, "verify", verify)
+
+    with pytest.raises(gateway_module.HTTPException) as exc_info:
+        _verify_bearer(gateway_module, "azure-token")
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Insufficient scope"
+    assert exc_info.value.headers == {
+        "WWW-Authenticate": 'Bearer error="insufficient_scope", scope="mcp:tools:execute"'
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"sub": "azure-user", "scp": "mcp:tools:execute"},
+        {"sub": "azure-user", "roles": ["mcp:tools:execute"]},
+        {
+            "sub": "azure-user",
+            "scp": "mcp:tools:read",
+            "roles": ["mcp:tools:execute"],
+        },
+    ],
+)
+def test_legacy_auth_accepts_execute_scoped_azure_tokens(
+    gateway_module, monkeypatch, payload
+):
+    async def verify(_token):
+        return payload
+
+    monkeypatch.setattr(gateway_module.azure_token_verifier, "verify", verify)
+
+    auth = _verify_bearer(gateway_module, "azure-token")
+
+    assert auth["auth"] == "azure_ad"
+    assert auth["user_id"] == "azure-user"
+    assert "mcp:tools:execute" in auth["scopes"]
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "mcp:tools:read",
+        "openid profile email",
+        "mcp:tools:execute mcp:tools:execute",
+        ["mcp:tools:execute"],
+        None,
+    ],
+)
+def test_legacy_auth_rejects_unprivileged_or_malformed_local_scopes(
+    gateway_module, scope
+):
+    token = _local_access_token(gateway_module, scope)
+
+    with pytest.raises(gateway_module.HTTPException) as exc_info:
+        _verify_bearer(gateway_module, token)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Insufficient scope"
 
 
 @pytest.mark.parametrize(
