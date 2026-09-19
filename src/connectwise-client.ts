@@ -1066,8 +1066,17 @@ export function createConnectWiseClient(
 
     async listScheduleEntries(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
-      // CW rejects orderBy on /schedule/entries; order in the caller if needed.
-      return requestJson("GET", "/schedule/entries", { pageSize });
+      const memberId = credentials.memberId;
+      if (memberId === undefined) {
+        throw new Error(
+          "ConnectWise profile is missing memberId; add it to enable list_schedule_entries",
+        );
+      }
+      // CW rejects orderBy on /schedule/entries; do not imply recency here.
+      return requestJson("GET", "/schedule/entries", {
+        conditions: `member/id=${memberId}`,
+        pageSize,
+      });
     },
 
     async getTimeSheets(pageSize: number): Promise<unknown> {

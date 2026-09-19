@@ -327,6 +327,66 @@ describe("authenticated MCP transport", () => {
     expect(body.match(/\\\"id\\\":/g)).toHaveLength(6);
   });
 
+  it("bounds and projects schedule entries without accepting a caller member", async () => {
+    const calls: number[] = [];
+    const client = businessClient({
+      async listScheduleEntries(maxResults: number) {
+        calls.push(maxResults);
+        return Array.from({ length: 3 }, (_, index) => ({
+          id: index + 1,
+          member: { id: 149, name: "Mapped Member", secret: "drop" },
+          dateStart: "2026-09-19T12:00:00Z",
+          dateEnd: "2026-09-19T13:00:00Z",
+          name: "Scheduled work",
+          privateField: "drop",
+        }));
+      },
+    });
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () => client,
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: {
+            name: "list_schedule_entries",
+            arguments: { maxResults: 2, memberId: 999 },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(response.status, body).toBe(200);
+    expect(calls).toEqual([2]);
+    expect(body).toContain('\\"name\\":\\"Scheduled work\\"');
+    expect(body).toContain('\\"name\\":\\"Mapped Member\\"');
+    expect(body).not.toContain("privateField");
+    expect(body).not.toContain("secret");
+    expect(body).not.toContain("999");
+    expect(body.match(/\\\"id\\\":/g)).toHaveLength(4);
+  });
+
   it.each([
     { label: "missing mcp:write", scopes: ["mcp:read"] },
     { label: "malformed string scopes", scopes: "mcp:read mcp:write" },

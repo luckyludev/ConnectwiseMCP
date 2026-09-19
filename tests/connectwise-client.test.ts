@@ -744,6 +744,42 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow("Invalid startDate calendar date");
   });
 
+  it("scopes dedicated schedule reads to the mapped profile member", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([{ id: 2, privateField: "not projected here" }]);
+      },
+    });
+
+    await expect(client.listScheduleEntries(7)).resolves.toEqual([
+      { id: 2, privateField: "not projected here" },
+    ]);
+    const url = new URL(urls[0]!);
+    expect(url.searchParams.get("conditions")).toBe("member/id=149");
+    expect(url.searchParams.get("pageSize")).toBe("7");
+    expect(url.searchParams.has("orderBy")).toBe(false);
+  });
+
+  it("rejects schedule reads without a mapped member before fetching", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(
+      { ...credentials, memberId: undefined },
+      {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json([]);
+        },
+      },
+    );
+
+    await expect(client.listScheduleEntries(20)).rejects.toThrow(
+      "ConnectWise profile is missing memberId; add it to enable list_schedule_entries",
+    );
+    expect(requests).toBe(0);
+  });
+
   it("sends no orderBy on schedule entries and sorts them in the worker", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
