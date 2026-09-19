@@ -76,6 +76,7 @@ function readCookie(request: Request, name: string): string | undefined {
 }
 
 const MAX_CONSENT_BODY_BYTES = 16 * 1024;
+const MAX_CONSENT_BODY_CHUNKS = 256;
 
 class ConsentBodyTooLargeError extends Error {}
 
@@ -111,16 +112,22 @@ async function readConsentForm(request: Request): Promise<URLSearchParams> {
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let chunkCount = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      chunkCount += 1;
+      if (chunkCount > MAX_CONSENT_BODY_CHUNKS) {
+        await cancelConsentBody(reader);
+        throw new ConsentBodyTooLargeError();
+      }
       total += value.byteLength;
       if (total > MAX_CONSENT_BODY_BYTES) {
         await cancelConsentBody(reader);
         throw new ConsentBodyTooLargeError();
       }
-      chunks.push(value);
+      if (value.byteLength > 0) chunks.push(value);
     }
   } finally {
     reader.releaseLock();
