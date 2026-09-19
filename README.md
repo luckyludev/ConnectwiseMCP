@@ -62,6 +62,7 @@ The Docker/FastAPI gateway under `deploy/` is retained only as a controlled emer
 - consume callback state and authorization codes once;
 - sanitize upstream OAuth failures and Azure verification logs;
 - require signed RS256 Entra tokens with exact issuer/audience, mandatory `exp`/`iat`, time validation, and rate-limited JWKS refresh on key rotation;
+- require `mcp:tools:execute` on local or Entra OAuth tokens before either broad legacy MCP transport is exposed; the static bearer token remains an explicitly privileged rollback credential;
 - require at least 32 ASCII bytes for the local JWT signing secret and static bearer token.
 
 It still has material legacy limitations:
