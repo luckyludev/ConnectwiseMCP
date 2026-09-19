@@ -1445,7 +1445,7 @@ export function registerConnectWiseBusinessTools(
     "list_schedule_entries",
     {
       description:
-        "List the most recent schedule entries. Access is limited by the authenticated user's ConnectWise API member.",
+        "List a bounded set of schedule entries for the member fixed in the authenticated user's server-side ConnectWise profile.",
       inputSchema: { maxResults: pageSize },
       annotations: readAnnotations,
     },
