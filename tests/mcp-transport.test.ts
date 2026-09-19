@@ -1037,7 +1037,7 @@ describe("authenticated MCP transport", () => {
             name: "call_connectwise",
             arguments: {
               route: "service.tickets.byOwner",
-              memberId: 149,
+              memberId: 999,
               includeClosed: "true",
             },
           },
@@ -1047,7 +1047,7 @@ describe("authenticated MCP transport", () => {
     const thirdBody = await third.text();
     expect(calls[2]).toEqual({
       route: "service.tickets.byOwner",
-      params: { pageSize: 20, memberId: 149, includeClosed: "true" },
+      params: { pageSize: 20, includeClosed: "true" },
     });
     expect(thirdBody).toContain('\\"closedFlag\\":true');
     expect(thirdBody).toContain(

@@ -455,6 +455,12 @@ export const CATALOG_ROUTE_IDS = [
 
 export type CatalogRouteId = (typeof CATALOG_ROUTE_IDS)[number];
 
+const MEMBER_SCOPED_CATALOG_ROUTES = new Set<CatalogRouteId>([
+  "service.tickets.byOwner",
+  "time.entries.byMember",
+  "schedule.entries.byMember",
+]);
+
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
     path: (p) => `/service/boards/${p.boardId}/statuses`,
@@ -1195,13 +1201,29 @@ export function createConnectWiseClient(
       if (!definition) {
         throw new Error(`Unknown ConnectWise route: ${route}`);
       }
-      for (const key of Object.keys(params)) {
+      const effectiveParams = { ...params };
+      if (MEMBER_SCOPED_CATALOG_ROUTES.has(route as CatalogRouteId)) {
+        const profileMemberId = credentials.memberId;
+        if (profileMemberId === undefined) {
+          throw new Error(
+            `ConnectWise profile is missing memberId; add it to enable ${route}`,
+          );
+        }
+        if (
+          effectiveParams.memberId !== undefined &&
+          effectiveParams.memberId !== profileMemberId
+        ) {
+          throw new Error("Catalog memberId must match the mapped profile");
+        }
+        effectiveParams.memberId = profileMemberId;
+      }
+      for (const key of Object.keys(effectiveParams)) {
         if (!definition.allowed.includes(key)) {
           throw new Error(`Parameter ${key} is not allowed for route ${route}`);
         }
       }
       for (const key of definition.required) {
-        const value = params[key];
+        const value = effectiveParams[key];
         if (typeof value === "number") {
           positiveId(value, `${key}`);
         } else if (typeof value !== "string" || value.length < 1) {
@@ -1209,20 +1231,20 @@ export function createConnectWiseClient(
         }
       }
       if (
-        params.recordType !== undefined &&
-        !CATALOG_DOCUMENT_RECORD_TYPES.has(String(params.recordType))
+        effectiveParams.recordType !== undefined &&
+        !CATALOG_DOCUMENT_RECORD_TYPES.has(String(effectiveParams.recordType))
       ) {
         throw new Error("Unsupported document record type");
       }
-      if (params.pageSize !== undefined) {
-        boundedPageSize(Number(params.pageSize));
+      if (effectiveParams.pageSize !== undefined) {
+        boundedPageSize(Number(effectiveParams.pageSize));
       }
-      for (const [key, value] of Object.entries(params)) {
+      for (const [key, value] of Object.entries(effectiveParams)) {
         if (typeof value === "string" && /[\u0000-\u001F\u007F]/.test(value)) {
           throw new Error(`Invalid ${key}`);
         }
       }
-      const path = definition.path(params);
+      const path = definition.path(effectiveParams);
       if (
         !/^\/[a-z0-9\-]+(\/[a-z0-9\-]+)*$/i.test(path) ||
         path.includes("//")
@@ -1230,8 +1252,8 @@ export function createConnectWiseClient(
         throw new Error("Invalid ConnectWise route");
       }
       const query = definition.query
-        ? definition.query(params)
-        : { pageSize: params.pageSize ?? 20 };
+        ? definition.query(effectiveParams)
+        : { pageSize: effectiveParams.pageSize ?? 20 };
       const result = await requestJson("GET", path, query);
       return definition.transform ? definition.transform(result) : result;
     },

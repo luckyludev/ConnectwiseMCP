@@ -602,6 +602,71 @@ describe("ConnectWiseClient", () => {
     );
   });
 
+  it("binds member-scoped catalog routes to the mapped profile", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    for (const route of [
+      "service.tickets.byOwner",
+      "time.entries.byMember",
+      "schedule.entries.byMember",
+    ] as const) {
+      await client.catalogGet(route, { pageSize: 20 });
+    }
+
+    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
+      "owner/id=149 and closedFlag=false",
+    );
+    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
+      "member/id=149",
+    );
+    expect(new URL(urls[2]!).searchParams.get("conditions")).toBe(
+      "member/id=149",
+    );
+  });
+
+  it("rejects catalog member overrides and missing profile member IDs", async () => {
+    let requests = 0;
+    const fetcher = async () => {
+      requests += 1;
+      return Response.json([]);
+    };
+    const memberScopedRoutes = [
+      "service.tickets.byOwner",
+      "time.entries.byMember",
+      "schedule.entries.byMember",
+    ] as const;
+    const client = createConnectWiseClient(credentials, { fetcher });
+
+    for (const route of memberScopedRoutes) {
+      await expect(
+        client.catalogGet(route, { memberId: 999, pageSize: 20 }),
+      ).rejects.toThrow("Catalog memberId must match the mapped profile");
+    }
+
+    const credentialsWithoutMember = { ...credentials };
+    delete credentialsWithoutMember.memberId;
+    const clientWithoutMember = createConnectWiseClient(
+      credentialsWithoutMember,
+      {
+        fetcher,
+      },
+    );
+    for (const route of memberScopedRoutes) {
+      await expect(
+        clientWithoutMember.catalogGet(route, { pageSize: 20 }),
+      ).rejects.toThrow(
+        `ConnectWise profile is missing memberId; add it to enable ${route}`,
+      );
+    }
+    expect(requests).toBe(0);
+  });
+
   it("bounds schedule.entries.byMember with an optional date range", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {

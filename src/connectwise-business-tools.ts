@@ -1520,12 +1520,11 @@ export function registerConnectWiseBusinessTools(
       description:
         "Read-only ConnectWise catalog lookup. [BUILD-MARKER 4421014b-2026-08-30] Pick a route ID and provide its required parameters. Routes: " +
         CATALOG_ROUTE_IDS.join(", ") +
-        ". schedule.entries.byMember accepts an optional startDate/endDate pair (valid YYYY-MM-DD dates, at most a 31-day span) and returns entries ordered by dateStart. service.tickets.byOwner filters on ticket OWNER (owner/id), not assigned resources; it returns open tickets by default (closedFlag=false) — pass includeClosed:'true' to include closed ones, and returns status, board, priority, owner, contact, closedDate and dateResolved. All routes are GET-only with route-specific allowlisted parameters and bounded output.",
+        ". Member-scoped routes (service.tickets.byOwner, time.entries.byMember, schedule.entries.byMember) are fixed to the memberId in the mapped profile; callers cannot select another member. schedule.entries.byMember accepts an optional startDate/endDate pair (valid YYYY-MM-DD dates, at most a 31-day span) and returns entries ordered by dateStart. service.tickets.byOwner filters on ticket OWNER (owner/id), not assigned resources; it returns open tickets by default (closedFlag=false) — pass includeClosed:'true' to include closed ones, and returns status, board, priority, owner, contact, closedDate and dateResolved. All routes are GET-only with route-specific allowlisted parameters and bounded output.",
       inputSchema: {
         route: z.enum(CATALOG_ROUTE_IDS),
         boardId: positiveId.optional(),
         statusId: positiveId.optional(),
-        memberId: positiveId.optional(),
         recordId: positiveId.optional(),
         recordType: z
           .enum([
@@ -1550,7 +1549,6 @@ export function registerConnectWiseBusinessTools(
       route,
       boardId,
       statusId,
-      memberId,
       recordId,
       recordType,
       name,
@@ -1568,7 +1566,6 @@ export function registerConnectWiseBusinessTools(
           const params: Record<string, string | number> = { pageSize };
           if (boardId !== undefined) params.boardId = boardId;
           if (statusId !== undefined) params.statusId = statusId;
-          if (memberId !== undefined) params.memberId = memberId;
           if (recordId !== undefined) params.recordId = recordId;
           if (recordType !== undefined) params.recordType = recordType;
           if (name !== undefined) params.name = name;
