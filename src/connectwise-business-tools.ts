@@ -1424,7 +1424,7 @@ export function registerConnectWiseBusinessTools(
     "list_time_entries",
     {
       description:
-        "List the most recent time entries. Access is limited by the authenticated user's ConnectWise API member.",
+        "List the most recent time entries for the member fixed in the authenticated user's server-side ConnectWise profile.",
       inputSchema: { maxResults: pageSize },
       annotations: readAnnotations,
     },

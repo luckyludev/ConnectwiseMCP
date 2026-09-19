@@ -1045,7 +1045,14 @@ export function createConnectWiseClient(
 
     async listTimeEntries(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
+      const memberId = credentials.memberId;
+      if (memberId === undefined) {
+        throw new Error(
+          "ConnectWise profile is missing memberId; add it to enable list_time_entries",
+        );
+      }
       return requestJson("GET", "/time/entries", {
+        conditions: `member/id=${memberId}`,
         orderBy: "dateEntered desc",
         pageSize,
       });

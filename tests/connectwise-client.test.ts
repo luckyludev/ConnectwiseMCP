@@ -512,6 +512,27 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[6]!).pathname).toBe(
       "/v4_6_release/apis/3.0/time/entries",
     );
+    expect(new URL(urls[6]!).searchParams.get("conditions")).toBe(
+      "member/id=149",
+    );
+    expect(new URL(urls[6]!).searchParams.get("pageSize")).toBe("5");
+  });
+
+  it("refuses time-entry listing without a profile member ID", async () => {
+    let requests = 0;
+    const credentialsWithoutMember = { ...credentials };
+    delete credentialsWithoutMember.memberId;
+    const client = createConnectWiseClient(credentialsWithoutMember, {
+      fetcher: async () => {
+        requests += 1;
+        return Response.json([]);
+      },
+    });
+
+    await expect(client.listTimeEntries(5)).rejects.toThrow(
+      "ConnectWise profile is missing memberId; add it to enable list_time_entries",
+    );
+    expect(requests).toBe(0);
   });
 
   it("escapes company and contact search conditions", async () => {
