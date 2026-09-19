@@ -243,6 +243,41 @@ describe("Entra auth handler", () => {
     expect(cancelled).toBe(true);
   });
 
+  it("bounds consent stream chunks even when they are empty", async () => {
+    let cancelled = false;
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array());
+      },
+      cancel() {
+        cancelled = true;
+        throw new Error("simulated cancellation failure");
+      },
+    });
+    const request = new Request("https://mcp.example.com/authorize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+
+    const response = await createEntraAuthHandler().fetch!(
+      request as never,
+      {} as WorkerEnv,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.text()).toBe("Request body too large");
+    expect(pulls).toBe(257);
+    expect(cancelled).toBe(true);
+  });
+
   it("rejects lookalike consent media types without reading the body", async () => {
     const response = await createEntraAuthHandler().fetch!(
       new Request("https://mcp.example.com/authorize", {
