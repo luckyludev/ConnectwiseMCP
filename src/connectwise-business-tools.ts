@@ -1466,7 +1466,7 @@ export function registerConnectWiseBusinessTools(
     "get_time_sheets",
     {
       description:
-        "List the most recent timesheets. Access is limited by the authenticated user's ConnectWise API member.",
+        "List the most recent timesheets for the member fixed in the authenticated user's server-side ConnectWise profile.",
       inputSchema: { maxResults: pageSize },
       annotations: readAnnotations,
     },

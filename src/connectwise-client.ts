@@ -1081,7 +1081,14 @@ export function createConnectWiseClient(
 
     async getTimeSheets(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
+      const memberId = credentials.memberId;
+      if (memberId === undefined) {
+        throw new Error(
+          "ConnectWise profile is missing memberId; add it to enable get_time_sheets",
+        );
+      }
       return requestJson("GET", "/time/sheets", {
+        conditions: `member/id=${memberId}`,
         orderBy: "dateCreated desc",
         pageSize,
       });
