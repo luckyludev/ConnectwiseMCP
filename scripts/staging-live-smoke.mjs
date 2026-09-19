@@ -510,7 +510,7 @@ const catalogError = validateStagingToolsListResult(
 );
 if (catalogError) fail(catalogError);
 log(
-  `tools/list ok (${EXPECTED_TOOL_NAMES.length} registered; 39 model-visible, 1 app-only)`,
+  `tools/list ok (${EXPECTED_TOOL_NAMES.length} registered; 38 model-visible, 1 app-only)`,
 );
 
 async function callTool(name, args) {

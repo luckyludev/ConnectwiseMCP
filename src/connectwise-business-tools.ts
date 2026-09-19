@@ -1484,43 +1484,32 @@ export function registerConnectWiseBusinessTools(
   );
 
   server.registerTool(
-    "get_document",
+    "download_ticket_attachment",
     {
       description:
-        "Get metadata for a ConnectWise document by ID. Use the catalog route 'system.documents' to list documents for a record.",
-      inputSchema: { documentId: positiveId },
+        "Download an attachment belonging to a specified service ticket as base64 (8 MB maximum). The attachment must appear in the ticket's bounded attachment list.",
+      inputSchema: { ticketId: positiveId, documentId: positiveId },
       annotations: readAnnotations,
     },
-    ({ documentId }) =>
+    ({ ticketId, documentId }) =>
       runBusinessTool(
         getProps(),
         env,
-        "get_document",
-        (client) =>
-          Promise.resolve(client.getDocument(documentId)).then((value) => {
-            const document = object(value);
-            return document
-              ? attachment(document)
-              : { message: "Document not found" };
-          }),
-        dependencies,
-      ),
-  );
-
-  server.registerTool(
-    "download_document",
-    {
-      description:
-        "Download a ConnectWise document as base64 (8 MB maximum). Returns base64 content, MIME type, and byte length.",
-      inputSchema: { documentId: positiveId },
-      annotations: readAnnotations,
-    },
-    ({ documentId }) =>
-      runBusinessTool(
-        getProps(),
-        env,
-        "download_document",
-        (client) => client.downloadDocument(documentId),
+        "download_ticket_attachment",
+        async (client) => {
+          const attachments = list(
+            await client.getTicketAttachments(ticketId, 50),
+            50,
+          );
+          const belongsToTicket = attachments.some((value) => {
+            const candidate = object(value);
+            return candidate?.id === documentId;
+          });
+          if (!belongsToTicket) {
+            return { message: "Attachment not found for ticket" };
+          }
+          return client.downloadDocument(documentId);
+        },
         dependencies,
       ),
   );

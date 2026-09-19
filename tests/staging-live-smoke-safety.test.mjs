@@ -26,9 +26,9 @@ function expectedToolCatalog() {
 }
 
 describe("staging smoke output safety", () => {
-  it("requires the exact 39 model-visible and one app-only tool catalog", () => {
+  it("requires the exact 38 model-visible and one app-only tool catalog", () => {
     const expected = expectedToolCatalog();
-    expect(expected).toHaveLength(40);
+    expect(expected).toHaveLength(39);
     expect(validateStagingToolCatalog(expected)).toBeUndefined();
     expect(
       validateStagingToolsListResult({
@@ -390,7 +390,7 @@ describe("staging smoke output safety", () => {
       import.meta.url,
     );
     const toolCatalog = expectedToolCatalog();
-    expect(toolCatalog).toHaveLength(40);
+    expect(toolCatalog).toHaveLength(39);
 
     let baseUrl = "";
     let capturedScheduleArguments;
