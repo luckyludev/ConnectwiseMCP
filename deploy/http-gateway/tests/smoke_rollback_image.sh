@@ -36,6 +36,12 @@ common_env=(
   --env CONNECTWISE_AUTH_PREFIX=ci-only-prefix+
 )
 
+runtime_uid="$(docker run --rm --entrypoint python "$image" -c 'import os; print(os.geteuid())')"
+if [[ ! "$runtime_uid" =~ ^[0-9]+$ || "$runtime_uid" -eq 0 ]]; then
+  printf '%s\n' "Rollback image must run as a numeric non-root user." >&2
+  exit 1
+fi
+
 docker run --detach --name "$container" \
   --publish 127.0.0.1::8000 \
   --health-interval 1s \
