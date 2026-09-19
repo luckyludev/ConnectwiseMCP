@@ -1,6 +1,9 @@
 name: v2-ci
 
 on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
   pull_request:
     paths:
       - "src/**"
@@ -43,7 +46,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: v2-ci-${{ github.ref }}
+  group: v2-ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

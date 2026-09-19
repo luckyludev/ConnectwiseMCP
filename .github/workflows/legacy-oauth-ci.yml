@@ -1,6 +1,9 @@
 name: legacy-oauth-ci
 
 on:
+  workflow_dispatch:
+  schedule:
+    - cron: "43 6 * * 1"
   pull_request:
     paths:
       - "deploy/http-gateway/**"
@@ -19,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: legacy-oauth-ci-${{ github.ref }}
+  group: legacy-oauth-ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
