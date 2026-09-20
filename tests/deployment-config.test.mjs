@@ -105,6 +105,13 @@ describe("staging deployment configuration", () => {
       ({ id, preview_id: previewId }) => [id, previewId].filter(Boolean),
     );
 
+    expect(config.name).toBe("connectwise-mcp-v2");
+    expect(staging).not.toHaveProperty("name");
+    expect(staging?.workers_dev).toBe(true);
+    for (const deploymentTarget of [config, staging]) {
+      expect(deploymentTarget).not.toHaveProperty("route");
+      expect(deploymentTarget).not.toHaveProperty("routes");
+    }
     expect(config).not.toHaveProperty("keep_vars");
     for (const environment of Object.values(config.env ?? {})) {
       expect(environment).not.toHaveProperty("keep_vars");
