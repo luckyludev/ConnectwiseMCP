@@ -535,6 +535,39 @@ describe("ConnectWiseClient", () => {
     expect(requests).toBe(0);
   });
 
+  it("searches members by a required bounded name query", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.searchMembers("  O'Brien  ", 20);
+    const url = new URL(urls[0]!);
+    expect(`${url.origin}${url.pathname}`).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/system/members",
+    );
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      conditions: "name like '%O''Brien%'",
+      orderBy: "name asc",
+      pageSize: "20",
+    });
+
+    for (const query of ["", " ", "x", "%%", "A_", "x".repeat(101), "ok\nno"]) {
+      await expect(client.searchMembers(query, 10)).rejects.toThrow(
+        /Invalid (member )?search text/,
+      );
+    }
+    for (const pageSize of [0, 21, 1.5]) {
+      await expect(client.searchMembers("valid", pageSize)).rejects.toThrow(
+        "Invalid member page size",
+      );
+    }
+    expect(urls).toHaveLength(1);
+  });
+
   it("escapes company and contact search conditions", async () => {
     let url = "";
     const client = createConnectWiseClient(credentials, {

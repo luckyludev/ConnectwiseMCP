@@ -26,7 +26,7 @@ const toolAuditNames = [
   "get_service_priorities",
   "get_service_sources",
   "get_my_member",
-  "list_members",
+  "search_members",
   "search_companies",
   "search_contacts",
   "list_time_entries",

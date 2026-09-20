@@ -341,6 +341,7 @@ async function runBusinessTool(
 
 const positiveId = z.number().int().positive();
 const pageSize = z.number().int().min(1).max(50).default(20);
+const memberSearchPageSize = z.number().int().min(1).max(20).default(10);
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/png": "png",
@@ -1109,6 +1110,13 @@ export function registerConnectWiseBusinessTools(
       status: reference(value.status),
     });
 
+  const memberSearchItem = (value: Record<string, unknown>) =>
+    compact({
+      id: id(value.id),
+      name: text(value.name, 200),
+      status: reference(value.status),
+    });
+
   const companyItem = (value: Record<string, unknown>) =>
     compact({
       id: id(value.id),
@@ -1342,22 +1350,30 @@ export function registerConnectWiseBusinessTools(
   );
 
   server.registerTool(
-    "list_members",
+    "search_members",
     {
       description:
-        "List ConnectWise team members. Access is limited by the authenticated user's ConnectWise API member.",
-      inputSchema: { maxResults: pageSize },
+        "Search ConnectWise team members by name. Results expose only member identity and status and are limited by the authenticated user's ConnectWise API member.",
+      inputSchema: {
+        query: z
+          .string()
+          .trim()
+          .min(2)
+          .max(100)
+          .regex(/^[^%_]+$/, "Wildcard characters are not allowed"),
+        maxResults: memberSearchPageSize,
+      },
       annotations: readAnnotations,
     },
-    ({ maxResults }) =>
+    ({ query, maxResults }) =>
       runBusinessTool(
         getProps(),
         env,
-        "list_members",
+        "search_members",
         async (client) =>
-          list(await client.listMembers(maxResults), maxResults).map(
-            memberItem,
-          ),
+          list(await client.searchMembers(query, maxResults), maxResults)
+            .map(memberSearchItem)
+            .filter((entry) => entry.id !== undefined || entry.name),
         dependencies,
       ),
   );

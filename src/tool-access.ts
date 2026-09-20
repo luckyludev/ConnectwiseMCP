@@ -20,7 +20,7 @@ export const TOOL_ACCESS = Object.freeze({
   get_service_priorities: "read",
   get_service_sources: "read",
   get_my_member: "read",
-  list_members: "read",
+  search_members: "read",
   search_companies: "read",
   search_contacts: "read",
   list_time_entries: "read",

@@ -50,8 +50,8 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
     "93ab7499dc3c616f8db8780fed0d9f69270803cda913882ad2ef3943db8d7225",
   get_my_member:
     "93ab7499dc3c616f8db8780fed0d9f69270803cda913882ad2ef3943db8d7225",
-  list_members:
-    "d092755cbe07b7355c5abb5569e8dd15c1d4a0b4be02c1d26b15c4026996b853",
+  search_members:
+    "15171b145237ea80b813c18694b4143df2574a8d322f446d56ccef94d3e585ee",
   search_companies:
     "287972874bf83b6ca8d00b570b238898f378d4aa1509a1009a6c86f134d2f294",
   search_contacts:

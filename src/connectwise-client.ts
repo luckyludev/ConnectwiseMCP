@@ -105,7 +105,7 @@ export type ConnectWiseClient = {
   getServicePriorities(): Promise<unknown>;
   getServiceSources(): Promise<unknown>;
   getMyMember(): Promise<unknown>;
-  listMembers(pageSize: number): Promise<unknown>;
+  searchMembers(query: string, pageSize: number): Promise<unknown>;
   searchCompanies(query: string, pageSize: number): Promise<unknown>;
   searchContacts(query: string, pageSize: number): Promise<unknown>;
   listTimeEntries(pageSize: number): Promise<unknown>;
@@ -1019,9 +1019,21 @@ export function createConnectWiseClient(
       return requestJson("GET", `/system/members/${memberId}`);
     },
 
-    async listMembers(pageSize: number): Promise<unknown> {
-      boundedPageSize(pageSize);
+    async searchMembers(query: string, pageSize: number): Promise<unknown> {
+      const normalizedQuery = query.trim();
+      if (
+        normalizedQuery.length < 2 ||
+        normalizedQuery.length > 100 ||
+        /[%_]/.test(normalizedQuery)
+      ) {
+        throw new Error("Invalid member search text");
+      }
+      if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 20) {
+        throw new Error("Invalid member page size");
+      }
+      const escaped = conditionString(normalizedQuery);
       return requestJson("GET", "/system/members", {
+        conditions: `name like '%${escaped}%'`,
         orderBy: "name asc",
         pageSize,
       });
