@@ -2,7 +2,7 @@
 
 > **Purpose:** safely prepare and validate a Cloudflare Workers staging environment for ConnectWise MCP V2. This is an operator procedure, not production cutover authorization. It never authorizes secret disclosure, live ConnectWise access, DNS changes, or production deployment.
 
-> **Remote variable source of truth:** staging policy variables are managed remotely. The `env.staging` block intentionally omits `vars`; deploy staging with `--keep-vars` so Wrangler preserves the approved remote values. Never add placeholder staging values to `wrangler.jsonc`, because explicitly configured values replace the live policy bindings.
+> **Remote variable source of truth:** staging policy variables are managed remotely. The `env.staging` block intentionally omits `vars`; deploy staging with `--keep-vars` so Wrangler preserves the approved remote values. The repository tests enforce that deployment-script flag. Wrangler does not support environment-specific `keep_vars` configuration, and enabling it globally would also change production behavior. Never add placeholder staging values to `wrangler.jsonc`, because explicitly configured values replace the live policy bindings.
 
 ## Boundaries and prerequisites
 
@@ -21,7 +21,7 @@ npx wrangler whoami
 npx wrangler kv namespace list
 npm ci
 npm run check
-npx wrangler deploy --env staging --dry-run --outdir dist-staging
+npx wrangler deploy --env staging --keep-vars --dry-run --outdir dist-staging
 rm -rf dist-staging
 ```
 
@@ -35,7 +35,7 @@ Namespaces are account-scoped, not domain-scoped. Before creating anything, inve
 
 ```bash
 npx wrangler kv namespace list
-npx wrangler deploy --env staging --dry-run --outdir dist-staging
+npx wrangler deploy --env staging --keep-vars --dry-run --outdir dist-staging
 rm -rf dist-staging
 ```
 
@@ -60,7 +60,7 @@ The acceptance checklist also requires a distinct **preview** KV namespace/bindi
 }
 ```
 
-Worker environments do **not** inherit KV bindings or `vars`. Keep the staging KV binding in the `staging` block, but keep the approved staging policy-variable values in the remote Worker configuration and deploy with `--keep-vars`. Keep production placeholders and production bindings separate.
+Worker environments do **not** inherit KV bindings or `vars`. Keep the staging KV binding in the `staging` block, but keep the approved staging policy-variable values in the remote Worker configuration and deploy with `--keep-vars`. Keep production placeholders and production bindings separate. CI enforces the staging deployment-script flag, remote-variable omission, and KV-isolation contract.
 
 ## 3. Establish the literal canonical staging resource
 
