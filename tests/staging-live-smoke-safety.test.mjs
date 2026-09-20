@@ -3,7 +3,10 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { createMcpHandler } from "agents/mcp/server";
+import { beforeAll, describe, expect, it } from "vitest";
+
+import { createMcpServer } from "../src/mcp-server";
 
 import {
   MAX_SMOKE_RESPONSE_BYTES,
@@ -17,15 +20,47 @@ import {
 } from "../scripts/staging-tool-catalog.mjs";
 import { bearerResourceMetadata } from "../scripts/www-authenticate.mjs";
 
-function expectedToolCatalog() {
-  return EXPECTED_TOOL_NAMES.map((name) => ({
-    name,
-    inputSchema: { type: "object" },
-    ...(name === "upload_connectwise_image"
-      ? { _meta: { ui: { visibility: ["app"] } } }
-      : {}),
-  }));
+let localToolCatalog;
+
+async function loadLocalToolCatalog() {
+  const handler = createMcpHandler(() => createMcpServer({}), {
+    route: "/mcp",
+    corsOptions: false,
+    authContext: {
+      props: { profileAlias: "TEST", scopes: ["mcp:read"] },
+    },
+  });
+  const response = await handler.fetch(
+    new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Host: "localhost",
+        "MCP-Protocol-Version": "2025-06-18",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    }),
+  );
+  const event = (await response.text())
+    .split("\n")
+    .find((line) => line.startsWith("data: "));
+  expect(event).toBeDefined();
+  return JSON.parse(event.slice("data: ".length)).result.tools;
 }
+
+function expectedToolCatalog() {
+  return structuredClone(localToolCatalog);
+}
+
+beforeAll(async () => {
+  localToolCatalog = await loadLocalToolCatalog();
+});
 
 describe("staging smoke output safety", () => {
   it("requires the exact 38 model-visible and one app-only tool catalog", () => {
@@ -62,6 +97,65 @@ describe("staging smoke output safety", () => {
     expect(validateStagingToolCatalog(secondAppOnlyTool)).toBe(
       "tools/list hides an unexpected tool from model clients",
     );
+  });
+
+  it("rejects caller-controlled routing and other input-schema drift", () => {
+    const cases = [
+      ["whoami", "profileAlias"],
+      ["get_service_ticket", "host"],
+      ["call_connectwise", "method"],
+      ["call_connectwise", "path"],
+      ["call_connectwise", "body"],
+      ["upload_connectwise_image", "url"],
+    ];
+    for (const [toolName, property] of cases) {
+      const catalog = structuredClone(expectedToolCatalog());
+      catalog.find((tool) => tool.name === toolName).inputSchema.properties[
+        property
+      ] = { type: "string" };
+      expect(validateStagingToolCatalog(catalog)).toBe(
+        `tools/list input schema drifted for ${toolName}`,
+      );
+    }
+
+    const missingSchema = structuredClone(expectedToolCatalog());
+    delete missingSchema.find((tool) => tool.name === "whoami").inputSchema;
+    expect(validateStagingToolCatalog(missingSchema)).toBe(
+      "tools/list exposes an invalid input schema for whoami",
+    );
+
+    for (const keyword of ["additionalProperties", "unevaluatedProperties"]) {
+      for (const value of [true, {}]) {
+        const permissive = structuredClone(expectedToolCatalog());
+        permissive.find((tool) => tool.name === "whoami").inputSchema[keyword] =
+          value;
+        expect(validateStagingToolCatalog(permissive)).toBe(
+          "tools/list input schema drifted for whoami",
+        );
+      }
+    }
+
+    const patterned = structuredClone(expectedToolCatalog());
+    patterned.find(
+      (tool) => tool.name === "whoami",
+    ).inputSchema.patternProperties = { ".*": {} };
+    expect(validateStagingToolCatalog(patterned)).toBe(
+      "tools/list input schema drifted for whoami",
+    );
+
+    const broadenedRoute = structuredClone(expectedToolCatalog());
+    broadenedRoute.find(
+      (tool) => tool.name === "call_connectwise",
+    ).inputSchema.properties.route = { type: "string" };
+    expect(validateStagingToolCatalog(broadenedRoute)).toBe(
+      "tools/list input schema drifted for call_connectwise",
+    );
+  });
+
+  it("keeps the local MCP catalog aligned with the staging schema contract", () => {
+    expect(
+      validateStagingToolsListResult({ tools: localToolCatalog }),
+    ).toBeUndefined();
   });
 
   it("reads bounded response bodies and parses JSON", async () => {
