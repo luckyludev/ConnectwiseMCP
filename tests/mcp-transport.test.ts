@@ -915,6 +915,61 @@ describe("authenticated MCP transport", () => {
     expect(body).not.toContain("private-key");
   });
 
+  it("rejects attachment resource reads without mcp:read before profile access", async () => {
+    let bindingReads = 0;
+    let clientCreations = 0;
+    const guardedEnv = new Proxy(
+      {},
+      {
+        get() {
+          bindingReads += 1;
+          throw new Error("profile binding must not be read");
+        },
+      },
+    );
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(guardedEnv, {
+          createBusinessClient: () => {
+            clientCreations += 1;
+            return businessClient();
+          },
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:write"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 23,
+          method: "resources/read",
+          params: {
+            uri: "ui://connectwise/attachment-uploader.html",
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(body).toContain("Insufficient scope");
+    expect(body).not.toContain("Drop or paste an image here");
+    expect(body).not.toContain("upload_connectwise_image");
+    expect(bindingReads).toBe(0);
+    expect(clientCreations).toBe(0);
+  });
+
   it("isolates concurrent profile contexts from hostile headers and arguments", async () => {
     const selectedCompanies: string[] = [];
     const auditMessages: string[] = [];

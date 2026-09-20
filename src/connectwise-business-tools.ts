@@ -460,23 +460,28 @@ export function registerConnectWiseBusinessTools(
         "Paste, drop, or choose an image and attach it to a ConnectWise ticket or time entry.",
       mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
     },
-    async (uri) => ({
-      contents: [
-        {
-          uri: uri.href,
-          mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
-          text: ATTACHMENT_UPLOADER_HTML,
-          _meta: {
-            ui: {
-              csp: {
-                connectDomains: [],
-                resourceDomains: [],
+    async (uri) => {
+      if (!hasMcpScopes(getProps(), ["mcp:read"])) {
+        throw new Error("Insufficient scope");
+      }
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
+            text: ATTACHMENT_UPLOADER_HTML,
+            _meta: {
+              ui: {
+                csp: {
+                  connectDomains: [],
+                  resourceDomains: [],
+                },
               },
             },
           },
-        },
-      ],
-    }),
+        ],
+      };
+    },
   );
 
   server.registerTool(
