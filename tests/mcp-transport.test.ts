@@ -75,7 +75,7 @@ function businessClient(
     getServicePriorities: unused,
     getServiceSources: unused,
     getMyMember: unused,
-    listMembers: unused,
+    searchMembers: unused,
     searchCompanies: unused,
     searchContacts: unused,
     listTimeEntries: unused,
@@ -174,7 +174,6 @@ describe("authenticated MCP transport", () => {
       "get_ticket_notes_with_content",
       "get_time_sheets",
       "list_board_tickets",
-      "list_members",
       "list_schedule_entries",
       "list_ticket_tasks",
       "list_ticket_time_entries",
@@ -183,6 +182,7 @@ describe("authenticated MCP transport", () => {
       "search_agreement_additions",
       "search_companies",
       "search_contacts",
+      "search_members",
       "search_tickets_by_content",
       "update_schedule_entry",
       "update_service_ticket",
@@ -427,6 +427,78 @@ describe("authenticated MCP transport", () => {
     expect(body.match(/\\\"id\\\":/g)).toHaveLength(4);
   });
 
+  it("searches a bounded member directory projection", async () => {
+    const calls: Array<{ query: string; maxResults: number }> = [];
+    const client = businessClient({
+      async searchMembers(query: string, maxResults: number) {
+        calls.push({ query, maxResults });
+        return Array.from({ length: 3 }, (_, index) => ({
+          id: index + 1,
+          name: `Member ${index + 1}`,
+          firstName: "Private",
+          lastName: "Name",
+          email: "must-not-escape@example.com",
+          phone: "555-0100",
+          status: { id: 1, name: "Active", secret: "drop" },
+          privateKey: "drop",
+        }));
+      },
+    });
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () => client,
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 4,
+          method: "tools/call",
+          params: {
+            name: "search_members",
+            arguments: {
+              query: "  Smith  ",
+              maxResults: 2,
+              profileAlias: "MAYA",
+              host: "https://attacker.invalid",
+              conditions: "id>0",
+              privateKey: "hostile-private-key",
+            },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(response.status, body).toBe(200);
+    expect(calls).toEqual([{ query: "Smith", maxResults: 2 }]);
+    expect(body).toContain('\\"name\\":\\"Member 1\\"');
+    expect(body).toContain('\\"name\\":\\"Member 2\\"');
+    expect(body).not.toContain("Member 3");
+    expect(body).not.toContain("must-not-escape");
+    expect(body).not.toContain("555-0100");
+    expect(body).not.toContain("Private");
+    expect(body).not.toContain("hostile-private-key");
+    expect(body).not.toContain("attacker.invalid");
+    expect(body).not.toContain("conditions");
+  });
+
   it.each([
     { label: "missing mcp:write", scopes: ["mcp:read"] },
     { label: "missing mcp:read", scopes: ["mcp:write"] },
@@ -621,7 +693,7 @@ describe("authenticated MCP transport", () => {
       { name: "get_service_priorities", arguments: {} },
       { name: "get_service_sources", arguments: {} },
       { name: "get_my_member", arguments: {} },
-      { name: "list_members", arguments: {} },
+      { name: "search_members", arguments: { query: "must not be sent" } },
       { name: "search_companies", arguments: { query: "must not be sent" } },
       { name: "search_contacts", arguments: { query: "must not be sent" } },
       { name: "list_time_entries", arguments: {} },
