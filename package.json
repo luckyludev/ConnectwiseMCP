@@ -23,7 +23,7 @@
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "0.8.3",
     "@modelcontextprotocol/server": "2.0.0",
-    "agents": "0.20.1",
+    "agents": "0.23.0",
     "jose": "6.2.12",
     "zod": "4.4.3"
   },
