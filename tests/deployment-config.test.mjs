@@ -53,6 +53,44 @@ describe("dependency maintenance configuration", () => {
   });
 });
 
+describe("legacy rollback image security", () => {
+  it("fails CI when the built rollback image has fixable severe vulnerabilities", async () => {
+    const [workflow, dockerfile] = await Promise.all([
+      readFile(
+        new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../deploy/http-gateway/Dockerfile", import.meta.url),
+        "utf8",
+      ),
+    ]);
+    const buildOffset = workflow.indexOf("- name: Build rollback image");
+    const scanOffset = workflow.indexOf(
+      "- name: Scan rollback image for fixable severe vulnerabilities",
+    );
+    const smokeOffset = workflow.indexOf(
+      "- name: Smoke-test rollback image startup and auth boundary",
+    );
+
+    expect(buildOffset).toBeGreaterThan(-1);
+    expect(scanOffset).toBeGreaterThan(buildOffset);
+    expect(smokeOffset).toBeGreaterThan(scanOffset);
+    expect(workflow).toContain(
+      "uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
+    );
+    expect(workflow).toContain("image-ref: connectwise-legacy-rollback-ci");
+    expect(workflow).toContain("scanners: vuln");
+    expect(workflow).toContain("vuln-type: os,library");
+    expect(workflow).toContain("severity: HIGH,CRITICAL");
+    expect(workflow).toContain("ignore-unfixed: true");
+    expect(workflow).toContain('exit-code: "1"');
+    expect(dockerfile).toMatch(
+      /^FROM python:3\.12-slim@sha256:[0-9a-f]{64}$/mu,
+    );
+  });
+});
+
 describe("staging deployment configuration", () => {
   it("preserves remote variables and isolates staging OAuth storage", async () => {
     const [config, packageJson] = await Promise.all([
