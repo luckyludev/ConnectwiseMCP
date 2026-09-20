@@ -34,8 +34,10 @@ import { randomBytes, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import process from "node:process";
 import {
+  CallToolResultSchema,
   InitializeResultSchema,
   JSONRPCResultResponseSchema,
+  ListToolsResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { readBoundedJson, readBoundedText } from "./smoke-response.mjs";
 import {
@@ -454,10 +456,26 @@ async function mcpCall(payload, sessionId) {
   };
 }
 
+let nextRequestId = 1;
+function allocateRequestId() {
+  const id = nextRequestId;
+  nextRequestId += 1;
+  return id;
+}
+
+function parseMcpResult(response, expectedId, resultSchema) {
+  if (response.status !== 200) return null;
+  const envelope = JSONRPCResultResponseSchema.safeParse(response.parsed);
+  if (!envelope.success || envelope.data.id !== expectedId) return null;
+  const result = resultSchema.safeParse(envelope.data.result);
+  return result.success ? result.data : null;
+}
+
+const initializeId = allocateRequestId();
 const init = await mcpCall(
   {
     jsonrpc: "2.0",
-    id: 1,
+    id: initializeId,
     method: "initialize",
     params: {
       protocolVersion: "2025-06-18",
@@ -467,17 +485,15 @@ const init = await mcpCall(
   },
   null,
 );
-const initializeEnvelope = JSONRPCResultResponseSchema.safeParse(init.parsed);
-const initializeResult = initializeEnvelope.success
-  ? InitializeResultSchema.safeParse(initializeEnvelope.data.result)
-  : null;
+const initializeResult = parseMcpResult(
+  init,
+  initializeId,
+  InitializeResultSchema,
+);
 if (
-  init.status !== 200 ||
-  !initializeEnvelope.success ||
-  initializeEnvelope.data.id !== 1 ||
-  !initializeResult?.success ||
-  initializeResult.data.protocolVersion !== "2025-06-18" ||
-  !initializeResult.data.capabilities.tools
+  !initializeResult ||
+  initializeResult.protocolVersion !== "2025-06-18" ||
+  !initializeResult.capabilities.tools
 ) {
   fail(`MCP initialize failed (${init.status})`);
 }
@@ -494,30 +510,31 @@ if (initialized.status !== 200 && initialized.status !== 202) {
 // Gate 0: tools/list must expose every expected tool. A tool that passes its
 // own unit tests but is not registered looks identical to a nonexistent tool.
 log("requesting tools/list ...");
+const toolsListId = allocateRequestId();
 const toolsListResp = await mcpCall(
-  { jsonrpc: "2.0", id: Date.now(), method: "tools/list" },
+  { jsonrpc: "2.0", id: toolsListId, method: "tools/list" },
   init.sessionId,
 );
-if (
-  toolsListResp.status !== 200 ||
-  toolsListResp.parsed?.error ||
-  !toolsListResp.parsed?.result
-) {
+const toolsListResult = parseMcpResult(
+  toolsListResp,
+  toolsListId,
+  ListToolsResultSchema,
+);
+if (!toolsListResult) {
   fail("tools/list failed");
 }
-const catalogError = validateStagingToolsListResult(
-  toolsListResp.parsed.result,
-);
+const catalogError = validateStagingToolsListResult(toolsListResult);
 if (catalogError) fail(catalogError);
 log(
   `tools/list ok (${EXPECTED_TOOL_NAMES.length} registered; 38 model-visible, 1 app-only)`,
 );
 
 async function callTool(name, args) {
+  const requestId = allocateRequestId();
   const result = await mcpCall(
     {
       jsonrpc: "2.0",
-      id: Date.now(),
+      id: requestId,
       method: "tools/call",
       params: { name, arguments: args },
     },
@@ -529,12 +546,11 @@ async function callTool(name, args) {
       reason: `http_${result.status}`,
     };
   }
-  const payload = result.parsed;
-  if (payload?.error) {
-    return { ok: false, reason: "mcp_error" };
+  const toolResult = parseMcpResult(result, requestId, CallToolResultSchema);
+  if (!toolResult) {
+    return { ok: false, reason: "invalid_mcp_response" };
   }
-  const toolResult = payload?.result;
-  const text = toolResult?.content
+  const text = toolResult.content
     ?.filter((c) => c.type === "text")
     .map((c) => c.text)
     .join("\n");
