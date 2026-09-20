@@ -14,6 +14,7 @@ const profile = (companyId: string) =>
     publicKey: "public-key",
     privateKey: "private-key",
     clientId: "partner-client-id",
+    memberId: 149,
   });
 
 const env = {
@@ -135,6 +136,7 @@ describe("authenticated MCP transport", () => {
       result: {
         tools: Array<{
           name: string;
+          inputSchema?: { properties?: Record<string, unknown> };
           annotations?: { readOnlyHint?: boolean; idempotentHint?: boolean };
           _meta?: { ui?: { visibility?: string[]; resourceUri?: string } };
         }>;
@@ -185,6 +187,12 @@ describe("authenticated MCP transport", () => {
     expect(names).toHaveLength(expectedNames.length);
     expect(new Set(names).size).toBe(expectedNames.length);
     expect([...names].sort()).toEqual(expectedNames);
+    for (const name of ["create_schedule_entry", "create_time_entry"]) {
+      const tool = body.result.tools.find(
+        (candidate) => candidate.name === name,
+      );
+      expect(tool?.inputSchema?.properties).not.toHaveProperty("memberId");
+    }
 
     const appOnlyTools = body.result.tools.filter(
       (tool) =>
@@ -1377,7 +1385,7 @@ describe("authenticated MCP transport", () => {
   // Phase 2 write tools must be exercised through the MCP tool interface with
   // the exact JSON arguments a client sends (third occurrence of the
   // wrong-layer test: mocks/curl passed while the tool handler failed).
-  it("create_schedule_entry converts offset to second-precision UTC on the wire", async () => {
+  it("create_schedule_entry ignores a caller member and uses the mapped profile member", async () => {
     const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
     const fetcher: typeof fetch = async (input, init) => {
       const method = (init as { method?: string } | undefined)?.method ?? "GET";
@@ -1425,7 +1433,7 @@ describe("authenticated MCP transport", () => {
           params: {
             name: "create_schedule_entry",
             arguments: {
-              memberId: 149,
+              memberId: 999,
               objectId: 1892065,
               objectType: 4,
               statusId: 1,
@@ -1486,7 +1494,6 @@ describe("authenticated MCP transport", () => {
           params: {
             name: "create_schedule_entry",
             arguments: {
-              memberId: 149,
               objectId: 1892065,
               objectType: 4,
               dateStart: "2026-08-31T12:30:00",
@@ -1629,6 +1636,68 @@ describe("authenticated MCP transport", () => {
     );
   });
 
+  it("create_time_entry uses the mapped profile member on the wire", async () => {
+    const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      const rawBody = (init as { body?: string } | undefined)?.body;
+      bodies.push({
+        method,
+        url: String(input),
+        ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+      });
+      return String(input).includes("/time/sheets")
+        ? Response.json([])
+        : Response.json({ id: 123, member: { id: 149 } });
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_time_entry",
+            arguments: {
+              memberId: 999,
+              timeStart: "2026-09-01T12:00:00-04:00",
+              timeEnd: "2026-09-01T13:00:00-04:00",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+    const post = bodies.find(
+      (body) => body.method === "POST" && body.url.endsWith("/time/entries"),
+    );
+    expect(post).toBeDefined();
+    expect((post!.body as { member: { id: number } }).member.id).toBe(149);
+    expect(text).toContain('\\"id\\":123');
+  });
+
   it("create_time_entry surfaces a locked timesheet message through the tool", async () => {
     const bodies: Array<{ method: string; url: string }> = [];
     const fetcher: typeof fetch = async (input, init) => {
@@ -1671,7 +1740,7 @@ describe("authenticated MCP transport", () => {
           params: {
             name: "create_time_entry",
             arguments: {
-              memberId: 149,
+              memberId: 999,
               timeStart: "2026-09-01T12:00:00-04:00",
               timeEnd: "2026-09-01T13:00:00-04:00",
             },
@@ -1682,6 +1751,10 @@ describe("authenticated MCP transport", () => {
     const text = await response.text();
     expect(text).toContain("pending approval");
     expect(text).toContain("approve or recall it before retrying");
+    const sheetLookup = new URL(
+      bodies.find((body) => body.url.includes("/time/sheets"))!.url,
+    );
+    expect(sheetLookup.searchParams.get("conditions")).toBe("member/id=149");
     expect(bodies.filter((b) => b.method === "POST").length).toBe(0);
   });
 
@@ -2111,7 +2184,6 @@ describe("authenticated MCP transport", () => {
           params: {
             name: "create_schedule_entry",
             arguments: {
-              memberId: 149,
               objectId: 1927351,
               objectType: 4,
               dateStart: "2026-09-01T08:00:00-04:00",

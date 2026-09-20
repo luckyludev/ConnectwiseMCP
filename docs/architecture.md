@@ -72,7 +72,7 @@ Bind this JSON as the `IDENTITY_PROFILE_MAP` Worker secret. Never commit real te
 
 ### Per-profile Worker secrets
 
-For each profile alias, provision exactly one `CW_PROFILE_<ALIAS>` Worker secret. Its value is strict JSON containing the approved ConnectWise API base URL, company ID, public key, private key, client ID, and API-member ID from 1 through 1,000,000. The member ID is server-controlled and enables member-scoped reads to fail closed rather than return tenant-wide records. For example, the alias `LUIS` uses only `CW_PROFILE_LUIS`.
+For each profile alias, provision exactly one `CW_PROFILE_<ALIAS>` Worker secret. Its value is strict JSON containing the approved ConnectWise API base URL, company ID, public key, private key, client ID, and API-member ID from 1 through 1,000,000. The member ID is server-controlled and makes member-scoped reads and schedule/time-entry creation fail closed rather than operate tenant-wide or accept a caller-selected member. For example, the alias `LUIS` uses only `CW_PROFILE_LUIS`.
 
 The runtime derives this binding name only from the authenticated server-side profile alias. MCP inputs and ordinary headers cannot select another profile, host, or credential. The detailed schema, origin allowlist, and approved secret-entry process are authoritative in [`v2-foundation.md`](v2-foundation.md); do not put real values in this architecture document or shell commands.
 
