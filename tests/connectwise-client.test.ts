@@ -899,7 +899,6 @@ describe("ConnectWiseClient", () => {
     });
 
     await client.createScheduleEntry({
-      memberId: 149,
       objectId: 1892065,
       objectType: 4,
       dateStart: "2026-08-31T12:30:00-04:00",
@@ -920,7 +919,6 @@ describe("ConnectWiseClient", () => {
 
     await expect(
       client.createScheduleEntry({
-        memberId: 149,
         dateStart: "2026-08-31T12:30:00",
         dateEnd: "2026-08-31T17:00:00",
       }),
@@ -928,12 +926,46 @@ describe("ConnectWiseClient", () => {
 
     await expect(
       client.createScheduleEntry({
-        memberId: 149,
         dateStart: "2026-08-31T12:30:00-04:00",
         dateEnd: "2026-08-31T17:00:00-04:00",
       }),
     ).rejects.toThrow(/objectId is required/);
   });
+
+  it.each([
+    ["schedule", "create_schedule_entry"],
+    ["time", "create_time_entry"],
+  ] as const)(
+    "refuses %s writes without a profile member ID",
+    async (kind, operation) => {
+      let requests = 0;
+      const credentialsWithoutMember = { ...credentials };
+      delete credentialsWithoutMember.memberId;
+      const client = createConnectWiseClient(credentialsWithoutMember, {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json({});
+        },
+      });
+
+      const write =
+        kind === "schedule"
+          ? client.createScheduleEntry({
+              objectId: 1,
+              dateStart: "2026-08-31T12:30:00-04:00",
+              dateEnd: "2026-08-31T17:00:00-04:00",
+            })
+          : client.createTimeEntry({
+              timeStart: "2026-08-31T12:30:00-04:00",
+              timeEnd: "2026-08-31T17:00:00-04:00",
+            });
+
+      await expect(write).rejects.toThrow(
+        `ConnectWise profile is missing memberId; add it to enable ${operation}`,
+      );
+      expect(requests).toBe(0);
+    },
+  );
 
   it("logs only allowlisted request metadata", async () => {
     const logs: string[] = [];
@@ -942,7 +974,6 @@ describe("ConnectWiseClient", () => {
       log: (message) => logs.push(message),
     });
     await client.createScheduleEntry({
-      memberId: 149,
       objectId: 1892065,
       objectType: 4,
       dateStart: "2026-08-31T08:30:00-04:00",
@@ -1040,7 +1071,6 @@ describe("ConnectWiseClient", () => {
     });
     await expect(
       client.createTimeEntry({
-        memberId: 149,
         timeStart: "2026-09-01T12:00:00-04:00",
         timeEnd: "2026-09-01T13:00:00-04:00",
       }),

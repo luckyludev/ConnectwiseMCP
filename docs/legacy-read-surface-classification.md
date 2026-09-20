@@ -24,7 +24,7 @@ The Worker exposes these bounded business tools:
 - Agreement reads: `get_agreement_additions`, `get_agreement_additions_summary`, `search_agreement_additions`, `get_agreement_billing_summary`.
 - Agreement writes: `create_agreement_addition`.
 - Attachment UI: `open_attachment_uploader` is model-visible; `upload_connectwise_image` is app-only and attaches a bounded image to a Ticket or TimeEntry.
-- Schedule/time writes: `create_schedule_entry`, `update_schedule_entry`, `delete_schedule_entry`, `create_time_entry`.
+- Schedule/time writes: `create_schedule_entry`, `update_schedule_entry`, `delete_schedule_entry`, `create_time_entry`. Create operations select the member only from the mapped profile; callers cannot choose a member.
 
 Ticket-note text and commercial fields are returned only when the mapped ConnectWise API member can retrieve them. All list sections are capped at 50 items. Document downloads return bounded base64 without download URLs or GUIDs. The registered catalog contains 39 tools (38 model-visible and one app-only); 11 are dormant write-capable tools that require the currently unissued `mcp:write` scope. All writes are non-idempotent and are never retried.
 

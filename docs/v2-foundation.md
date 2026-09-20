@@ -63,7 +63,7 @@ Each map value must be a single string; arrays and other value types are rejecte
 }
 ```
 
-`memberId` must be an integer from 1 through 1,000,000 identifying the same ConnectWise API member as the profile credentials. It is required for `get_my_member`, `list_time_entries`, `list_schedule_entries`, `get_time_sheets`, and member-scoped catalog routes; those operations fail before contacting ConnectWise when it is absent. Callers cannot supply or override it.
+`memberId` must be an integer from 1 through 1,000,000 identifying the same ConnectWise API member as the profile credentials. It is required for `get_my_member`, `list_time_entries`, `list_schedule_entries`, `get_time_sheets`, `create_schedule_entry`, `create_time_entry`, and member-scoped catalog routes; those operations fail before contacting ConnectWise when it is absent. Callers cannot supply or override it.
 
 Set the non-secret `CONNECTWISE_ALLOWED_ORIGINS` Worker variable to a JSON array of the exact canonical ConnectWise origins used by these profiles, for example `["https://<connectwise-host>"]`. Origin entries must be canonical HTTPS origins with no path, credentials, query, or fragment. IP literals, localhost-class names, and `.local` names are rejected. Each profile's `apiBaseUrl` origin must match an entry literally. Keep this variable separate from profile secrets so compromise of one secret cannot redirect its Basic credentials to another host.
 

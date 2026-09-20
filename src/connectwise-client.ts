@@ -153,7 +153,6 @@ export type ConnectWiseClient = {
     pageSize: number,
   ): Promise<unknown>;
   createScheduleEntry(input: {
-    memberId: number;
     dateStart: string;
     dateEnd: string;
     objectId?: number;
@@ -202,7 +201,6 @@ export type ConnectWiseClient = {
     },
   ): Promise<unknown>;
   createTimeEntry(input: {
-    memberId: number;
     timeStart: string;
     timeEnd: string;
     notes?: string;
@@ -1460,7 +1458,12 @@ export function createConnectWiseClient(
     },
 
     async createScheduleEntry(input): Promise<unknown> {
-      positiveId(input.memberId, "member ID");
+      const memberId = credentials.memberId;
+      if (memberId === undefined) {
+        throw new Error(
+          "ConnectWise profile is missing memberId; add it to enable create_schedule_entry",
+        );
+      }
       const dateStart = toUtcIso(input.dateStart, "dateStart");
       const dateEnd = toUtcIso(input.dateEnd, "dateEnd");
       const objectType = input.objectType ?? 4;
@@ -1475,7 +1478,7 @@ export function createConnectWiseClient(
         );
       }
       const payload: Record<string, unknown> = {
-        member: { id: input.memberId },
+        member: { id: memberId },
         type: { id: objectType },
         status: { id: input.statusId ?? 1 },
         dateStart,
@@ -1554,7 +1557,12 @@ export function createConnectWiseClient(
     },
 
     async createTimeEntry(input): Promise<unknown> {
-      positiveId(input.memberId, "member ID");
+      const memberId = credentials.memberId;
+      if (memberId === undefined) {
+        throw new Error(
+          "ConnectWise profile is missing memberId; add it to enable create_time_entry",
+        );
+      }
       const timeStart = toUtcIso(input.timeStart, "timeStart");
       const timeEnd = toUtcIso(input.timeEnd, "timeEnd");
       if (input.ticketId !== undefined) positiveId(input.ticketId, "ticket ID");
@@ -1570,7 +1578,7 @@ export function createConnectWiseClient(
       // Writing into a submitted timesheet fails server-side; fail fast with
       // a clear recall instruction instead of a generic CW error.
       const sheets = (await requestJson("GET", "/time/sheets", {
-        conditions: `member/id=${input.memberId}`,
+        conditions: `member/id=${memberId}`,
         pageSize: 5,
       })) as unknown[];
       if (Array.isArray(sheets)) {
@@ -1582,7 +1590,7 @@ export function createConnectWiseClient(
         }
       }
       const payload: Record<string, unknown> = {
-        member: { id: input.memberId },
+        member: { id: memberId },
         timeStart,
         timeEnd,
         billableOption: input.billableOption ?? "Billable",
