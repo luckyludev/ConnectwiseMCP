@@ -29,7 +29,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260920.1",
-    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/ext-apps": "2.0.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "prettier": "3.9.6",
     "typescript": "6.0.3",
