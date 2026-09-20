@@ -53,9 +53,9 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   search_members:
     "15171b145237ea80b813c18694b4143df2574a8d322f446d56ccef94d3e585ee",
   search_companies:
-    "287972874bf83b6ca8d00b570b238898f378d4aa1509a1009a6c86f134d2f294",
+    "15171b145237ea80b813c18694b4143df2574a8d322f446d56ccef94d3e585ee",
   search_contacts:
-    "287972874bf83b6ca8d00b570b238898f378d4aa1509a1009a6c86f134d2f294",
+    "15171b145237ea80b813c18694b4143df2574a8d322f446d56ccef94d3e585ee",
   list_time_entries:
     "d092755cbe07b7355c5abb5569e8dd15c1d4a0b4be02c1d26b15c4026996b853",
   list_schedule_entries:
@@ -65,7 +65,7 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   download_ticket_attachment:
     "1f9fbb5ae048a534b0f1ae21814df160a00f97d1e1b6b9ce6ed1238f6638edd6",
   call_connectwise:
-    "8e12ae1ba32a119a41cb9a0f582ec15dc2faf4e642e050cb3f14be1f4937d872",
+    "a654164d163313f496de41e326660e5923981e73178419f363ac91d93cd2e48e",
   create_service_ticket:
     "65753c79701ae624f3a6f66736b2e4a60f237ed4b18caf23c89dc592349e1089",
   update_service_ticket:
@@ -105,14 +105,33 @@ function canonicalJson(value) {
 
 function validateInputSchema(tool) {
   const schema = tool.inputSchema;
+  const hasObjectProperties =
+    schema !== null &&
+    typeof schema === "object" &&
+    !Array.isArray(schema) &&
+    schema.properties !== null &&
+    typeof schema.properties === "object" &&
+    !Array.isArray(schema.properties);
+  const hasObjectVariants =
+    schema !== null &&
+    typeof schema === "object" &&
+    !Array.isArray(schema) &&
+    Array.isArray(schema.oneOf) &&
+    schema.oneOf.length > 0 &&
+    schema.oneOf.every(
+      (variant) =>
+        variant !== null &&
+        typeof variant === "object" &&
+        !Array.isArray(variant) &&
+        variant.type === "object" &&
+        variant.additionalProperties === false &&
+        variant.properties !== null &&
+        typeof variant.properties === "object" &&
+        !Array.isArray(variant.properties),
+    );
   if (
-    schema === null ||
-    typeof schema !== "object" ||
-    Array.isArray(schema) ||
-    schema.type !== "object" ||
-    schema.properties === null ||
-    typeof schema.properties !== "object" ||
-    Array.isArray(schema.properties)
+    schema?.type !== "object" ||
+    (!hasObjectProperties && !hasObjectVariants)
   ) {
     return `tools/list exposes an invalid input schema for ${tool.name}`;
   }

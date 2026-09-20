@@ -459,6 +459,11 @@ const MEMBER_SCOPED_CATALOG_ROUTES = new Set<CatalogRouteId>([
   "schedule.entries.byMember",
 ]);
 
+const TARGETED_SEARCH_CATALOG_ROUTES = new Set<CatalogRouteId>([
+  "company.configurations",
+  "finance.agreements.byName",
+]);
+
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
     path: (p) => `/service/boards/${p.boardId}/statuses`,
@@ -506,12 +511,10 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "company.configurations": {
     path: () => "/company/configurations",
     query: (p) => ({
-      ...(p.query
-        ? { conditions: `name like '%${conditionString(String(p.query))}%'` }
-        : {}),
+      conditions: `name like '%${targetedSearchString(String(p.query))}%'`,
       pageSize: p.pageSize ?? 20,
     }),
-    required: [],
+    required: ["query"],
     allowed: ["query", "pageSize"],
   },
   "system.documents": {
@@ -527,7 +530,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "finance.agreements.byName": {
     path: () => "/finance/agreements",
     query: (p) => ({
-      conditions: `name like '%${conditionString(String(p.name))}%'`,
+      conditions: `name like '%${targetedSearchString(String(p.name))}%'`,
       pageSize: p.pageSize ?? 20,
     }),
     required: ["name"],
@@ -611,6 +614,12 @@ function boundedPageSize(value: number): void {
   }
 }
 
+function targetedSearchPageSize(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 20) {
+    throw new Error("Invalid targeted search page size");
+  }
+}
+
 const ATTACHMENT_MIME_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -669,6 +678,18 @@ function conditionString(value: string): string {
     throw new Error("Invalid search text");
   }
   return value.replaceAll("'", "''");
+}
+
+function targetedSearchString(value: string): string {
+  const normalized = value.trim();
+  if (
+    normalized.length < 2 ||
+    normalized.length > 100 ||
+    /[%_]/.test(normalized)
+  ) {
+    throw new Error("Invalid targeted search text");
+  }
+  return conditionString(normalized);
 }
 
 // CW stores schedule and time entries as UTC ISO strings. Accept ISO 8601
@@ -1020,18 +1041,8 @@ export function createConnectWiseClient(
     },
 
     async searchMembers(query: string, pageSize: number): Promise<unknown> {
-      const normalizedQuery = query.trim();
-      if (
-        normalizedQuery.length < 2 ||
-        normalizedQuery.length > 100 ||
-        /[%_]/.test(normalizedQuery)
-      ) {
-        throw new Error("Invalid member search text");
-      }
-      if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 20) {
-        throw new Error("Invalid member page size");
-      }
-      const escaped = conditionString(normalizedQuery);
+      const escaped = targetedSearchString(query);
+      targetedSearchPageSize(pageSize);
       return requestJson("GET", "/system/members", {
         conditions: `name like '%${escaped}%'`,
         orderBy: "name asc",
@@ -1040,8 +1051,8 @@ export function createConnectWiseClient(
     },
 
     async searchCompanies(query: string, pageSize: number): Promise<unknown> {
-      boundedPageSize(pageSize);
-      const escaped = conditionString(query);
+      targetedSearchPageSize(pageSize);
+      const escaped = targetedSearchString(query);
       return requestJson("GET", "/company/companies", {
         conditions: `name like '%${escaped}%'`,
         orderBy: "name asc",
@@ -1050,8 +1061,8 @@ export function createConnectWiseClient(
     },
 
     async searchContacts(query: string, pageSize: number): Promise<unknown> {
-      boundedPageSize(pageSize);
-      const escaped = conditionString(query);
+      targetedSearchPageSize(pageSize);
+      const escaped = targetedSearchString(query);
       return requestJson("GET", "/company/contacts", {
         conditions: `(name like '%${escaped}%' OR email like '%${escaped}%')`,
         orderBy: "name asc",
@@ -1263,7 +1274,12 @@ export function createConnectWiseClient(
         throw new Error("Unsupported document record type");
       }
       if (effectiveParams.pageSize !== undefined) {
-        boundedPageSize(Number(effectiveParams.pageSize));
+        const catalogPageSize = Number(effectiveParams.pageSize);
+        if (TARGETED_SEARCH_CATALOG_ROUTES.has(route as CatalogRouteId)) {
+          targetedSearchPageSize(catalogPageSize);
+        } else {
+          boundedPageSize(catalogPageSize);
+        }
       }
       for (const [key, value] of Object.entries(effectiveParams)) {
         if (typeof value === "string" && /[\u0000-\u001F\u007F]/.test(value)) {

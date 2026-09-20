@@ -557,35 +557,53 @@ describe("ConnectWiseClient", () => {
 
     for (const query of ["", " ", "x", "%%", "A_", "x".repeat(101), "ok\nno"]) {
       await expect(client.searchMembers(query, 10)).rejects.toThrow(
-        /Invalid (member )?search text/,
+        /Invalid .*search text/,
       );
     }
     for (const pageSize of [0, 21, 1.5]) {
       await expect(client.searchMembers("valid", pageSize)).rejects.toThrow(
-        "Invalid member page size",
+        "Invalid targeted search page size",
       );
     }
     expect(urls).toHaveLength(1);
   });
 
-  it("escapes company and contact search conditions", async () => {
-    let url = "";
+  it("requires targeted company and contact searches", async () => {
+    const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
-        url = String(input);
+        urls.push(String(input));
         return Response.json([]);
       },
     });
 
-    await client.searchCompanies("O'Brien", 10);
-    expect(new URL(url).searchParams.get("conditions")).toBe(
+    await client.searchCompanies("  O'Brien  ", 20);
+    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
       "name like '%O''Brien%'",
     );
 
-    await client.searchContacts("a@b.com", 10);
-    expect(new URL(url).searchParams.get("conditions")).toBe(
+    await client.searchContacts("a@b.com", 20);
+    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
       "(name like '%a@b.com%' OR email like '%a@b.com%')",
     );
+
+    for (const query of ["", " ", "x", "%", "A_", "x".repeat(101), "ok\nno"]) {
+      await expect(client.searchCompanies(query, 10)).rejects.toThrow(
+        /Invalid .*search text/,
+      );
+      await expect(client.searchContacts(query, 10)).rejects.toThrow(
+        /Invalid .*search text/,
+      );
+    }
+    for (const pageSize of [0, 21, 1.5]) {
+      await expect(client.searchCompanies("valid", pageSize)).rejects.toThrow(
+        "Invalid targeted search page size",
+      );
+      await expect(client.searchContacts("valid", pageSize)).rejects.toThrow(
+        "Invalid targeted search page size",
+      );
+    }
+    expect(urls).toHaveLength(2);
   });
 
   it("builds allowlisted catalog routes and rejects unknown ones", async () => {
@@ -633,6 +651,50 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow(
       "Parameter query is not allowed for route service.boards.statuses",
     );
+  });
+
+  it("requires targeted catalog name searches", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.catalogGet("company.configurations", {
+      query: "  O'Brien  ",
+      pageSize: 20,
+    });
+    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
+      "name like '%O''Brien%'",
+    );
+
+    await client.catalogGet("finance.agreements.byName", {
+      name: "Managed Services",
+      pageSize: 20,
+    });
+    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
+      "name like '%Managed Services%'",
+    );
+
+    await expect(
+      client.catalogGet("company.configurations", { pageSize: 20 }),
+    ).rejects.toThrow("Missing query");
+    for (const [route, key] of [
+      ["company.configurations", "query"],
+      ["finance.agreements.byName", "name"],
+    ] as const) {
+      for (const value of ["x", "%", "A_", "ok\nno"]) {
+        await expect(
+          client.catalogGet(route, { [key]: value, pageSize: 20 }),
+        ).rejects.toThrow(/Invalid .*search text|Invalid (query|name)/);
+      }
+      await expect(
+        client.catalogGet(route, { [key]: "valid", pageSize: 21 }),
+      ).rejects.toThrow("Invalid targeted search page size");
+    }
+    expect(urls).toHaveLength(2);
   });
 
   it("binds member-scoped catalog routes to the mapped profile", async () => {

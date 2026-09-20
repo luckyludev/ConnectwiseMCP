@@ -1396,7 +1396,6 @@ describe("authenticated MCP transport", () => {
             name: "call_connectwise",
             arguments: {
               route: "service.tickets.byOwner",
-              memberId: 999,
               includeClosed: "true",
             },
           },
@@ -1621,6 +1620,79 @@ describe("authenticated MCP transport", () => {
     );
     const contactBody = await contacts.text();
     expect(contactBody).toContain('\\"id\\":81');
+  });
+
+  it("rejects wildcard and underspecified directory searches before profile access", async () => {
+    let clientCreations = 0;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () => {
+            clientCreations += 1;
+            return businessClient();
+          },
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+
+    const invalidCalls = [
+      { name: "search_companies", arguments: { query: "%" } },
+      { name: "search_contacts", arguments: { query: "A_" } },
+      {
+        name: "call_connectwise",
+        arguments: { route: "company.configurations", query: "%" },
+      },
+      {
+        name: "call_connectwise",
+        arguments: { route: "company.configurations" },
+      },
+      {
+        name: "call_connectwise",
+        arguments: {
+          route: "service.tickets.byOwner",
+          memberId: 999,
+        },
+      },
+      {
+        name: "call_connectwise",
+        arguments: {
+          route: "company.configurations",
+          query: "router",
+          pageSize: 21,
+        },
+      },
+      {
+        name: "call_connectwise",
+        arguments: { route: "finance.agreements.byName", name: "x" },
+      },
+    ];
+    for (const [index, params] of invalidCalls.entries()) {
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 560 + index,
+            method: "tools/call",
+            params,
+          }),
+        }),
+      );
+      expect(await response.text()).toMatch(/invalid|wildcard|too_small/i);
+    }
+    expect(clientCreations).toBe(0);
   });
 
   it("returns the authenticated member record for get_my_member", async () => {
