@@ -4,7 +4,7 @@
 
 ## Authorization and safety rules
 
-Entra authorization determines who may reach the MCP server and selects exactly one server-side `CW_PROFILE_<ALIAS>` secret. Every tool requires `mcp:read`. Write-capable tools additionally require `mcp:write` before profile-secret access; the current authorization flow never issues or retains that scope, so production-default access is read-only. If a separately reviewed policy later enables `mcp:write`, every business call still uses the mapped user's ConnectWise credentials and ConnectWise Security Roles remain the final business-authorization boundary.
+Entra authorization determines who may reach the MCP server and selects exactly one server-side `CW_PROFILE_<ALIAS>` secret. Every tool requires `mcp:read`. Write-capable tools additionally require `mcp:write` before profile-secret access; the current authorization flow never issues or retains that scope, so production-default access is read-only. The tool-access table is exhaustive at compile time, so adding an audited tool without an explicit read/write classification fails the build instead of defaulting to read access. If a separately reviewed policy later enables `mcp:write`, every business call still uses the mapped user's ConnectWise credentials and ConnectWise Security Roles remain the final business-authorization boundary.
 
 V2 never accepts caller-selected ConnectWise hosts, endpoints, methods, credential headers, profile aliases, raw conditions, or arbitrary request bodies. Every tool uses a fixed route and method, validated inputs, server-controlled result bounds, an allowlisted output projection, sanitized failures, and an argument-free audit event. Non-idempotent writes are never retried after an ambiguous network failure.
 

@@ -17,6 +17,7 @@ import {
 } from "./audit";
 import { registerConnectWiseBusinessTools } from "./connectwise-business-tools";
 import { hasMcpScopes } from "./auth-scopes";
+import { requiredMcpScopes } from "./tool-access";
 
 export type AuditedToolDependencies = {
   audit?: ToolAuditDependencies;
@@ -27,7 +28,7 @@ export function whoamiResult(
   dependencies: AuditedToolDependencies = {},
 ): CallToolResult {
   const startedAtMs = getAuditStartTime(dependencies.audit);
-  if (!hasMcpScopes(props, ["mcp:read"])) {
+  if (!hasMcpScopes(props, requiredMcpScopes("whoami"))) {
     emitToolAudit(
       {
         props,
@@ -101,7 +102,7 @@ export async function getServiceTicketResult(
   dependencies: ServiceTicketDependencies = {},
 ): Promise<CallToolResult> {
   const startedAtMs = getAuditStartTime(dependencies.audit);
-  if (!hasMcpScopes(props, ["mcp:read"])) {
+  if (!hasMcpScopes(props, requiredMcpScopes("get_service_ticket"))) {
     emitToolAudit(
       {
         props,
@@ -198,6 +199,12 @@ export function createMcpServer(
     {
       description: "Return the authenticated ConnectWise profile alias",
       inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async (_args): Promise<CallToolResult> => {
       const props = getMcpAuthContext()?.props as

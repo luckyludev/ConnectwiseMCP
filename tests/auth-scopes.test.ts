@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { hasMcpScopes } from "../src/auth-scopes";
+import { requiredMcpScopes, TOOL_ACCESS } from "../src/tool-access";
 import type { EntraAccessTokenProps } from "../src/auth-handler";
 
 const asProps = (scopes: unknown) =>
   ({ scopes }) as Partial<EntraAccessTokenProps>;
 
 describe("runtime MCP scope validation", () => {
+  it("derives immutable required scopes from every explicit tool classification", () => {
+    expect(Object.isFrozen(TOOL_ACCESS)).toBe(true);
+    for (const [tool, access] of Object.entries(TOOL_ACCESS)) {
+      const scopes = requiredMcpScopes(tool as keyof typeof TOOL_ACCESS);
+      expect(scopes, tool).toEqual(
+        access === "write" ? ["mcp:read", "mcp:write"] : ["mcp:read"],
+      );
+      expect(Object.isFrozen(scopes), tool).toBe(true);
+    }
+  });
+
   it("accepts only dense string arrays containing every required scope", () => {
     expect(hasMcpScopes(asProps(["mcp:read"]), ["mcp:read"])).toBe(true);
     expect(
