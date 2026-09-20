@@ -564,6 +564,137 @@ describe("authenticated MCP transport", () => {
     },
   );
 
+  it("denies every read tool without mcp:read before resolving a profile", async () => {
+    const auditMessages: string[] = [];
+    const bindingReads: string[] = [];
+    let directClientCreated = false;
+    let businessClientCreated = false;
+    const guardedEnv = new Proxy(env, {
+      get(target, property, receiver) {
+        bindingReads.push(String(property));
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(guardedEnv, {
+          audit: { logger: (message) => auditMessages.push(message) },
+          createClient: () => {
+            directClientCreated = true;
+            return businessClient();
+          },
+          createBusinessClient: () => {
+            businessClientCreated = true;
+            return businessClient();
+          },
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:write"] },
+        },
+      },
+    );
+    const reads: Array<{
+      name: string;
+      arguments: Record<string, unknown>;
+    }> = [
+      { name: "whoami", arguments: {} },
+      { name: "get_service_ticket", arguments: { ticketId: 1 } },
+      {
+        name: "search_tickets_by_content",
+        arguments: { searchText: "must not be sent" },
+      },
+      { name: "get_ticket_notes_with_content", arguments: { ticketId: 1 } },
+      {
+        name: "get_ticket_attachments_with_details",
+        arguments: { ticketId: 1 },
+      },
+      { name: "list_ticket_tasks", arguments: { ticketId: 1 } },
+      { name: "list_ticket_time_entries", arguments: { ticketId: 1 } },
+      { name: "get_complete_ticket_content", arguments: { ticketId: 1 } },
+      { name: "get_service_boards", arguments: {} },
+      { name: "get_board_options", arguments: { boardId: 1 } },
+      { name: "list_board_tickets", arguments: { boardId: 1 } },
+      { name: "get_service_statuses", arguments: {} },
+      { name: "get_service_priorities", arguments: {} },
+      { name: "get_service_sources", arguments: {} },
+      { name: "get_my_member", arguments: {} },
+      { name: "list_members", arguments: {} },
+      { name: "search_companies", arguments: { query: "must not be sent" } },
+      { name: "search_contacts", arguments: { query: "must not be sent" } },
+      { name: "list_time_entries", arguments: {} },
+      { name: "list_schedule_entries", arguments: {} },
+      { name: "get_time_sheets", arguments: {} },
+      {
+        name: "download_ticket_attachment",
+        arguments: { ticketId: 1, documentId: 1 },
+      },
+      { name: "open_attachment_uploader", arguments: {} },
+      {
+        name: "call_connectwise",
+        arguments: { route: "service.boards.statuses", boardId: 1 },
+      },
+      { name: "get_agreement_additions", arguments: { agreementId: 1 } },
+      {
+        name: "get_agreement_additions_summary",
+        arguments: { agreementId: 1 },
+      },
+      {
+        name: "search_agreement_additions",
+        arguments: { agreementId: 1 },
+      },
+      {
+        name: "get_agreement_billing_summary",
+        arguments: { agreementId: 1 },
+      },
+    ];
+    expect(reads.map(({ name }) => name).sort()).toEqual(
+      Object.entries(TOOL_ACCESS)
+        .filter(([, access]) => access === "read")
+        .map(([name]) => name)
+        .sort(),
+    );
+
+    for (const [index, read] of reads.entries()) {
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 40 + index,
+            method: "tools/call",
+            params: read,
+          }),
+        }),
+      );
+      expect(await response.text(), read.name).toContain("Insufficient scope");
+    }
+
+    expect(directClientCreated).toBe(false);
+    expect(businessClientCreated).toBe(false);
+    expect(bindingReads).toEqual([]);
+    expect(auditMessages).toHaveLength(reads.length);
+    expect(auditMessages.map((message) => JSON.parse(message).tool)).toEqual(
+      reads.map(({ name }) => name),
+    );
+    for (const message of auditMessages) {
+      expect(JSON.parse(message)).toMatchObject({
+        profileAlias: "LUIS",
+        outcome: "denied",
+        reason: "insufficient_scope",
+      });
+      expect(message).not.toContain("must not be sent");
+    }
+  });
+
   it("executes a write with only the authenticated user's ConnectWise profile", async () => {
     const auditMessages: string[] = [];
     let received:
