@@ -18,7 +18,7 @@
     "prebuild": "npm run build:attachment-app",
     "build": "wrangler deploy --env=\"\" --dry-run --outdir dist",
     "build:staging": "wrangler deploy --env staging --keep-vars --strict --dry-run --outdir dist",
-    "deploy:staging": "wrangler deploy --env staging --keep-vars --strict",
+    "deploy:staging": "npm run check && wrangler deploy --env staging --keep-vars --strict",
     "check": "npm run scripts:check && npm run typecheck && npm test && npm run format:check && npm audit --audit-level=moderate && npm run build && npm run build:staging"
   },
   "dependencies": {

@@ -84,7 +84,7 @@ A configuration change requires the normal repository review and CI process. Onc
 npm run deploy:staging
 ```
 
-The repository-owned command preserves approved remote variables and enables Wrangler strict mode. If Wrangler reports conflicting remote changes, stop and review the drift through the approved configuration workflow; do not bypass `--strict` or run an ad hoc deploy command.
+The repository-owned command explicitly runs the complete blocking `npm run check` suite before invoking Wrangler, while preserving approved remote variables and retaining strict mode. If any validation fails, the shell does not invoke Wrangler. If Wrangler reports conflicting remote changes, stop and review the drift through the approved configuration workflow; do not bypass the checks, `--strict`, or run an ad hoc deploy command.
 
 This creates or updates the staging Worker and its Workers.dev endpoint. It does not create a custom-domain route, but it is an external deployment and must be recorded in the secure operations record.
 
