@@ -1,6 +1,7 @@
 import { createMcpHandler } from "agents/mcp/server";
 import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/mcp-server";
+import { TOOL_ACCESS } from "../src/tool-access";
 import {
   ConnectWiseRequestError,
   createConnectWiseClient,
@@ -137,7 +138,12 @@ describe("authenticated MCP transport", () => {
         tools: Array<{
           name: string;
           inputSchema?: { properties?: Record<string, unknown> };
-          annotations?: { readOnlyHint?: boolean; idempotentHint?: boolean };
+          annotations?: {
+            readOnlyHint?: boolean;
+            destructiveHint?: boolean;
+            idempotentHint?: boolean;
+            openWorldHint?: boolean;
+          };
           _meta?: { ui?: { visibility?: string[]; resourceUri?: string } };
         }>;
       };
@@ -187,6 +193,7 @@ describe("authenticated MCP transport", () => {
     expect(names).toHaveLength(expectedNames.length);
     expect(new Set(names).size).toBe(expectedNames.length);
     expect([...names].sort()).toEqual(expectedNames);
+    expect(Object.keys(TOOL_ACCESS).sort()).toEqual(expectedNames);
     for (const name of ["create_schedule_entry", "create_time_entry"]) {
       const tool = body.result.tools.find(
         (candidate) => candidate.name === name,
@@ -218,12 +225,37 @@ describe("authenticated MCP transport", () => {
       "update_service_ticket",
       "upload_connectwise_image",
     ];
-    for (const name of writeNames) {
+    const writeNameSet = new Set(writeNames);
+    const writeTools = body.result.tools.filter((tool) =>
+      writeNameSet.has(tool.name),
+    );
+    const readTools = body.result.tools.filter(
+      (tool) => !writeNameSet.has(tool.name),
+    );
+    expect(writeTools).toHaveLength(11);
+    expect(readTools).toHaveLength(28);
+    const destructiveNameSet = new Set([
+      "create_agreement_addition",
+      "delete_schedule_entry",
+      "update_schedule_entry",
+      "update_service_ticket",
+    ]);
+    for (const tool of body.result.tools) {
+      const expectedAccess = writeNameSet.has(tool.name) ? "write" : "read";
       expect(
-        body.result.tools.find((tool) => tool.name === name),
-      ).toMatchObject({
-        annotations: { readOnlyHint: false, idempotentHint: false },
-      });
+        TOOL_ACCESS[tool.name as keyof typeof TOOL_ACCESS],
+        tool.name,
+      ).toBe(expectedAccess);
+      expect(tool.annotations, tool.name).toBeDefined();
+      expect(tool.annotations?.destructiveHint, tool.name).toBe(
+        destructiveNameSet.has(tool.name),
+      );
+      expect(typeof tool.annotations?.openWorldHint, tool.name).toBe("boolean");
+      expect(tool.annotations, tool.name).toMatchObject(
+        writeNameSet.has(tool.name)
+          ? { readOnlyHint: false, idempotentHint: false }
+          : { readOnlyHint: true, idempotentHint: true },
+      );
     }
 
     expect(
@@ -397,6 +429,7 @@ describe("authenticated MCP transport", () => {
 
   it.each([
     { label: "missing mcp:write", scopes: ["mcp:read"] },
+    { label: "missing mcp:read", scopes: ["mcp:write"] },
     { label: "malformed string scopes", scopes: "mcp:read mcp:write" },
   ])(
     "denies every write tool with $label before resolving a profile",

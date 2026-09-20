@@ -15,7 +15,8 @@ import {
   type ConnectWiseCredentials,
 } from "./connectwise-profile";
 import type { EntraAccessTokenProps } from "./auth-handler";
-import { hasMcpScopes, type McpScope } from "./auth-scopes";
+import { hasMcpScopes } from "./auth-scopes";
+import { requiredMcpScopes } from "./tool-access";
 import {
   emitToolAudit,
   getAuditStartTime,
@@ -251,20 +252,6 @@ function failureMessage(error: unknown): string {
   return "ConnectWise operation failed";
 }
 
-const WRITE_TOOLS: ReadonlySet<ToolAuditName> = new Set([
-  "upload_connectwise_image",
-  "create_ticket_note",
-  "attach_image_to_ticket",
-  "attach_image_to_time_entry",
-  "create_agreement_addition",
-  "create_service_ticket",
-  "update_service_ticket",
-  "create_schedule_entry",
-  "update_schedule_entry",
-  "delete_schedule_entry",
-  "create_time_entry",
-]);
-
 async function runBusinessTool(
   props: AuthProps,
   env: object,
@@ -273,9 +260,7 @@ async function runBusinessTool(
   dependencies: BusinessToolDependencies,
 ): Promise<CallToolResult> {
   const startedAtMs = getAuditStartTime(dependencies.audit);
-  const requiredScopes: McpScope[] = WRITE_TOOLS.has(tool)
-    ? ["mcp:read", "mcp:write"]
-    : ["mcp:read"];
+  const requiredScopes = requiredMcpScopes(tool);
   if (!hasMcpScopes(props, requiredScopes)) {
     emitToolAudit(
       {
@@ -461,7 +446,7 @@ export function registerConnectWiseBusinessTools(
     idempotentHint: false,
     openWorldHint: true,
   } as const;
-  const financialWriteAnnotations = {
+  const destructiveWriteAnnotations = {
     ...writeAnnotations,
     destructiveHint: true,
   } as const;
@@ -967,7 +952,7 @@ export function registerConnectWiseBusinessTools(
           .enum(["Billable", "DoNotBill", "NoCharge"])
           .default("Billable"),
       },
-      annotations: financialWriteAnnotations,
+      annotations: destructiveWriteAnnotations,
     },
     (input) =>
       runBusinessTool(
@@ -1652,7 +1637,7 @@ export function registerConnectWiseBusinessTools(
         summary: z.string().trim().min(1).max(100).optional(),
         contactId: positiveId.optional(),
       },
-      annotations: writeAnnotations,
+      annotations: destructiveWriteAnnotations,
     },
     ({
       ticketId,
@@ -1763,7 +1748,7 @@ export function registerConnectWiseBusinessTools(
         allowConflicts: z.boolean().optional(),
         whereId: positiveId.optional(),
       },
-      annotations: writeAnnotations,
+      annotations: destructiveWriteAnnotations,
     },
     ({
       entryId,
@@ -1801,7 +1786,7 @@ export function registerConnectWiseBusinessTools(
       description:
         "Permanently delete a schedule entry by ID. Use for ghost entries left by failed UI/PUT operations. This is destructive and cannot be undone.",
       inputSchema: { entryId: positiveId },
-      annotations: financialWriteAnnotations,
+      annotations: destructiveWriteAnnotations,
     },
     ({ entryId }) =>
       runBusinessTool(
