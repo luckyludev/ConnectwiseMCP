@@ -341,7 +341,13 @@ async function runBusinessTool(
 
 const positiveId = z.number().int().positive();
 const pageSize = z.number().int().min(1).max(50).default(20);
-const memberSearchPageSize = z.number().int().min(1).max(20).default(10);
+const targetedSearchPageSize = z.number().int().min(1).max(20).default(10);
+const targetedSearchText = z
+  .string()
+  .trim()
+  .min(2)
+  .max(100)
+  .regex(/^[^%_]+$/, "Wildcard characters are not allowed");
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/png": "png",
@@ -428,6 +434,84 @@ const date = z
       parsed.getUTCDate() === day
     );
   }, "Invalid calendar date");
+
+const catalogPageSize = pageSize;
+const catalogTargetedPageSize = z.number().int().min(1).max(20).default(20);
+const catalogToolInput = z.discriminatedUnion("route", [
+  z
+    .object({
+      route: z.literal("service.boards.statuses"),
+      boardId: positiveId,
+      pageSize: catalogPageSize,
+    })
+    .strict(),
+  z
+    .object({
+      route: z.literal("service.boards.types"),
+      boardId: positiveId,
+      pageSize: catalogPageSize,
+    })
+    .strict(),
+  z
+    .object({
+      route: z.literal("service.tickets.byStatus"),
+      statusId: positiveId,
+      pageSize: catalogPageSize,
+    })
+    .strict(),
+  z
+    .object({
+      route: z.literal("service.tickets.byOwner"),
+      includeClosed: z.enum(["true", "false"]).optional(),
+      pageSize: catalogPageSize,
+    })
+    .strict(),
+  z
+    .object({
+      route: z.literal("company.configurations"),
+      query: targetedSearchText,
+      pageSize: catalogTargetedPageSize,
+    })
+    .strict(),
+  z
+    .object({
+      route: z.literal("system.documents"),
+      recordId: positiveId,
+      recordType: z
+        .enum([
+          "Ticket",
+          "Project",
+          "Agreement",
+          "Company",
+          "Contact",
+          "Vendor",
+        ])
+        .optional(),
+      pageSize: catalogPageSize,
+    })
+    .strict(),
+  z
+    .object({
+      route: z.literal("finance.agreements.byName"),
+      name: targetedSearchText,
+      pageSize: catalogTargetedPageSize,
+    })
+    .strict(),
+  z
+    .object({
+      route: z.literal("time.entries.byMember"),
+      pageSize: catalogPageSize,
+    })
+    .strict(),
+  z
+    .object({
+      route: z.literal("schedule.entries.byMember"),
+      startDate: date.optional(),
+      endDate: date.optional(),
+      pageSize: catalogPageSize,
+    })
+    .strict(),
+]);
 
 export function registerConnectWiseBusinessTools(
   server: McpServer,
@@ -1355,13 +1439,8 @@ export function registerConnectWiseBusinessTools(
       description:
         "Search ConnectWise team members by name. Results expose only member identity and status and are limited by the authenticated user's ConnectWise API member.",
       inputSchema: {
-        query: z
-          .string()
-          .trim()
-          .min(2)
-          .max(100)
-          .regex(/^[^%_]+$/, "Wildcard characters are not allowed"),
-        maxResults: memberSearchPageSize,
+        query: targetedSearchText,
+        maxResults: targetedSearchPageSize,
       },
       annotations: readAnnotations,
     },
@@ -1384,8 +1463,8 @@ export function registerConnectWiseBusinessTools(
       description:
         "Search ConnectWise companies by name. Access is limited by the authenticated user's ConnectWise API member.",
       inputSchema: {
-        query: z.string().trim().min(1).max(100),
-        maxResults: pageSize,
+        query: targetedSearchText,
+        maxResults: targetedSearchPageSize,
       },
       annotations: readAnnotations,
     },
@@ -1408,8 +1487,8 @@ export function registerConnectWiseBusinessTools(
       description:
         "Search ConnectWise contacts by name or email. Access is limited by the authenticated user's ConnectWise API member.",
       inputSchema: {
-        query: z.string().trim().min(1).max(100),
-        maxResults: pageSize,
+        query: targetedSearchText,
+        maxResults: targetedSearchPageSize,
       },
       annotations: readAnnotations,
     },
@@ -1527,59 +1606,19 @@ export function registerConnectWiseBusinessTools(
         "Read-only ConnectWise catalog lookup. [BUILD-MARKER 4421014b-2026-08-30] Pick a route ID and provide its required parameters. Routes: " +
         CATALOG_ROUTE_IDS.join(", ") +
         ". Member-scoped routes (service.tickets.byOwner, time.entries.byMember, schedule.entries.byMember) are fixed to the memberId in the mapped profile; callers cannot select another member. schedule.entries.byMember accepts an optional startDate/endDate pair (valid YYYY-MM-DD dates, at most a 31-day span) and returns entries ordered by dateStart. service.tickets.byOwner filters on ticket OWNER (owner/id), not assigned resources; it returns open tickets by default (closedFlag=false) — pass includeClosed:'true' to include closed ones, and returns status, board, priority, owner, contact, closedDate and dateResolved. All routes are GET-only with route-specific allowlisted parameters and bounded output.",
-      inputSchema: {
-        route: z.enum(CATALOG_ROUTE_IDS),
-        boardId: positiveId.optional(),
-        statusId: positiveId.optional(),
-        recordId: positiveId.optional(),
-        recordType: z
-          .enum([
-            "Ticket",
-            "Project",
-            "Agreement",
-            "Company",
-            "Contact",
-            "Vendor",
-          ])
-          .optional(),
-        name: z.string().trim().min(1).max(100).optional(),
-        query: z.string().trim().min(1).max(100).optional(),
-        startDate: date.optional(),
-        endDate: date.optional(),
-        includeClosed: z.enum(["true", "false"]).optional(),
-        pageSize: pageSize,
-      },
+      inputSchema: catalogToolInput,
       annotations: readAnnotations,
     },
-    ({
-      route,
-      boardId,
-      statusId,
-      recordId,
-      recordType,
-      name,
-      query,
-      startDate,
-      endDate,
-      includeClosed,
-      pageSize,
-    }) =>
+    (input) =>
       runBusinessTool(
         getProps(),
         env,
         "call_connectwise",
         async (client) => {
-          const params: Record<string, string | number> = { pageSize };
-          if (boardId !== undefined) params.boardId = boardId;
-          if (statusId !== undefined) params.statusId = statusId;
-          if (recordId !== undefined) params.recordId = recordId;
-          if (recordType !== undefined) params.recordType = recordType;
-          if (name !== undefined) params.name = name;
-          if (query !== undefined) params.query = query;
-          if (startDate !== undefined) params.startDate = startDate;
-          if (endDate !== undefined) params.endDate = endDate;
-          if (includeClosed !== undefined) {
-            params.includeClosed = includeClosed;
+          const { route, pageSize } = input;
+          const params: Record<string, string | number> = {};
+          for (const [key, value] of Object.entries(input)) {
+            if (key !== "route" && value !== undefined) params[key] = value;
           }
           const project = catalogProjectors[route];
           return list(await client.catalogGet(route, params), pageSize).map(

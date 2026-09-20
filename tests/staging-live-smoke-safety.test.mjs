@@ -110,9 +110,10 @@ describe("staging smoke output safety", () => {
     ];
     for (const [toolName, property] of cases) {
       const catalog = structuredClone(expectedToolCatalog());
-      catalog.find((tool) => tool.name === toolName).inputSchema.properties[
-        property
-      ] = { type: "string" };
+      const tool = catalog.find((entry) => entry.name === toolName);
+      const properties =
+        tool.inputSchema.properties ?? tool.inputSchema.oneOf[0].properties;
+      properties[property] = { type: "string" };
       expect(validateStagingToolCatalog(catalog)).toBe(
         `tools/list input schema drifted for ${toolName}`,
       );
@@ -146,7 +147,7 @@ describe("staging smoke output safety", () => {
     const broadenedRoute = structuredClone(expectedToolCatalog());
     broadenedRoute.find(
       (tool) => tool.name === "call_connectwise",
-    ).inputSchema.properties.route = { type: "string" };
+    ).inputSchema.oneOf[0].properties.route = { type: "string" };
     expect(validateStagingToolCatalog(broadenedRoute)).toBe(
       "tools/list input schema drifted for call_connectwise",
     );
