@@ -7,10 +7,17 @@ RUN pip install --no-cache-dir --require-hashes -r /app/requirements.lock \
   && groupadd --gid 10001 app \
   && useradd --uid 10001 --gid app --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin app
 
-# Copy MCP server code and gateway app. The legacy server writes its rollback
-# database beside its source, so retain app-user ownership without root runtime.
-COPY --chown=app:app cwm-mcp /app/mcp-server
-COPY --chown=app:app http-gateway/app /app/gateway
+# Copy only the MCP modules and database required by the rollback gateway. Keep
+# the writable legacy database under app-user ownership without broad COPYs
+# that could embed local credentials, logs, backups, or other workspace files.
+COPY --chown=app:app \
+  cwm-mcp/api_gateway/__init__.py \
+  cwm-mcp/api_gateway/api_db_utils.py \
+  cwm-mcp/api_gateway/connectwise_api.db \
+  cwm-mcp/api_gateway/fast_memory_db.py \
+  cwm-mcp/api_gateway/server.py \
+  /app/mcp-server/api_gateway/
+COPY --chown=app:app http-gateway/app/main.py /app/gateway/main.py
 
 # Default env for module discovery
 ENV PYTHONPATH="/app/mcp-server"
