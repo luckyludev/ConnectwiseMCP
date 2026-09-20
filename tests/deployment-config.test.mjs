@@ -17,6 +17,42 @@ async function readWranglerConfig() {
   return parsed.config;
 }
 
+describe("dependency maintenance configuration", () => {
+  it("covers maintained dependency surfaces without unsafe Python lock updates", async () => {
+    const [source, v2Workflow, legacyWorkflow] = await Promise.all([
+      readFile(new URL("../.github/dependabot.yml", import.meta.url), "utf8"),
+      readFile(
+        new URL("../.github/workflows/v2-ci.yml", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+        "utf8",
+      ),
+    ]);
+    const entries = [
+      ...source.matchAll(
+        /  - package-ecosystem: "([^"]+)"\n    directory: "([^"]+)"/gu,
+      ),
+    ].map((match) => ({ ecosystem: match[1], directory: match[2] }));
+
+    expect(source).toMatch(/^version: 2$/mu);
+    expect(entries).toEqual([
+      { ecosystem: "npm", directory: "/" },
+      { ecosystem: "npm", directory: "/deploy/cwm-mcp" },
+      { ecosystem: "github-actions", directory: "/" },
+      { ecosystem: "docker", directory: "/deploy/http-gateway" },
+      { ecosystem: "docker-compose", directory: "/deploy/http-gateway" },
+    ]);
+    expect(source.match(/interval: "weekly"/gu)).toHaveLength(5);
+    expect(source.match(/timezone: "America\/New_York"/gu)).toHaveLength(5);
+    expect(source).not.toContain('package-ecosystem: "pip"');
+    for (const workflow of [v2Workflow, legacyWorkflow]) {
+      expect(workflow.match(/- "\.github\/dependabot\.yml"/gu)).toHaveLength(2);
+    }
+  });
+});
+
 describe("staging deployment configuration", () => {
   it("preserves remote variables and isolates staging OAuth storage", async () => {
     const [config, packageJson] = await Promise.all([
