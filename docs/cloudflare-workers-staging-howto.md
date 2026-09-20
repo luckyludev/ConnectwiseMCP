@@ -60,7 +60,7 @@ The acceptance checklist also requires a distinct **preview** KV namespace/bindi
 }
 ```
 
-Worker environments do **not** inherit KV bindings or `vars`. Keep the staging KV binding in the `staging` block, but keep the approved staging policy-variable values in the remote Worker configuration and deploy with `--keep-vars`. Keep production placeholders and production bindings separate. CI enforces the staging deployment-script flag, remote-variable omission, and KV-isolation contract.
+Worker environments do **not** inherit KV bindings or `vars`. Keep the staging KV binding in the `staging` block, but keep the approved staging policy-variable values in the remote Worker configuration and deploy with `--keep-vars`. Keep production placeholders and production bindings separate. CI pins the staging Worker name, Workers.dev-only exposure, absence of DNS routes, deployment-script flags, remote-variable omission, and KV-isolation contract.
 
 ## 3. Establish the literal canonical staging resource
 
