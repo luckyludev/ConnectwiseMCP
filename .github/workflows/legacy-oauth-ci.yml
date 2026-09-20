@@ -80,8 +80,27 @@ jobs:
         run: |
           npm ci --prefix deploy/cwm-mcp
           npm audit --prefix deploy/cwm-mcp --audit-level=moderate
-      - name: Seed ignored build-context canary
-        run: printf '%s\n' build-context-canary > deploy/cwm-mcp/.env
+      - name: Seed ignored build-context canaries
+        run: |
+          printf '%s\n' build-context-canary > deploy/cwm-mcp/.env
+          printf '%s\n' build-context-canary > deploy/cwm-mcp/credentials.json
+          printf '%s\n' build-context-canary > deploy/cwm-mcp/api_gateway/debug-backup.py
+          printf '%s\n' build-context-canary > deploy/http-gateway/local-credentials.json
+          printf '%s\n' build-context-canary > deploy/http-gateway/app/debug-backup.py
+      - name: Verify canaries are absent from the Docker build context
+        run: |
+          for canary in \
+            cwm-mcp/.env \
+            cwm-mcp/credentials.json \
+            cwm-mcp/api_gateway/debug-backup.py \
+            http-gateway/local-credentials.json \
+            http-gateway/app/debug-backup.py
+          do
+            if printf 'FROM scratch\nCOPY %s /canary\n' "$canary" | docker build --file - deploy; then
+              printf 'Build-context canary unexpectedly available: %s\n' "$canary" >&2
+              exit 1
+            fi
+          done
       - name: Validate rollback compose configuration and secret isolation
         env:
           MCP_STATIC_TOKEN: compose-canary-mcp-static-token
@@ -109,9 +128,17 @@ jobs:
         run: >-
           docker build --tag connectwise-legacy-rollback-ci
           --file deploy/http-gateway/Dockerfile deploy
-      - name: Verify local environment is absent from image
+      - name: Verify allowlisted rollback image contents
         run: >-
           docker run --rm --entrypoint sh connectwise-legacy-rollback-ci
-          -c 'test ! -e /app/mcp-server/.env'
+          -c '! grep -R -F -q build-context-canary /app
+          && test ! -e /app/mcp-server/.env
+          && test ! -e /app/mcp-server/credentials.json
+          && test ! -e /app/mcp-server/api_gateway/debug-backup.py
+          && test -f /app/mcp-server/api_gateway/server.py
+          && test -f /app/mcp-server/api_gateway/api_db_utils.py
+          && test -f /app/mcp-server/api_gateway/fast_memory_db.py
+          && test -f /app/mcp-server/api_gateway/connectwise_api.db
+          && test -f /app/gateway/main.py'
       - name: Smoke-test rollback image startup and auth boundary
         run: bash deploy/http-gateway/tests/smoke_rollback_image.sh

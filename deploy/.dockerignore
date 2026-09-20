@@ -1,7 +1,20 @@
-**/.DS_Store
-.env
-**/.env
-cwm-mcp/node_modules
-cwm-mcp/venv
-cwm-mcp/api_gateway/api_gateway.log
-cwm-mcp/api_gateway/fast_memory_api.db
+# Deny the entire legacy rollback build context by default. Re-include parent
+# directories only so narrowly named files can be restored below.
+**
+
+!http-gateway/
+http-gateway/**
+!http-gateway/requirements.lock
+!http-gateway/app/
+http-gateway/app/**
+!http-gateway/app/main.py
+
+!cwm-mcp/
+cwm-mcp/**
+!cwm-mcp/api_gateway/
+cwm-mcp/api_gateway/**
+!cwm-mcp/api_gateway/__init__.py
+!cwm-mcp/api_gateway/api_db_utils.py
+!cwm-mcp/api_gateway/connectwise_api.db
+!cwm-mcp/api_gateway/fast_memory_db.py
+!cwm-mcp/api_gateway/server.py
