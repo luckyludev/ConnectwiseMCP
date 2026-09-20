@@ -21,6 +21,7 @@ on:
       - ".prettierignore"
       - ".gitignore"
       - "docs/**"
+      - ".github/dependabot.yml"
       - ".github/workflows/v2-ci.yml"
   push:
     branches: [main]
@@ -40,6 +41,7 @@ on:
       - ".prettierignore"
       - ".gitignore"
       - "docs/**"
+      - ".github/dependabot.yml"
       - ".github/workflows/v2-ci.yml"
 
 permissions:
