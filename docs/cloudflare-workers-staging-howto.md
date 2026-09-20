@@ -81,8 +81,10 @@ Empty eligibility lists and absent secrets must remain fail-closed. Do not deplo
 A configuration change requires the normal repository review and CI process. Once the target release is merged and an authorized operator explicitly approves deployment, publish only the staging environment:
 
 ```bash
-npx wrangler deploy --env staging --keep-vars
+npm run deploy:staging
 ```
+
+The repository-owned command preserves approved remote variables and enables Wrangler strict mode. If Wrangler reports conflicting remote changes, stop and review the drift through the approved configuration workflow; do not bypass `--strict` or run an ad hoc deploy command.
 
 This creates or updates the staging Worker and its Workers.dev endpoint. It does not create a custom-domain route, but it is an external deployment and must be recorded in the secure operations record.
 

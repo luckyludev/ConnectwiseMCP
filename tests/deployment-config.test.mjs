@@ -73,7 +73,10 @@ describe("staging deployment configuration", () => {
     }
     expect(staging).not.toHaveProperty("vars");
     expect(packageJson.scripts?.["build:staging"]).toBe(
-      "wrangler deploy --env staging --keep-vars --dry-run --outdir dist",
+      "wrangler deploy --env staging --keep-vars --strict --dry-run --outdir dist",
+    );
+    expect(packageJson.scripts?.["deploy:staging"]).toBe(
+      "wrangler deploy --env staging --keep-vars --strict",
     );
 
     expect(stagingOAuthBindings).toHaveLength(1);
