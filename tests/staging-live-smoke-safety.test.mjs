@@ -18,11 +18,13 @@ import {
 import { bearerResourceMetadata } from "../scripts/www-authenticate.mjs";
 
 function expectedToolCatalog() {
-  return EXPECTED_TOOL_NAMES.map((name) =>
-    name === "upload_connectwise_image"
-      ? { name, _meta: { ui: { visibility: ["app"] } } }
-      : { name },
-  );
+  return EXPECTED_TOOL_NAMES.map((name) => ({
+    name,
+    inputSchema: { type: "object" },
+    ...(name === "upload_connectwise_image"
+      ? { _meta: { ui: { visibility: ["app"] } } }
+      : {}),
+  }));
 }
 
 describe("staging smoke output safety", () => {
@@ -395,6 +397,8 @@ describe("staging smoke output safety", () => {
     let baseUrl = "";
     let capturedScheduleArguments;
     let rejectedPostInitializeRequests = 0;
+    const mcpMethodsByAuthorization = new Map();
+    const mcpIdsByAuthorization = new Map();
     const mock = createServer(async (request, response) => {
       response.setHeader("Content-Type", "application/json");
       if (request.url === "/.well-known/oauth-protected-resource") {
@@ -415,6 +419,14 @@ describe("staging smoke output safety", () => {
       for await (const chunk of request) chunks.push(chunk);
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       const authorization = request.headers.authorization;
+      const methods = mcpMethodsByAuthorization.get(authorization) ?? [];
+      methods.push(payload.method);
+      mcpMethodsByAuthorization.set(authorization, methods);
+      if (payload.id !== undefined) {
+        const ids = mcpIdsByAuthorization.get(authorization) ?? [];
+        ids.push(payload.id);
+        mcpIdsByAuthorization.set(authorization, ids);
+      }
       const rejectedInitializeTokens = new Set([
         "Bearer MALFORMED_INIT_CANARY",
         "Bearer UNSUPPORTED_INIT_CANARY",
@@ -476,37 +488,64 @@ describe("staging smoke output safety", () => {
         return;
       }
       if (payload.method === "tools/list") {
+        if (authorization === "Bearer LIST_ERROR_CANARY") {
+          response.end(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: payload.id,
+              error: { code: -32603, message: "BUSINESS_DATA_CANARY" },
+            }),
+          );
+          return;
+        }
         response.end(
           JSON.stringify({
-            jsonrpc: "2.0",
-            id: payload.id,
-            result: {
-              tools: toolCatalog,
-              ...(request.headers.authorization === "Bearer PAGINATED_CANARY"
-                ? { nextCursor: "CANARY_UNREAD_PAGE" }
-                : {}),
-            },
+            jsonrpc:
+              authorization === "Bearer LIST_JSONRPC_CANARY" ? "1.0" : "2.0",
+            id:
+              authorization === "Bearer LIST_WRONG_ID_CANARY"
+                ? payload.id + 1
+                : payload.id,
+            result:
+              authorization === "Bearer LIST_MALFORMED_CANARY"
+                ? {}
+                : {
+                    tools: toolCatalog,
+                    ...(authorization === "Bearer PAGINATED_CANARY"
+                      ? { nextCursor: "CANARY_UNREAD_PAGE" }
+                      : {}),
+                  },
           }),
         );
         return;
       }
       if (payload.method === "tools/call") {
         let data;
+        let gate;
         if (payload.params.name === "get_my_member") {
+          gate = "MEMBER";
           data = { member: { id: 149, firstName: canary, lastName: canary } };
         } else if (
           payload.params.arguments.route === "service.boards.statuses"
         ) {
+          gate = "STATUSES";
           data = [{ id: 1, name: canary }];
         } else {
+          gate = "SCHEDULE";
           capturedScheduleArguments = payload.params.arguments;
           data = [{ id: 2, name: canary }];
         }
+        const malformed = authorization === `Bearer ${gate}_MALFORMED_CANARY`;
+        const wrongId = authorization === `Bearer ${gate}_WRONG_ID_CANARY`;
         response.end(
           JSON.stringify({
             jsonrpc: "2.0",
-            id: payload.id,
-            result: { content: [{ type: "text", text: JSON.stringify(data) }] },
+            id: wrongId ? payload.id + 1 : payload.id,
+            result: malformed
+              ? { content: "BUSINESS_DATA_CANARY" }
+              : {
+                  content: [{ type: "text", text: JSON.stringify(data) }],
+                },
           }),
         );
         return;
@@ -546,7 +585,7 @@ describe("staging smoke output safety", () => {
       paginatedChild.once("close", resolve),
     );
 
-    const runRejectedInitialize = async (accessToken) => {
+    const runSmoke = async (accessToken) => {
       const rejectedChild = spawn(process.execPath, [smokePath.pathname], {
         env: { ...smokeEnv, SMOKE_ACCESS_TOKEN: accessToken },
       });
@@ -558,19 +597,25 @@ describe("staging smoke output safety", () => {
       );
       return { exitCode: rejectedExitCode, output: rejectedOutput };
     };
-    const malformedInitialize = await runRejectedInitialize(
-      "MALFORMED_INIT_CANARY",
+    const malformedInitialize = await runSmoke("MALFORMED_INIT_CANARY");
+    const unsupportedInitialize = await runSmoke("UNSUPPORTED_INIT_CANARY");
+    const invalidEnvelope = await runSmoke("INVALID_ENVELOPE_CANARY");
+    const errorInitialize = await runSmoke("ERROR_INIT_CANARY");
+    const wrongIdInitialize = await runSmoke("WRONG_ID_CANARY");
+    const noToolsCapability = await runSmoke("NO_TOOLS_CAPABILITY_CANARY");
+    const invalidListRuns = await Promise.all(
+      ["LIST_JSONRPC", "LIST_WRONG_ID", "LIST_ERROR", "LIST_MALFORMED"].map(
+        async (fault) => [fault, await runSmoke(`${fault}_CANARY`)],
+      ),
     );
-    const unsupportedInitialize = await runRejectedInitialize(
-      "UNSUPPORTED_INIT_CANARY",
-    );
-    const invalidEnvelope = await runRejectedInitialize(
-      "INVALID_ENVELOPE_CANARY",
-    );
-    const errorInitialize = await runRejectedInitialize("ERROR_INIT_CANARY");
-    const wrongIdInitialize = await runRejectedInitialize("WRONG_ID_CANARY");
-    const noToolsCapability = await runRejectedInitialize(
-      "NO_TOOLS_CAPABILITY_CANARY",
+    const invalidCallRuns = await Promise.all(
+      ["MEMBER", "STATUSES", "SCHEDULE"].flatMap((gate) =>
+        ["WRONG_ID", "MALFORMED"].map(async (fault) => [
+          gate,
+          fault,
+          await runSmoke(`${gate}_${fault}_CANARY`),
+        ]),
+      ),
     );
     await new Promise((resolve) => mock.close(resolve));
 
@@ -591,6 +636,41 @@ describe("staging smoke output safety", () => {
     }
     expect(rejectedPostInitializeRequests).toBe(0);
 
+    for (const [fault, rejected] of invalidListRuns) {
+      expect(rejected.exitCode).toBe(1);
+      expect(rejected.output).toContain("FAIL tools/list failed");
+      expect(rejected.output).not.toContain("BUSINESS_DATA_CANARY");
+      expect(rejected.output).not.toContain(fault);
+      expect(rejected.output).not.toContain(baseUrl);
+      expect(mcpMethodsByAuthorization.get(`Bearer ${fault}_CANARY`)).toEqual([
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+      ]);
+    }
+
+    const expectedCallMethods = {
+      MEMBER: ["tools/call"],
+      STATUSES: ["tools/call", "tools/call"],
+      SCHEDULE: ["tools/call", "tools/call", "tools/call"],
+    };
+    for (const [gate, fault, rejected] of invalidCallRuns) {
+      expect(rejected.exitCode).toBe(1);
+      expect(rejected.output).toContain("failed (invalid_mcp_response)");
+      expect(rejected.output).not.toContain("BUSINESS_DATA_CANARY");
+      expect(rejected.output).not.toContain(canary);
+      expect(rejected.output).not.toContain(`${gate}_${fault}_CANARY`);
+      expect(rejected.output).not.toContain(baseUrl);
+      expect(
+        mcpMethodsByAuthorization.get(`Bearer ${gate}_${fault}_CANARY`),
+      ).toEqual([
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        ...expectedCallMethods[gate],
+      ]);
+    }
+
     expect(paginatedExitCode).toBe(1);
     expect(paginatedOutput).toContain(
       "FAIL tools/list pagination is not allowed for the fixed catalog",
@@ -598,6 +678,9 @@ describe("staging smoke output safety", () => {
     expect(paginatedOutput).not.toContain("CANARY_UNREAD_PAGE");
     expect(paginatedOutput).not.toContain("PAGINATED_CANARY");
     expect(exitCode).toBe(0);
+    expect(mcpIdsByAuthorization.get(`Bearer TOKEN_${canary}`)).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
     expect(capturedScheduleArguments).toEqual({
       route: "schedule.entries.byMember",
       memberId: 149,
