@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
@@ -50,6 +50,39 @@ describe("dependency maintenance configuration", () => {
     for (const workflow of [v2Workflow, legacyWorkflow]) {
       expect(workflow.match(/- "\.github\/dependabot\.yml"/gu)).toHaveLength(2);
     }
+  });
+});
+
+describe("legacy rollback deployment surface", () => {
+  it("allows only the CI-verified Docker/FastAPI rollback descriptors", async () => {
+    const [deploymentFiles, legacyWorkflow, v2Workflow] = await Promise.all([
+      readdir(new URL("../deploy/", import.meta.url), { recursive: true }),
+      readFile(
+        new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../.github/workflows/v2-ci.yml", import.meta.url),
+        "utf8",
+      ),
+    ]);
+    const descriptors = deploymentFiles
+      .filter((path) =>
+        /(?:^|\/)(?:Dockerfile(?:\..+)?|Containerfile(?:\..+)?|(?:docker-)?compose(?:\..+)?\.ya?ml)$/u.test(
+          path,
+        ),
+      )
+      .sort();
+
+    expect(descriptors).toEqual([
+      "http-gateway/Dockerfile",
+      "http-gateway/docker-compose.yml",
+    ]);
+    expect(legacyWorkflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(2);
+    expect(v2Workflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(2);
+    expect(
+      v2Workflow.match(/- "\.github\/workflows\/legacy-oauth-ci\.yml"/gu),
+    ).toHaveLength(2);
   });
 });
 
