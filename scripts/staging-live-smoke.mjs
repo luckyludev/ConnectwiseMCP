@@ -600,7 +600,6 @@ log("board statuses ok");
 log("calling call_connectwise schedule.entries.byMember (date range) ...");
 const schedule = await callTool("call_connectwise", {
   route: "schedule.entries.byMember",
-  memberId: EXPECT_MEMBER_ID,
   startDate: SCHEDULE_START_DATE,
   endDate: SCHEDULE_END_DATE,
 });

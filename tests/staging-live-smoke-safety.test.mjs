@@ -778,7 +778,6 @@ describe("staging smoke output safety", () => {
     ]);
     expect(capturedScheduleArguments).toEqual({
       route: "schedule.entries.byMember",
-      memberId: 149,
       startDate: "2026-09-01",
       endDate: "2026-09-07",
     });
