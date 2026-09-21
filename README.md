@@ -16,8 +16,7 @@ ConnectWise MCP server migrating from the legacy Docker/FastAPI gateway to a sec
 ├── wrangler.jsonc             # non-secret Worker configuration
 ├── deploy/                    # legacy Docker/FastAPI rollback path
 │   ├── cwm-mcp/              # Core MCP tools (ConnectWise API gateway)
-│   ├── http-gateway/         # HTTP gateway (OAuth + token auth)
-│   └── supergateway/         # Legacy/optional
+│   └── http-gateway/         # Supported rollback image and HTTP gateway
 ├── docs/
 │   ├── README.md             # Docs index
 │   ├── chatgpt-connector.md  # ChatGPT connector setup
@@ -238,4 +237,4 @@ Call a tool:
 
 ## Legacy
 
-`deploy/supergateway` is kept for reference.
+The only supported legacy deployment is the controlled Docker/FastAPI rollback path under `deploy/http-gateway`, backed by `deploy/cwm-mcp`. Unsupported Supergateway and `mcpo` reference images are intentionally excluded so every executable deployment descriptor is covered by rollback CI.

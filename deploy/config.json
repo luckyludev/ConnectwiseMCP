@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "connectwise": {
-      "command": "node",
-      "args": ["/app/mcp-server/bin/server.js"]
-    }
-  }
-}
