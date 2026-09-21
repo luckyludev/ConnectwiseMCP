@@ -1134,22 +1134,134 @@ describe("ConnectWiseClient", () => {
     expect(body.status).toEqual({ id: 1 });
   });
 
-  it("deletes a schedule entry with DELETE", async () => {
+  it("refuses to update schedule entries outside the mapped member", async () => {
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        methods.push(
+          (init as { method?: string } | undefined)?.method ?? "GET",
+        );
+        return Response.json({ id: 9, member: { id: 150 } });
+      },
+    });
+
+    await expect(
+      client.updateScheduleEntry(9, { doneFlag: true }),
+    ).rejects.toThrow("ConnectWise record is not assigned to mapped member");
+    expect(methods).toEqual(["GET"]);
+  });
+
+  it("deletes only a schedule entry owned by the mapped member", async () => {
     const calls: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input, init) => {
-        calls.push(
-          `${
-            (init as { method?: string } | undefined)?.method ?? "GET"
-          } ${String(input)}`,
-        );
-        return new Response(null, { status: 204 });
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        calls.push(`${method} ${String(input)}`);
+        return method === "GET"
+          ? Response.json({ id: 247134, member: { id: 149 } })
+          : new Response(null, { status: 204 });
       },
     });
     await client.deleteScheduleEntry(247134);
-    expect(calls[0]).toBe(
+    expect(calls).toEqual([
+      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
       "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
-    );
+    ]);
+  });
+
+  it("refuses to delete schedule entries with missing or mismatched ownership", async () => {
+    for (const member of [undefined, { id: 150 }]) {
+      const methods: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          methods.push(
+            (init as { method?: string } | undefined)?.method ?? "GET",
+          );
+          return Response.json({ id: 247134, ...(member ? { member } : {}) });
+        },
+      });
+
+      await expect(client.deleteScheduleEntry(247134)).rejects.toThrow(
+        "ConnectWise record is not assigned to mapped member",
+      );
+      expect(methods).toEqual(["GET"]);
+    }
+  });
+
+  it("refuses time-entry attachment writes outside the mapped member", async () => {
+    const attachmentMethods: string[] = [];
+    const attachmentClient = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        attachmentMethods.push(
+          (init as { method?: string } | undefined)?.method ?? "GET",
+        );
+        return Response.json({ id: 42, member: { id: 150 } });
+      },
+    });
+    await expect(
+      attachmentClient.attachImageToTimeEntry(42, {
+        filename: "image.png",
+        base64: "AAAA",
+        mimeType: "image/png",
+      }),
+    ).rejects.toThrow("ConnectWise record is not assigned to mapped member");
+    expect(attachmentMethods).toEqual(["GET"]);
+
+    const uploadMethods: string[] = [];
+    const uploadClient = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        uploadMethods.push(
+          (init as { method?: string } | undefined)?.method ?? "GET",
+        );
+        return Response.json({ id: 42 });
+      },
+    });
+    await expect(
+      uploadClient.uploadImageDocument("TimeEntry", 42, {
+        fileName: "image.png",
+        mimeType: "image/png",
+        base64: "iVBORw0KGgo=",
+        privateFlag: true,
+      }),
+    ).rejects.toThrow("ConnectWise record is not assigned to mapped member");
+    expect(uploadMethods).toEqual(["GET"]);
+  });
+
+  it("checks time-entry ownership before both attachment write forms", async () => {
+    const calls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        calls.push(`${method} ${String(input)}`);
+        if (method === "GET") {
+          return Response.json({ id: 42, member: { id: 149 } });
+        }
+        return Response.json({ id: 901 }, { status: 201 });
+      },
+    });
+
+    await client.attachImageToTimeEntry(42, {
+      filename: "image.png",
+      base64: "AAAA",
+      mimeType: "image/png",
+    });
+    await client.uploadImageDocument("TimeEntry", 42, {
+      fileName: "image.png",
+      mimeType: "image/png",
+      base64: "iVBORw0KGgo=",
+      privateFlag: true,
+    });
+
+    expect(calls.map((call) => call.split(" ")[0])).toEqual([
+      "GET",
+      "POST",
+      "GET",
+      "POST",
+    ]);
+    expect(calls[0]).toContain("/time/entries/42");
+    expect(calls[2]).toContain("/time/entries/42");
   });
 
   it("rejects createTimeEntry when a timesheet is pending approval", async () => {
@@ -1499,8 +1611,15 @@ describe("ConnectWiseClient", () => {
   it("posts a time-entry image attachment to the time-entry path", async () => {
     let capturedUrl = "";
     let capturedInit: RequestInit | undefined;
+    const calls: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        calls.push(`${method} ${String(input)}`);
+        if (method === "GET") {
+          return Response.json({ id: 42, member: { id: 149 } });
+        }
         capturedUrl = String(input);
         capturedInit = init;
         return Response.json({ id: 66 });
@@ -1510,6 +1629,9 @@ describe("ConnectWiseClient", () => {
     await expect(
       client.attachImageToTimeEntry(42, imagePayload),
     ).resolves.toEqual({ id: 66 });
+    expect(calls[0]).toBe(
+      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/time/entries/42",
+    );
     expect(capturedUrl).toBe(
       "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/timeentries/42/attachments",
     );

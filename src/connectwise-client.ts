@@ -844,6 +844,40 @@ export function createConnectWiseClient(
     throw new Error("ConnectWise request unavailable");
   }
 
+  function mappedMemberId(operation: string): number {
+    const memberId = credentials.memberId;
+    if (memberId === undefined) {
+      throw new Error(
+        `ConnectWise profile is missing memberId; add it to enable ${operation}`,
+      );
+    }
+    positiveId(memberId, "profile member ID");
+    return memberId;
+  }
+
+  function assertMappedMember(record: unknown, memberId: number): void {
+    if (!record || typeof record !== "object") {
+      throw new Error("Invalid ConnectWise ownership response");
+    }
+    const member = (record as Record<string, unknown>).member;
+    if (!member || typeof member !== "object") {
+      throw new Error("ConnectWise record is not assigned to mapped member");
+    }
+    const recordMemberId = (member as Record<string, unknown>).id;
+    if (recordMemberId !== memberId) {
+      throw new Error("ConnectWise record is not assigned to mapped member");
+    }
+  }
+
+  async function assertTimeEntryOwnedByMappedMember(
+    timeEntryId: number,
+    operation: string,
+  ): Promise<void> {
+    const memberId = mappedMemberId(operation);
+    const entry = await requestJson("GET", `/time/entries/${timeEntryId}`);
+    assertMappedMember(entry, memberId);
+  }
+
   return {
     async getServiceTicket(ticketId: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
@@ -967,11 +1001,16 @@ export function createConnectWiseClient(
 
     async attachImageToTimeEntry(timeEntryId, input): Promise<unknown> {
       positiveId(timeEntryId, "time entry ID");
+      const payload = attachmentPayload(input);
+      await assertTimeEntryOwnedByMappedMember(
+        timeEntryId,
+        "attach_image_to_time_entry",
+      );
       return requestJson(
         "POST",
         `/timeentries/${timeEntryId}/attachments`,
         undefined,
-        attachmentPayload(input),
+        payload,
       );
     },
 
@@ -1166,6 +1205,12 @@ export function createConnectWiseClient(
       const fileName = imageFileName(input.fileName, input.mimeType);
       const title = imageTitle(input.title, fileName);
       const bytes = decodeImageBase64(input.base64, input.mimeType);
+      if (recordType === "TimeEntry") {
+        await assertTimeEntryOwnedByMappedMember(
+          recordId,
+          "upload_connectwise_image",
+        );
+      }
       const body = new FormData();
       const fileBytes = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(fileBytes).set(bytes);
@@ -1530,8 +1575,9 @@ export function createConnectWiseClient(
 
     async updateScheduleEntry(entryId, input): Promise<unknown> {
       positiveId(entryId, "schedule entry ID");
-      // GET first, then merge and PUT: a blind PUT blanks every field that
-      // is not passed on established records (Luis has hit this).
+      const memberId = mappedMemberId("update_schedule_entry");
+      // GET first, then verify ownership, merge and PUT: a blind PUT blanks every
+      // field that is not passed on established records (Luis has hit this).
       const existing = (await requestJson(
         "GET",
         `/schedule/entries/${entryId}`,
@@ -1539,6 +1585,7 @@ export function createConnectWiseClient(
       if (!existing || typeof existing !== "object") {
         throw new Error(`Schedule entry ${entryId} not found`);
       }
+      assertMappedMember(existing, memberId);
       const merged: Record<string, unknown> = { ...existing };
       if (input.dateStart !== undefined) {
         merged.dateStart = toUtcIso(input.dateStart, "dateStart");
@@ -1572,6 +1619,9 @@ export function createConnectWiseClient(
 
     async deleteScheduleEntry(entryId): Promise<void> {
       positiveId(entryId, "schedule entry ID");
+      const memberId = mappedMemberId("delete_schedule_entry");
+      const existing = await requestJson("GET", `/schedule/entries/${entryId}`);
+      assertMappedMember(existing, memberId);
       await requestJson("DELETE", `/schedule/entries/${entryId}`);
     },
 
