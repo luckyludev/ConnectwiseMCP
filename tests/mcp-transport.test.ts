@@ -1951,13 +1951,14 @@ describe("authenticated MCP transport", () => {
     expect(text).not.toContain("privateKey");
   });
 
-  it("delete_schedule_entry issues DELETE through the tool", async () => {
+  it("delete_schedule_entry verifies mapped-member ownership before DELETE", async () => {
     const calls: string[] = [];
     const fetcher: typeof fetch = async (input, init) => {
-      calls.push(
-        `${(init as { method?: string } | undefined)?.method ?? "GET"} ${String(input)}`,
-      );
-      return new Response(null, { status: 204 });
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      calls.push(`${method} ${String(input)}`);
+      return method === "GET"
+        ? Response.json({ id: 247134, member: { id: 149 } })
+        : new Response(null, { status: 204 });
     };
     const handler = createMcpHandler(
       () =>
@@ -1994,9 +1995,10 @@ describe("authenticated MCP transport", () => {
       }),
     );
     await response.text();
-    expect(calls[0]).toBe(
+    expect(calls).toEqual([
+      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
       "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
-    );
+    ]);
   });
 
   it("create_time_entry uses the mapped profile member on the wire", async () => {
