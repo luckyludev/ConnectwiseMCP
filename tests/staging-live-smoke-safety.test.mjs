@@ -99,6 +99,45 @@ describe("staging smoke output safety", () => {
     );
   });
 
+  it("rejects deployed tool annotation drift", () => {
+    const representatives = [
+      ["whoami", false],
+      ["get_service_ticket", true],
+      ["create_ticket_note", true],
+      ["delete_schedule_entry", true],
+    ];
+    const annotationNames = [
+      "readOnlyHint",
+      "destructiveHint",
+      "idempotentHint",
+      "openWorldHint",
+    ];
+
+    for (const [toolName, expectOpenWorld] of representatives) {
+      const baseline = expectedToolCatalog();
+      const baselineTool = baseline.find((tool) => tool.name === toolName);
+      expect(baselineTool.annotations.openWorldHint).toBe(expectOpenWorld);
+
+      for (const annotationName of annotationNames) {
+        const flipped = structuredClone(baseline);
+        const flippedTool = flipped.find((tool) => tool.name === toolName);
+        flippedTool.annotations[annotationName] =
+          !flippedTool.annotations[annotationName];
+        expect(validateStagingToolCatalog(flipped)).toBe(
+          `tools/list annotations drifted for ${toolName}`,
+        );
+
+        const missing = structuredClone(baseline);
+        delete missing.find((tool) => tool.name === toolName).annotations[
+          annotationName
+        ];
+        expect(validateStagingToolCatalog(missing)).toBe(
+          `tools/list annotations drifted for ${toolName}`,
+        );
+      }
+    }
+  });
+
   it("rejects caller-controlled routing and other input-schema drift", () => {
     const cases = [
       ["whoami", "profileAlias"],
