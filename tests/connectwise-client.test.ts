@@ -887,7 +887,7 @@ describe("ConnectWiseClient", () => {
     await expect(client.getTimeSheets(9)).resolves.toEqual([{ id: 21 }]);
     const url = new URL(urls[0]!);
     expect(url.searchParams.get("conditions")).toBe("member/id=149");
-    expect(url.searchParams.get("orderBy")).toBe("dateCreated desc");
+    expect(url.searchParams.get("orderBy")).toBe("dateStart desc");
     expect(url.searchParams.get("pageSize")).toBe("9");
   });
 

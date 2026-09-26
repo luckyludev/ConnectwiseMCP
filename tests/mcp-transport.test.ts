@@ -632,6 +632,97 @@ describe("authenticated MCP transport", () => {
     expect(body.match(/\\\"id\\\":/g)).toHaveLength(4);
   });
 
+  it("projects schema-correct bounded timesheets for the mapped member", async () => {
+    const calls: number[] = [];
+    const client = businessClient({
+      async getTimeSheets(maxResults: number) {
+        calls.push(maxResults);
+        return Array.from({ length: 3 }, (_, index) => ({
+          id: index + 1,
+          member: { id: 149, name: "Mapped Member", secret: "drop" },
+          year: 2026,
+          period: 39 - index,
+          dateStart: `2026-09-${String(20 - index).padStart(2, "0")}T00:00:00Z`,
+          dateEnd: `2026-09-${String(26 - index).padStart(2, "0")}T23:59:59Z`,
+          status: "PendingApproval",
+          hours: 40 - index,
+          deadline: "2026-09-28T12:00:00Z",
+          startDate: "legacy-field-must-not-be-used",
+          endDate: "legacy-field-must-not-be-used",
+          privateField: "drop",
+        }));
+      },
+    });
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () => client,
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 4,
+          method: "tools/call",
+          params: {
+            name: "get_time_sheets",
+            arguments: { maxResults: 2, memberId: 999 },
+          },
+        }),
+      }),
+    );
+    const eventStream = await response.text();
+    expect(response.status, eventStream).toBe(200);
+    expect(calls).toEqual([2]);
+    const rpc = parseSseJsonRpcResponse(eventStream, 4) as {
+      result: { content: Array<{ type: string; text: string }> };
+    };
+    expect(JSON.parse(rpc.result.content[0]!.text)).toEqual([
+      {
+        id: 1,
+        member: { id: 149, name: "Mapped Member" },
+        year: 2026,
+        period: 39,
+        startDate: "2026-09-20T00:00:00Z",
+        endDate: "2026-09-26T23:59:59Z",
+        status: "PendingApproval",
+        hours: 40,
+        deadline: "2026-09-28T12:00:00Z",
+      },
+      {
+        id: 2,
+        member: { id: 149, name: "Mapped Member" },
+        year: 2026,
+        period: 38,
+        startDate: "2026-09-19T00:00:00Z",
+        endDate: "2026-09-25T23:59:59Z",
+        status: "PendingApproval",
+        hours: 39,
+        deadline: "2026-09-28T12:00:00Z",
+      },
+    ]);
+    expect(eventStream).not.toContain("legacy-field-must-not-be-used");
+    expect(eventStream).not.toContain("privateField");
+    expect(eventStream).not.toContain("secret");
+    expect(eventStream).not.toContain("999");
+  });
+
   it("searches a bounded member directory projection", async () => {
     const calls: Array<{ query: string; maxResults: number }> = [];
     const client = businessClient({
