@@ -1,9 +1,11 @@
 .DS_Store
 .env
 
-# Local env files
+# Local env and credential files
 /deploy/.env
 /deploy/http-gateway/.env
+/deploy/cwm-mcp/credentials.json
+/deploy/http-gateway/local-credentials.json
 
 # Python/Node artifacts
 /node_modules/

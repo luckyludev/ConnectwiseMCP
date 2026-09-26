@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 
 import { parse } from "jsonc-parser";
@@ -84,6 +85,20 @@ describe("legacy rollback deployment surface", () => {
     expect(
       v2Workflow.match(/- "\.github\/workflows\/legacy-oauth-ci\.yml"/gu),
     ).toHaveLength(2);
+  });
+
+  it("keeps local legacy credential artifacts out of version control", () => {
+    for (const path of [
+      "deploy/cwm-mcp/credentials.json",
+      "deploy/http-gateway/local-credentials.json",
+    ]) {
+      const result = spawnSync("git", ["check-ignore", "--verbose", path], {
+        cwd: new URL("../", import.meta.url),
+        encoding: "utf8",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trimEnd().endsWith(`\t${path}`)).toBe(true);
+    }
   });
 });
 
