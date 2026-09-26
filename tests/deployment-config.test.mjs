@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 
-import ts from "typescript";
+import { parse } from "jsonc-parser";
 import { describe, expect, it } from "vitest";
 
 async function readJson(relativePath) {
@@ -11,10 +11,11 @@ async function readJson(relativePath) {
 async function readWranglerConfig() {
   const path = new URL("../wrangler.jsonc", import.meta.url);
   const source = await readFile(path, "utf8");
-  const parsed = ts.parseConfigFileTextToJson(path.pathname, source);
+  const errors = [];
+  const config = parse(source, errors, { allowTrailingComma: true });
 
-  expect(parsed.error).toBeUndefined();
-  return parsed.config;
+  expect(errors).toEqual([]);
+  return config;
 }
 
 describe("dependency maintenance configuration", () => {
