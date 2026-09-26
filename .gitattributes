@@ -1,0 +1,2 @@
+# This legacy source file predates V2 and is intentionally retained with CRLF.
+deploy/cwm-mcp/api_gateway/server.py whitespace=cr-at-eol

@@ -41,6 +41,10 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("api_gateway")
+# HTTPX logs complete request URLs, including paths and encoded query strings,
+# at INFO. The rollback gateway accepts caller-controlled routes and conditions,
+# so retain only warning/error events from the transport library.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # MCP server
 # Use non-loopback host so FastMCP does not auto-enable strict localhost-only
@@ -162,15 +166,20 @@ async def make_api_request(
     url = f"{API_URL}{endpoint}"
     headers = headers or get_auth_header()
 
-    logger.info(f"Making {method.upper()} request: {url}")
-    if params:
-        logger.info(f"Params: {json.dumps(params)}")
-    if data:
-        logger.info(f"Data: {json.dumps(data)}")
+    method_upper = method.upper()
+    if method_upper not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+        logger.error("Unsupported ConnectWise API request method.")
+        raise APIError("Unsupported HTTP method.")
 
+    # The rollback gateway accepts broad caller-controlled paths and payloads.
+    # Keep request metadata out of durable file/container logs because it can
+    # contain credentials, record identifiers, ticket text, or commercial data.
+    logger.info("Making ConnectWise API request (method=%s)", method_upper)
+
+    failure_message = None
+    failure_status = None
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            method_upper = method.upper()
             if method_upper == "GET":
                 resp = await client.get(url, headers=headers, params=params)
             elif method_upper == "POST":
@@ -179,27 +188,32 @@ async def make_api_request(
                 resp = await client.put(url, headers=headers, json=data)
             elif method_upper == "PATCH":
                 resp = await client.patch(url, headers=headers, json=data)
-            elif method_upper == "DELETE":
-                resp = await client.delete(url, headers=headers)
             else:
-                raise APIError(f"Unsupported HTTP method: {method}")
+                resp = await client.delete(url, headers=headers)
 
-            logger.info(f"Response status: {resp.status_code}")
+            logger.info("ConnectWise API response received (status=%s)", resp.status_code)
             resp.raise_for_status()
             return resp.json() if resp.content else {}
-        except httpx.HTTPStatusError as e:
-            msg = f"HTTP error {e.response.status_code}: {e.response.text}"
-            logger.error(msg)
-            raise APIError(msg, status_code=e.response.status_code, response=e.response)
+        except httpx.HTTPStatusError as error:
+            failure_status = error.response.status_code
+            failure_message = f"ConnectWise API returned HTTP {failure_status}."
+            logger.error(
+                "ConnectWise API request failed (status=%s)",
+                failure_status,
+            )
         except httpx.TimeoutException:
-            logger.error("Request timed out.")
-            raise APIError("Request timed out.")
-        except httpx.RequestError as e:
-            logger.error(f"Request error: {e}")
-            raise APIError(f"API request failed: {e}")
-        except Exception as e:
-            logger.error(f"Unknown error: {e}")
-            raise APIError(f"Unknown error: {e}")
+            failure_message = "ConnectWise API request timed out."
+            logger.error(failure_message)
+        except httpx.RequestError:
+            failure_message = "ConnectWise API request failed."
+            logger.error(failure_message)
+        except Exception:
+            failure_message = "Unexpected ConnectWise API request failure."
+            logger.error(failure_message)
+
+    # Raise outside the exception handlers so the sanitized error does not retain
+    # an upstream HTTP exception (and its request URL or response body) as context.
+    raise APIError(failure_message, status_code=failure_status)
 
 
 # =========================
@@ -216,7 +230,7 @@ def check_fast_memory(path: str, method: str) -> Optional[Dict[str, Any]]:
     if query:
         current_query_from_fast_memory = True
         fast_memory_db.increment_usage(query['id'])
-        logger.info(f"Fast Memory hit: {method} {path}")
+        logger.info("Fast Memory cache hit.")
         return query
     current_query_from_fast_memory = False
     return None
