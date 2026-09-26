@@ -114,15 +114,22 @@ function ticket(value: unknown): Record<string, unknown> {
 }
 
 function note(value: Record<string, unknown>): Record<string, unknown> {
+  const internalFlag = boolean(value.internalFlag);
+  const internalAnalysisFlag = boolean(value.internalAnalysisFlag);
   const internal =
-    boolean(value.internalFlag) ?? boolean(value.internalAnalysisFlag) ?? false;
+    internalFlag === true || internalAnalysisFlag === true
+      ? true
+      : internalFlag === false || internalAnalysisFlag === false
+        ? false
+        : undefined;
+  const externalFlag = boolean(value.externalFlag);
   return compact({
     id: id(value.id),
     text: text(value.text, 8_000),
     created: text(value.dateCreated, 100),
     createdBy: text(value.createdBy, 200),
     internal,
-    external: boolean(value.externalFlag) ?? !internal,
+    external: internal === true ? false : externalFlag,
     resolution: boolean(value.resolutionFlag),
     issue: boolean(value.issueFlag),
     detailDescription: boolean(value.detailDescriptionFlag),
@@ -802,7 +809,11 @@ export function registerConnectWiseBusinessTools(
             ]);
           return {
             ticket: ticket(details),
-            notes: list(notes, maxResultsPerSection).map(note),
+            notes: list(notes, maxResultsPerSection)
+              .map(note)
+              .filter(
+                (entry) => entry.internal === true || entry.external === true,
+              ),
             attachments: list(attachments, maxResultsPerSection).map(
               attachment,
             ),
