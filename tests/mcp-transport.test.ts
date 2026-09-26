@@ -367,6 +367,211 @@ describe("authenticated MCP transport", () => {
     expect(body.match(/\\\"id\\\":/g)).toHaveLength(6);
   });
 
+  it("fails closed when ticket-note visibility flags are missing or contradictory", async () => {
+    const client = businessClient({
+      async getTicketNotes(ticketId: number, maxResults: number) {
+        expect(ticketId).toBe(123);
+        expect(maxResults).toBe(20);
+        return [
+          { id: 1, text: "internal", internalFlag: true, externalFlag: false },
+          { id: 2, text: "external", internalFlag: false, externalFlag: true },
+          {
+            id: 3,
+            text: "analysis",
+            internalFlag: null,
+            internalAnalysisFlag: true,
+            externalFlag: null,
+          },
+          {
+            id: 4,
+            text: "unknown",
+            internalFlag: null,
+            internalAnalysisFlag: null,
+            externalFlag: null,
+          },
+          {
+            id: 5,
+            text: "both",
+            internalFlag: true,
+            externalFlag: true,
+          },
+          {
+            id: 6,
+            text: "unknown external",
+            internalFlag: false,
+          },
+          {
+            id: 7,
+            text: "unknown internal",
+            externalFlag: false,
+          },
+          {
+            id: 8,
+            text: "contradictory internal flags",
+            internalFlag: false,
+            internalAnalysisFlag: true,
+            externalFlag: false,
+          },
+        ];
+      },
+    });
+
+    const call = async (
+      requestId: number,
+      includeInternal?: boolean,
+      includeExternal?: boolean,
+    ): Promise<
+      Array<{ id: number; internal?: boolean; external?: boolean }>
+    > => {
+      const handler = createMcpHandler(
+        () =>
+          createMcpServer(env, {
+            createBusinessClient: () => client,
+          }),
+        {
+          route: "/mcp",
+          corsOptions: false,
+          authContext: {
+            props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          },
+        },
+      );
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: requestId,
+            method: "tools/call",
+            params: {
+              name: "get_ticket_notes_with_content",
+              arguments: {
+                ticketId: 123,
+                includeInternal,
+                includeExternal,
+                maxResults: 20,
+              },
+            },
+          }),
+        }),
+      );
+      const eventStream = await response.text();
+      expect(response.status, eventStream).toBe(200);
+      const rpc = parseSseJsonRpcResponse(eventStream, requestId) as {
+        result: { content: Array<{ type: string; text: string }> };
+      };
+      return JSON.parse(rpc.result.content[0]!.text) as Array<{
+        id: number;
+        internal?: boolean;
+        external?: boolean;
+      }>;
+    };
+
+    const internalOnly = await call(20, true, false);
+    expect(internalOnly.map(({ id }) => id)).toEqual([1, 3, 5, 8]);
+    expect(internalOnly.find(({ id }) => id === 3)).toEqual(
+      expect.objectContaining({ internal: true }),
+    );
+    expect(internalOnly.find(({ id }) => id === 5)).toEqual(
+      expect.objectContaining({ internal: true, external: false }),
+    );
+
+    const externalOnly = await call(21, false, true);
+    expect(externalOnly.map(({ id }) => id)).toEqual([2]);
+
+    const allClassified = await call(22, true, true);
+    expect(allClassified.map(({ id }) => id)).toEqual([1, 2, 3, 5, 8]);
+    expect(allClassified).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 4 })]),
+    );
+
+    const defaultVisibility = await call(23);
+    expect(defaultVisibility.map(({ id }) => id)).toEqual([1, 2, 3, 5, 8]);
+
+    await expect(call(24, false, false)).resolves.toEqual([]);
+  });
+
+  it("excludes unclassified notes from the complete ticket view", async () => {
+    const client = businessClient({
+      async getServiceTicket() {
+        return { id: 123, summary: "Safe summary" };
+      },
+      async getTicketNotes() {
+        return [
+          { id: 1, text: "known internal", internalFlag: true },
+          { id: 2, text: "known external", externalFlag: true },
+          { id: 3, text: "unknown visibility" },
+          {
+            id: 4,
+            text: "internal overrides contradictory external",
+            internalAnalysisFlag: true,
+            externalFlag: true,
+          },
+        ];
+      },
+      async getTicketAttachments() {
+        return [];
+      },
+      async getTicketTasks() {
+        return [];
+      },
+      async getTicketTimeEntries() {
+        return [];
+      },
+    });
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () => client,
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 25,
+          method: "tools/call",
+          params: {
+            name: "get_complete_ticket_content",
+            arguments: { ticketId: 123, maxResultsPerSection: 20 },
+          },
+        }),
+      }),
+    );
+    const eventStream = await response.text();
+    expect(response.status, eventStream).toBe(200);
+    const rpc = parseSseJsonRpcResponse(eventStream, 25) as {
+      result: { content: Array<{ type: string; text: string }> };
+    };
+    const complete = JSON.parse(rpc.result.content[0]!.text) as {
+      notes: Array<{ id: number; internal?: boolean; external?: boolean }>;
+    };
+    expect(complete.notes.map(({ id }) => id)).toEqual([1, 2, 4]);
+    expect(complete.notes.find(({ id }) => id === 4)).toEqual(
+      expect.objectContaining({ internal: true, external: false }),
+    );
+  });
+
   it("bounds and projects schedule entries without accepting a caller member", async () => {
     const calls: number[] = [];
     const client = businessClient({
