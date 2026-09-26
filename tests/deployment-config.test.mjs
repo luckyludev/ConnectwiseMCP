@@ -100,6 +100,22 @@ describe("legacy rollback deployment surface", () => {
       expect(result.stdout.trimEnd().endsWith(`\t${path}`)).toBe(true);
     }
   });
+
+  it("blocks accidental publication of the legacy rollback package", async () => {
+    const [legacyPackage, deploymentFiles] = await Promise.all([
+      readJson("../deploy/cwm-mcp/package.json"),
+      readdir(new URL("../deploy/", import.meta.url), { recursive: true }),
+    ]);
+    const nestedWorkflows = deploymentFiles.filter((path) =>
+      /(?:^|\/)\.github\/workflows\//u.test(path),
+    );
+
+    expect(legacyPackage.private).toBe(true);
+    expect(legacyPackage.scripts?.prepublishOnly).toBe(
+      "node -e \"process.exitCode=1; console.error('Legacy rollback package is not publishable')\"",
+    );
+    expect(nestedWorkflows).toEqual([]);
+  });
 });
 
 describe("legacy rollback image security", () => {
