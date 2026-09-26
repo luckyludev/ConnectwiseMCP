@@ -1149,7 +1149,7 @@ export function createConnectWiseClient(
       }
       return requestJson("GET", "/time/sheets", {
         conditions: `member/id=${memberId}`,
-        orderBy: "dateCreated desc",
+        orderBy: "dateStart desc",
         pageSize,
       });
     },

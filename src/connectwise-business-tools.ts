@@ -1260,9 +1260,13 @@ export function registerConnectWiseBusinessTools(
     compact({
       id: id(value.id),
       member: reference(value.member),
-      startDate: text(value.startDate, 100),
-      endDate: text(value.endDate, 100),
-      status: reference(value.status),
+      year: number(value.year),
+      period: number(value.period),
+      startDate: text(value.dateStart, 100),
+      endDate: text(value.dateEnd, 100),
+      status: text(value.status, 100),
+      hours: number(value.hours),
+      deadline: text(value.deadline, 100),
     });
 
   const configurationItem = (value: Record<string, unknown>) =>
