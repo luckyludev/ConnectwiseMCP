@@ -1,13 +1,15 @@
 {
   "name": "@jasondsmith72/cwm-api-gateway-mcp",
   "version": "1.0.0",
+  "private": true,
   "description": "ConnectWise API Gateway MCP Server for Claude",
   "main": "index.js",
   "bin": {
     "cwm-api-gateway-mcp": "bin/server.js"
   },
   "scripts": {
-    "start": "node bin/server.js"
+    "start": "node bin/server.js",
+    "prepublishOnly": "node -e \"process.exitCode=1; console.error('Legacy rollback package is not publishable')\""
   },
   "repository": {
     "type": "git",
