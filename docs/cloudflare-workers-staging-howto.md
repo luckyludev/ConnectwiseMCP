@@ -78,13 +78,13 @@ Empty eligibility lists and absent secrets must remain fail-closed. Do not deplo
 
 ## 4. Review and publish the fail-closed staging Worker
 
-A configuration change requires the normal repository review and CI process. Once the target release is merged and an authorized operator explicitly approves deployment, publish only the staging environment:
+A configuration change requires the normal repository review and CI process. Once the target release is merged, record its full lowercase 40-character commit SHA in the approved release evidence. An authorized operator must use a dedicated checkout with no concurrent writers, check out that exact commit with a clean worktree, explicitly supply the recorded SHA, and publish only the staging environment:
 
 ```bash
-npm run deploy:staging
+STAGING_RELEASE_SHA=<approved-full-release-commit> npm run deploy:staging
 ```
 
-The repository-owned command explicitly runs the complete blocking `npm run check` suite before invoking Wrangler, while preserving approved remote variables and retaining strict mode. If any validation fails, the shell does not invoke Wrangler. If Wrangler reports conflicting remote changes, stop and review the drift through the approved configuration workflow; do not bypass the checks, `--strict`, or run an ad hoc deploy command.
+The repository-owned command fails before validation unless `STAGING_RELEASE_SHA` exactly matches `HEAD`, the checkout is the repository root, no tracked file uses `skip-worktree` or `assume-unchanged`, and the tracked, staged, and non-ignored untracked worktree state is clean. It discards the existing dependency tree and runs `npm ci` so deployment tooling is restored from the integrity-protected lockfile, runs the complete blocking `npm run check` suite, repeats the release/worktree guard immediately before invoking Wrangler, preserves approved remote variables, and retains strict mode. If any validation fails, the shell does not invoke Wrangler. If Wrangler reports conflicting remote changes, stop and review the drift through the approved configuration workflow; do not bypass the release guard, checks, `--strict`, or run an ad hoc deploy command.
 
 This creates or updates the staging Worker and its Workers.dev endpoint. It does not create a custom-domain route, but it is an external deployment and must be recorded in the secure operations record.
 
