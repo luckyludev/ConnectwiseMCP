@@ -412,7 +412,7 @@ type CatalogRoute = {
   path: (params: Record<string, string | number>) => string;
   query?: (
     params: Record<string, string | number>,
-  ) => Record<string, string | number>;
+  ) => Record<string, string | number> & { pageSize: string | number };
   required: string[];
   allowed: string[];
   transform?: (value: unknown) => unknown;
@@ -1341,7 +1341,16 @@ export function createConnectWiseClient(
       const query = definition.query
         ? definition.query(effectiveParams)
         : { pageSize: effectiveParams.pageSize ?? 20 };
+      const requestedPageSize = Number(query.pageSize);
+      if (TARGETED_SEARCH_CATALOG_ROUTES.has(route as CatalogRouteId)) {
+        targetedSearchPageSize(requestedPageSize);
+      } else {
+        boundedPageSize(requestedPageSize);
+      }
       const result = await requestJson("GET", path, query);
+      if (Array.isArray(result) && result.length > requestedPageSize) {
+        throw new Error("ConnectWise response exceeded requested page size");
+      }
       return definition.transform ? definition.transform(result) : result;
     },
 

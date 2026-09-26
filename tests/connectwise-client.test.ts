@@ -935,6 +935,45 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
+  it("rejects oversized catalog responses before schedule sorting", async () => {
+    const urls: string[] = [];
+    const oversizedResponses = [
+      Array.from({ length: 21 }, (_, index) => ({
+        id: index + 1,
+        dateStart: "2026-09-01T12:00:00Z",
+      })),
+      Array.from({ length: 51 }, (_, index) => ({
+        id: index + 1,
+        dateStart: "2026-09-01T12:00:00Z",
+      })),
+    ];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json(oversizedResponses[urls.length - 1]);
+      },
+    });
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-08-31",
+        endDate: "2026-09-06",
+      }),
+    ).rejects.toThrow("ConnectWise response exceeded requested page size");
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-08-31",
+        endDate: "2026-09-06",
+        pageSize: 50,
+      }),
+    ).rejects.toThrow("ConnectWise response exceeded requested page size");
+    expect(
+      urls.map((url) => new URL(url).searchParams.get("pageSize")),
+    ).toEqual(["20", "50"]);
+  });
+
   it("filters byOwner on owner with open-only default and explicit fields", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
