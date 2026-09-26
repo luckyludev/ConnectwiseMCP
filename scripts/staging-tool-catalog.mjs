@@ -84,7 +84,50 @@ export const EXPECTED_TOOL_NAMES = Object.freeze(
   Object.keys(EXPECTED_TOOL_SCHEMA_HASHES),
 );
 
+const WRITE_TOOL_NAMES = new Set([
+  "upload_connectwise_image",
+  "create_ticket_note",
+  "attach_image_to_ticket",
+  "attach_image_to_time_entry",
+  "create_agreement_addition",
+  "create_service_ticket",
+  "update_service_ticket",
+  "create_schedule_entry",
+  "update_schedule_entry",
+  "delete_schedule_entry",
+  "create_time_entry",
+]);
+const DESTRUCTIVE_TOOL_NAMES = new Set([
+  "create_agreement_addition",
+  "update_service_ticket",
+  "update_schedule_entry",
+  "delete_schedule_entry",
+]);
 const APP_ONLY_TOOL_NAME = "upload_connectwise_image";
+
+function expectedAnnotations(name) {
+  const isWrite = WRITE_TOOL_NAMES.has(name);
+  return {
+    readOnlyHint: !isWrite,
+    destructiveHint: DESTRUCTIVE_TOOL_NAMES.has(name),
+    idempotentHint: !isWrite,
+    openWorldHint: name !== "whoami",
+  };
+}
+
+function validateAnnotations(tool) {
+  const annotations = tool.annotations;
+  const expected = expectedAnnotations(tool.name);
+  if (
+    annotations === null ||
+    typeof annotations !== "object" ||
+    Array.isArray(annotations) ||
+    Object.entries(expected).some(([key, value]) => annotations[key] !== value)
+  ) {
+    return `tools/list annotations drifted for ${tool.name}`;
+  }
+  return undefined;
+}
 
 function visibility(tool) {
   return tool?._meta?.ui?.visibility;
@@ -191,6 +234,8 @@ export function validateStagingToolCatalog(tools) {
   for (const tool of tools) {
     const schemaError = validateInputSchema(tool);
     if (schemaError) return schemaError;
+    const annotationError = validateAnnotations(tool);
+    if (annotationError) return annotationError;
 
     const declaredVisibility = visibility(tool);
     if (tool.name === APP_ONLY_TOOL_NAME) {
