@@ -11,7 +11,7 @@
 
 ## 1. Change and environment control
 
-- [ ] Record the immutable release commit and confirm CI passed `npm run check` on that exact commit.
+- [ ] Record the immutable release commit and confirm CI passed `npm run check` on that exact commit. Use a dedicated checkout with no concurrent writers, supply that full lowercase SHA as `STAGING_RELEASE_SHA`, and confirm the repository release guard accepts the exact `HEAD` only from a clean worktree before Wrangler can run.
 - [ ] Identify the staging Cloudflare account, Worker name, canonical HTTPS MCP URL, and separate production target. Do not reuse production KV or secrets in staging.
 - [ ] Confirm the Worker is on a paid plan or an explicitly approved Workers plan with limits adequate for OAuth provider KV use, logging, and expected traffic.
 - [ ] Create separate staging KV namespaces for `OAUTH_KV` and its preview binding. Confirm the deployed Worker references staging namespace IDs rather than the placeholders in `wrangler.jsonc`.
