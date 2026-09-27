@@ -464,6 +464,10 @@ const TARGETED_SEARCH_CATALOG_ROUTES = new Set<CatalogRouteId>([
   "finance.agreements.byName",
 ]);
 
+// `_info` preserves the created/updated metadata exposed by the ticket projector.
+const SERVICE_TICKET_COLLECTION_FIELDS =
+  "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
+
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
     path: (p) => `/service/boards/${p.boardId}/statuses`,
@@ -479,6 +483,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     path: () => "/service/tickets",
     query: (p) => ({
       conditions: `status/id=${p.statusId}`,
+      fields: SERVICE_TICKET_COLLECTION_FIELDS,
       pageSize: p.pageSize ?? 20,
     }),
     required: ["statusId"],
@@ -500,8 +505,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
           `owner/id=${p.memberId}`,
           ...(p.includeClosed === "true" ? [] : ["closedFlag=false"]),
         ].join(" and "),
-        fields:
-          "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus",
+        fields: SERVICE_TICKET_COLLECTION_FIELDS,
         pageSize: p.pageSize ?? 20,
       };
     },
@@ -1080,6 +1084,7 @@ export function createConnectWiseClient(
         "/service/tickets",
         {
           conditions: `board/id=${boardId}`,
+          fields: SERVICE_TICKET_COLLECTION_FIELDS,
           orderBy: "dateEntered desc",
           pageSize,
         },
@@ -1424,6 +1429,7 @@ export function createConnectWiseClient(
         "/service/tickets",
         {
           conditions: `summary contains '${escaped}'`,
+          fields: SERVICE_TICKET_COLLECTION_FIELDS,
           pageSize,
           orderBy: "dateEntered desc",
         },

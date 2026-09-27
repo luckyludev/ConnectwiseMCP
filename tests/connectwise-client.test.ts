@@ -16,6 +16,9 @@ const credentials: ConnectWiseCredentials = {
   memberId: 149,
 };
 
+const serviceTicketCollectionFields =
+  "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
+
 function fragmentedResponse(
   firstChunk: Uint8Array,
   chunkCount: number,
@@ -406,6 +409,8 @@ describe("ConnectWiseClient", () => {
     expect(url.searchParams.get("conditions")).toBe(
       "summary contains 'Luis''s laptop'",
     );
+    expect(url.searchParams.get("fields")).toBe(serviceTicketCollectionFields);
+    expect(url.searchParams.getAll("fields")).toHaveLength(1);
     expect(url.searchParams.get("pageSize")).toBe("12");
     await expect(client.searchServiceTickets("x", 51)).rejects.toThrow(
       "Invalid page size",
@@ -521,6 +526,9 @@ describe("ConnectWiseClient", () => {
     await client.listBoardTickets(32, 10);
     expect(new URL(urls[3]!).searchParams.get("conditions")).toBe(
       "board/id=32",
+    );
+    expect(new URL(urls[3]!).searchParams.get("fields")).toBe(
+      serviceTicketCollectionFields,
     );
 
     await client.getServiceStatuses();
@@ -647,6 +655,9 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
       "status/id=547",
     );
+    expect(new URL(urls[0]!).searchParams.get("fields")).toBe(
+      serviceTicketCollectionFields,
+    );
 
     await client.catalogGet("system.documents", {
       recordType: "Ticket",
@@ -741,6 +752,9 @@ describe("ConnectWiseClient", () => {
 
     expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
       "owner/id=149 and closedFlag=false",
+    );
+    expect(new URL(urls[0]!).searchParams.get("fields")).toBe(
+      serviceTicketCollectionFields,
     );
     expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
       "member/id=149",
