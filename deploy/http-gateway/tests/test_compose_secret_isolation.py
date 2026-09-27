@@ -15,7 +15,13 @@ def compose_config() -> dict:
                 "environment": {name: f"gateway-{name}" for name in GATEWAY_ENVIRONMENT}
             },
             "cloudflared": {
-                "environment": {name: f"tunnel-{name}" for name in TUNNEL_ENVIRONMENT}
+                "environment": {name: f"tunnel-{name}" for name in TUNNEL_ENVIRONMENT},
+                "depends_on": {
+                    "mcp-gateway": {
+                        "condition": "service_healthy",
+                        "required": True,
+                    }
+                },
             },
         }
     }
@@ -23,6 +29,42 @@ def compose_config() -> dict:
 
 def test_accepts_exact_service_environment_allowlists():
     validate_compose_config(compose_config())
+
+
+@pytest.mark.parametrize(
+    "depends_on",
+    [
+        None,
+        {},
+        {"mcp-gateway": {"condition": "service_started"}},
+        {
+            "mcp-gateway": {
+                "condition": "service_healthy",
+                "required": False,
+            }
+        },
+        {
+            "mcp-gateway": {
+                "condition": "service_healthy",
+                "required": "true",
+            }
+        },
+        {"wrong-service": {"condition": "service_healthy"}},
+        {
+            "mcp-gateway": {"condition": "service_healthy"},
+            "wrong-service": {"condition": "service_healthy"},
+        },
+    ],
+)
+def test_rejects_tunnel_startup_without_exact_gateway_health_dependency(depends_on):
+    config = compose_config()
+    if depends_on is None:
+        del config["services"]["cloudflared"]["depends_on"]
+    else:
+        config["services"]["cloudflared"]["depends_on"] = depends_on
+
+    with pytest.raises(ValueError, match="cloudflared must"):
+        validate_compose_config(config)
 
 
 def test_canaries_verify_each_environment_value_source():
