@@ -17,7 +17,7 @@ The Worker exposes these bounded business tools:
 - Ticket writes: `create_ticket_note`.
 - Ticket and attachment writes: `attach_image_to_ticket`, `attach_image_to_time_entry`, `create_service_ticket`, `update_service_ticket`.
 - Service/reference reads: `get_service_boards`, `get_board_options`, `list_board_tickets`, `get_service_statuses`, `get_service_priorities`, `get_service_sources`.
-- People/company reads: `get_my_member`, `search_members`, `search_companies`, `search_contacts`. Directory searches require a 2–100 character targeted query without `%`/`_` wildcard metacharacters and return at most 20 allowlisted records; member results project only ID, name, and status.
+- People/company reads: `get_my_member`, `search_members`, `search_companies`, `search_contacts`. Directory searches require a 2–100 character targeted query without `%`/`_` wildcard metacharacters and return at most 20 allowlisted records. Member searches request only ID, name, and status; company searches request only ID, name, phone number, first address line, and status.
 - Time and schedule reads: `list_time_entries`, `list_schedule_entries`, `get_time_sheets`.
 - Ticket attachment download: `download_ticket_attachment`. Standalone document-by-ID metadata is intentionally not exposed; use the fixed `system.documents` catalog route with a record ID and type.
 - Fixed read-only catalog: `call_connectwise` with enumerated routes and route-specific parameters only. The `company.configurations` and `finance.agreements.byName` routes require a 2–100 character targeted name query without `%`/`_` wildcards and cap results at 20.

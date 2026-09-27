@@ -1233,9 +1233,9 @@ export function registerConnectWiseBusinessTools(
     compact({
       id: id(value.id),
       name: text(value.name, 300),
-      phone: text(value.phone, 100),
+      phone: text(value.phoneNumber, 100),
       email: text(value.email, 200),
-      address: text(value.address, 300),
+      address: text(value.addressLine1, 300),
       status: reference(value.status),
     });
 

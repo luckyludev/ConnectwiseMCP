@@ -2023,7 +2023,15 @@ describe("authenticated MCP transport", () => {
           createBusinessClient: (credentials) =>
             businessClient({
               async searchCompanies(query, pageSize) {
-                return [{ id: 250, name: "FUNCSHUN", phone: "555-0100" }];
+                return [
+                  {
+                    id: 250,
+                    name: "FUNCSHUN",
+                    phoneNumber: "555-0100",
+                    addressLine1: "1 Main St",
+                    unexpectedSecret: "must not escape",
+                  },
+                ];
               },
               async searchContacts(query, pageSize) {
                 return [
@@ -2068,6 +2076,11 @@ describe("authenticated MCP transport", () => {
     const companyBody = await companies.text();
     expect(companyBody).toContain('\\"id\\":250');
     expect(companyBody).toContain('\\"name\\":\\"FUNCSHUN\\"');
+    expect(companyBody).toContain('\\"phone\\":\\"555-0100\\"');
+    expect(companyBody).toContain('\\"address\\":\\"1 Main St\\"');
+    expect(companyBody).not.toContain("phoneNumber");
+    expect(companyBody).not.toContain("addressLine1");
+    expect(companyBody).not.toContain("unexpectedSecret");
 
     const contacts = await handler.fetch(
       new Request("http://localhost/mcp", {
