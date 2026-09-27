@@ -40,6 +40,7 @@ import {
   ListToolsResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { readBoundedJson, readBoundedText } from "./smoke-response.mjs";
+import { hasExactReadScope } from "./staging-token-scope.mjs";
 import {
   EXPECTED_TOOL_NAMES,
   validateStagingToolsListResult,
@@ -412,6 +413,9 @@ if (!token?.access_token) {
   fail(
     "no access token available (set SMOKE_ACCESS_TOKEN or complete the consent flow)",
   );
+}
+if (!hasExactReadScope(token.scope)) {
+  fail("token response did not grant exactly mcp:read");
 }
 
 // 9. MCP streamable-HTTP session.
