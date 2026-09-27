@@ -141,7 +141,7 @@ Before allowing any real staging MCP use:
 2. Configure alerts for sustained `failure`/`denied` audit outcomes and unexpected absence of audit events during known test traffic.
 3. Execute every relevant item in [`v2-staging-acceptance-checklist.md`](v2-staging-acceptance-checklist.md), including six-user identity isolation, OAuth refresh/eligibility revocation, metadata-only ticket output, and ConnectWise permission-denial testing.
 4. Retain only sanitized evidence references. Never commit log exports, token values, ticket IDs/text, request bodies, headers, profile JSON, or secrets.
-5. Keep the Docker/FastAPI implementation as a restricted rollback path until the service owner, security owner, and ConnectWise owner approve cutover.
+5. Complete and rehearse the parameterized [`cutover-rollback-runbook.md`](cutover-rollback-runbook.md). Keep the Docker/FastAPI implementation as a restricted rollback path until V2 passes the approved production monitoring period and the service owner, security owner, and ConnectWise owner separately approve retirement; no cutover may proceed without approved numeric triggers, a decision authority, RTO, legacy health proof, and sanitized rehearsal evidence.
 
 ## Explicit stop points
 

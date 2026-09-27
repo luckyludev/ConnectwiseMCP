@@ -240,4 +240,76 @@ describe("staging deployment configuration", () => {
     expect(productionKvIds).not.toContain(stagingKv.id);
     expect(productionKvIds).not.toContain(stagingKv.preview_id);
   });
+
+  it("requires an executable, evidence-backed cutover rollback plan", async () => {
+    const [runbook, checklist, stagingHowto] = await Promise.all([
+      readFile(
+        new URL("../docs/cutover-rollback-runbook.md", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../docs/v2-staging-acceptance-checklist.md", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../docs/cloudflare-workers-staging-howto.md", import.meta.url),
+        "utf8",
+      ),
+    ]);
+
+    expect(checklist.match(/\(cutover-rollback-runbook\.md\)/gu)).toHaveLength(
+      2,
+    );
+    expect(stagingHowto).toContain("(cutover-rollback-runbook.md)");
+    for (const requiredSection of [
+      "## 1. Required change record",
+      "## 2. Measurable rollback triggers",
+      "## 3. Preflight gate",
+      "## 4. Controlled cutover",
+      "## 5. Rollback decision and cutback",
+      "## 6. Post-cutback acceptance and abort criteria",
+      "## 7. Forward recovery and legacy retirement gate",
+      "## 8. Rehearsal evidence",
+    ]) {
+      expect(runbook).toContain(requiredSection);
+    }
+    for (const requiredControl of [
+      "rollback decision authority",
+      "rollback recovery-time objective (RTO)",
+      "exact ordered cutback sequence",
+      "cutover and recovery cohort definitions",
+      "cohort observation intervals",
+      "legacy health thresholds",
+      "stabilization interval",
+      "zero tolerance",
+      "If any preflight item fails, abort cutover",
+      "approved maximum decision time expires without a decision",
+      "Do not delete V2 resources or secrets; preserve evidence",
+      "If the RTO or maximum rollback duration is exceeded",
+      "Do not alternate targets repeatedly",
+      "new focused commit, review, CI run, and staging acceptance cycle",
+      "approved production monitoring period",
+      "A failed or late rehearsal blocks cutover",
+      "non-production rehearsal",
+    ]) {
+      expect(runbook).toContain(requiredControl);
+    }
+    const legacyHealthOffset = runbook.indexOf(
+      "Confirm the legacy gateway and tunnel are access-restricted and healthy",
+    );
+    const recoveryRoutingOffset = runbook.indexOf(
+      "Restore the captured legacy routing/client configuration only for the smallest approved recovery cohort",
+    );
+    expect(legacyHealthOffset).toBeGreaterThan(-1);
+    expect(recoveryRoutingOffset).toBeGreaterThan(legacyHealthOffset);
+    expect(runbook).toContain(
+      "service, security, and ConnectWise owners explicitly approve retirement",
+    );
+    expect(runbook).toContain(
+      "only under a separate reviewed change with verification that no client still depends on them",
+    );
+    expect(runbook).toContain(
+      "does not authorize deployment, DNS, Cloudflare or Entra changes, secret access, ConnectWise access, or production cutover",
+    );
+  });
 });

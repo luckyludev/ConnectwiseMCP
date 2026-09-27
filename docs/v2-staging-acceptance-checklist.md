@@ -16,7 +16,7 @@
 - [ ] Confirm the Worker is on a paid plan or an explicitly approved Workers plan with limits adequate for OAuth provider KV use, logging, and expected traffic.
 - [ ] Create separate staging KV namespaces for `OAUTH_KV` and its preview binding. Confirm the deployed Worker references staging namespace IDs rather than the placeholders in `wrangler.jsonc`.
 - [ ] Confirm staging DNS/TLS ownership and rollback owner. Do not change production DNS in this phase.
-- [ ] Record the legacy Docker/FastAPI rollback endpoint, responsible operator, and the conditions that trigger rollback. It remains a restricted rollback path, not a V2 compatibility target.
+- [ ] Complete the required change-record fields in the [cutover and rollback runbook](cutover-rollback-runbook.md): legacy Docker/FastAPI rollback endpoint, responsible operator, numeric trigger thresholds, decision time, RTO, approved cutback order, health probes, and sanitized rehearsal evidence. It remains a restricted rollback path, not a V2 compatibility target.
 
 ## 2. Non-secret Worker configuration
 
@@ -78,7 +78,7 @@ All items below must be explicitly approved before production DNS/client cutover
 - [ ] All required sections above passed with sanitized evidence references.
 - [ ] Security owner approved Entra eligibility, mapping, secret-management, audit retention/access, and alert configuration.
 - [ ] ConnectWise owner approved each dedicated API member's least-privilege role and confirmed per-user data isolation testing.
-- [ ] Service owner approved client redirect URIs, canonical URL, DNS/TLS plan, rollback plan, support coverage, and monitoring window.
+- [ ] Service owner approved client redirect URIs, canonical URL, DNS/TLS plan, the completed [cutover and rollback runbook](cutover-rollback-runbook.md), support coverage, and monitoring window.
 - [ ] A change window and rollback decision authority are recorded.
 - [ ] Production deployment and DNS/client updates are separately approved and executed by authorized operators. This repository checklist is not a deployment command.
 
