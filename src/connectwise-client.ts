@@ -844,6 +844,18 @@ export function createConnectWiseClient(
     throw new Error("ConnectWise request unavailable");
   }
 
+  async function requestBoundedList(
+    path: string,
+    query: Readonly<Record<string, string | number>>,
+    maxItems: number,
+  ): Promise<unknown> {
+    const result = await requestJson("GET", path, query);
+    if (Array.isArray(result) && result.length > maxItems) {
+      throw new Error("ConnectWise response exceeded requested page size");
+    }
+    return result;
+  }
+
   function mappedMemberId(operation: string): number {
     const memberId = credentials.memberId;
     if (memberId === undefined) {
@@ -888,10 +900,14 @@ export function createConnectWiseClient(
       positiveId(ticketId, "service ticket ID");
       boundedPageSize(pageSize);
       try {
-        return await requestJson("GET", `/service/tickets/${ticketId}/notes`, {
+        return await requestBoundedList(
+          `/service/tickets/${ticketId}/notes`,
+          {
+            pageSize,
+            orderBy: "dateCreated asc",
+          },
           pageSize,
-          orderBy: "dateCreated asc",
-        });
+        );
       } catch (error) {
         if (
           !(error instanceof ConnectWiseRequestError) ||
@@ -899,10 +915,14 @@ export function createConnectWiseClient(
         ) {
           throw error;
         }
-        return requestJson("GET", `/project/tickets/${ticketId}/notes`, {
+        return requestBoundedList(
+          `/project/tickets/${ticketId}/notes`,
+          {
+            pageSize,
+            orderBy: "dateCreated asc",
+          },
           pageSize,
-          orderBy: "dateCreated asc",
-        });
+        );
       }
     },
 
@@ -912,19 +932,25 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       boundedPageSize(pageSize);
-      return requestJson("GET", "/system/documents", {
-        recordType: "Ticket",
-        recordId: ticketId,
+      return requestBoundedList(
+        "/system/documents",
+        {
+          recordType: "Ticket",
+          recordId: ticketId,
+          pageSize,
+        },
         pageSize,
-      });
+      );
     },
 
     async getTicketTasks(ticketId: number, pageSize: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       boundedPageSize(pageSize);
-      return requestJson("GET", `/service/tickets/${ticketId}/tasks`, {
+      return requestBoundedList(
+        `/service/tickets/${ticketId}/tasks`,
+        { pageSize },
         pageSize,
-      });
+      );
     },
 
     async getTicketTimeEntries(
@@ -933,11 +959,15 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       boundedPageSize(pageSize);
-      return requestJson("GET", "/time/entries", {
-        conditions: `(chargeToType='ServiceTicket' OR chargeToType='ProjectTicket') AND chargeToId=${ticketId}`,
+      return requestBoundedList(
+        "/time/entries",
+        {
+          conditions: `(chargeToType='ServiceTicket' OR chargeToType='ProjectTicket') AND chargeToId=${ticketId}`,
+          pageSize,
+          orderBy: "dateEntered desc",
+        },
         pageSize,
-        orderBy: "dateEntered desc",
-      });
+      );
     },
 
     async createTicketNote(ticketId, input): Promise<unknown> {
@@ -1015,24 +1045,29 @@ export function createConnectWiseClient(
     },
 
     async getServiceBoards(): Promise<unknown> {
-      return requestJson("GET", "/service/boards", {
-        orderBy: "name asc",
-        pageSize: 50,
-      });
+      return requestBoundedList(
+        "/service/boards",
+        { orderBy: "name asc", pageSize: 50 },
+        50,
+      );
     },
 
     async getBoardStatuses(boardId: number): Promise<unknown> {
       positiveId(boardId, "board ID");
-      return requestJson("GET", `/service/boards/${boardId}/statuses`, {
-        pageSize: 50,
-      });
+      return requestBoundedList(
+        `/service/boards/${boardId}/statuses`,
+        { pageSize: 50 },
+        50,
+      );
     },
 
     async getBoardTypes(boardId: number): Promise<unknown> {
       positiveId(boardId, "board ID");
-      return requestJson("GET", `/service/boards/${boardId}/types`, {
-        pageSize: 50,
-      });
+      return requestBoundedList(
+        `/service/boards/${boardId}/types`,
+        { pageSize: 50 },
+        50,
+      );
     },
 
     async listBoardTickets(
@@ -1041,32 +1076,39 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(boardId, "board ID");
       boundedPageSize(pageSize);
-      return requestJson("GET", "/service/tickets", {
-        conditions: `board/id=${boardId}`,
-        orderBy: "dateEntered desc",
+      return requestBoundedList(
+        "/service/tickets",
+        {
+          conditions: `board/id=${boardId}`,
+          orderBy: "dateEntered desc",
+          pageSize,
+        },
         pageSize,
-      });
+      );
     },
 
     async getServiceStatuses(): Promise<unknown> {
-      return requestJson("GET", "/service/statuses", {
-        orderBy: "name asc",
-        pageSize: 50,
-      });
+      return requestBoundedList(
+        "/service/statuses",
+        { orderBy: "name asc", pageSize: 50 },
+        50,
+      );
     },
 
     async getServicePriorities(): Promise<unknown> {
-      return requestJson("GET", "/service/priorities", {
-        orderBy: "name asc",
-        pageSize: 50,
-      });
+      return requestBoundedList(
+        "/service/priorities",
+        { orderBy: "name asc", pageSize: 50 },
+        50,
+      );
     },
 
     async getServiceSources(): Promise<unknown> {
-      return requestJson("GET", "/service/sources", {
-        orderBy: "name asc",
-        pageSize: 50,
-      });
+      return requestBoundedList(
+        "/service/sources",
+        { orderBy: "name asc", pageSize: 50 },
+        50,
+      );
     },
 
     async getMyMember(): Promise<unknown> {
@@ -1082,31 +1124,43 @@ export function createConnectWiseClient(
     async searchMembers(query: string, pageSize: number): Promise<unknown> {
       const escaped = targetedSearchString(query);
       targetedSearchPageSize(pageSize);
-      return requestJson("GET", "/system/members", {
-        conditions: `name like '%${escaped}%'`,
-        orderBy: "name asc",
+      return requestBoundedList(
+        "/system/members",
+        {
+          conditions: `name like '%${escaped}%'`,
+          orderBy: "name asc",
+          pageSize,
+        },
         pageSize,
-      });
+      );
     },
 
     async searchCompanies(query: string, pageSize: number): Promise<unknown> {
       targetedSearchPageSize(pageSize);
       const escaped = targetedSearchString(query);
-      return requestJson("GET", "/company/companies", {
-        conditions: `name like '%${escaped}%'`,
-        orderBy: "name asc",
+      return requestBoundedList(
+        "/company/companies",
+        {
+          conditions: `name like '%${escaped}%'`,
+          orderBy: "name asc",
+          pageSize,
+        },
         pageSize,
-      });
+      );
     },
 
     async searchContacts(query: string, pageSize: number): Promise<unknown> {
       targetedSearchPageSize(pageSize);
       const escaped = targetedSearchString(query);
-      return requestJson("GET", "/company/contacts", {
-        conditions: `(name like '%${escaped}%' OR email like '%${escaped}%')`,
-        orderBy: "name asc",
+      return requestBoundedList(
+        "/company/contacts",
+        {
+          conditions: `(name like '%${escaped}%' OR email like '%${escaped}%')`,
+          orderBy: "name asc",
+          pageSize,
+        },
         pageSize,
-      });
+      );
     },
 
     async listTimeEntries(pageSize: number): Promise<unknown> {
@@ -1117,11 +1171,15 @@ export function createConnectWiseClient(
           "ConnectWise profile is missing memberId; add it to enable list_time_entries",
         );
       }
-      return requestJson("GET", "/time/entries", {
-        conditions: `member/id=${memberId}`,
-        orderBy: "dateEntered desc",
+      return requestBoundedList(
+        "/time/entries",
+        {
+          conditions: `member/id=${memberId}`,
+          orderBy: "dateEntered desc",
+          pageSize,
+        },
         pageSize,
-      });
+      );
     },
 
     async listScheduleEntries(pageSize: number): Promise<unknown> {
@@ -1133,10 +1191,11 @@ export function createConnectWiseClient(
         );
       }
       // CW rejects orderBy on /schedule/entries; do not imply recency here.
-      return requestJson("GET", "/schedule/entries", {
-        conditions: `member/id=${memberId}`,
+      return requestBoundedList(
+        "/schedule/entries",
+        { conditions: `member/id=${memberId}`, pageSize },
         pageSize,
-      });
+      );
     },
 
     async getTimeSheets(pageSize: number): Promise<unknown> {
@@ -1147,11 +1206,15 @@ export function createConnectWiseClient(
           "ConnectWise profile is missing memberId; add it to enable get_time_sheets",
         );
       }
-      return requestJson("GET", "/time/sheets", {
-        conditions: `member/id=${memberId}`,
-        orderBy: "dateStart desc",
+      return requestBoundedList(
+        "/time/sheets",
+        {
+          conditions: `member/id=${memberId}`,
+          orderBy: "dateStart desc",
+          pageSize,
+        },
         pageSize,
-      });
+      );
     },
 
     async downloadDocument(
@@ -1347,10 +1410,7 @@ export function createConnectWiseClient(
       } else {
         boundedPageSize(requestedPageSize);
       }
-      const result = await requestJson("GET", path, query);
-      if (Array.isArray(result) && result.length > requestedPageSize) {
-        throw new Error("ConnectWise response exceeded requested page size");
-      }
+      const result = await requestBoundedList(path, query, requestedPageSize);
       return definition.transform ? definition.transform(result) : result;
     },
 
@@ -1360,11 +1420,15 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       boundedPageSize(pageSize);
       const escaped = conditionString(searchText);
-      return requestJson("GET", "/service/tickets", {
-        conditions: `summary contains '${escaped}'`,
+      return requestBoundedList(
+        "/service/tickets",
+        {
+          conditions: `summary contains '${escaped}'`,
+          pageSize,
+          orderBy: "dateEntered desc",
+        },
         pageSize,
-        orderBy: "dateEntered desc",
-      });
+      );
     },
 
     async getAgreement(agreementId: number): Promise<unknown> {
@@ -1378,10 +1442,10 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(agreementId, "agreement ID");
       boundedPageSize(pageSize);
-      return requestJson(
-        "GET",
+      return requestBoundedList(
         `/finance/agreements/${agreementId}/additions`,
         { pageSize },
+        pageSize,
       );
     },
 
@@ -1409,11 +1473,15 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(agreementId, "agreement ID");
       boundedPageSize(pageSize);
-      return requestJson("GET", "/finance/invoices", {
-        conditions: `agreement/id=${agreementId}`,
+      return requestBoundedList(
+        "/finance/invoices",
+        {
+          conditions: `agreement/id=${agreementId}`,
+          pageSize,
+          orderBy: "date desc",
+        },
         pageSize,
-        orderBy: "date desc",
-      });
+      );
     },
 
     async createServiceTicket(input): Promise<unknown> {
@@ -1636,10 +1704,11 @@ export function createConnectWiseClient(
 
     async openScheduleEntriesForObject(objectId): Promise<unknown[]> {
       positiveId(objectId, "object ID");
-      const found = (await requestJson("GET", "/schedule/entries", {
-        conditions: `objectId=${objectId}`,
-        pageSize: 50,
-      })) as unknown[];
+      const found = await requestBoundedList(
+        "/schedule/entries",
+        { conditions: `objectId=${objectId}`, pageSize: 50 },
+        50,
+      );
       return Array.isArray(found) ? found : [];
     },
 
@@ -1664,10 +1733,11 @@ export function createConnectWiseClient(
       }
       // Writing into a submitted timesheet fails server-side; fail fast with
       // a clear recall instruction instead of a generic CW error.
-      const sheets = (await requestJson("GET", "/time/sheets", {
-        conditions: `member/id=${memberId}`,
-        pageSize: 5,
-      })) as unknown[];
+      const sheets = await requestBoundedList(
+        "/time/sheets",
+        { conditions: `member/id=${memberId}`, pageSize: 5 },
+        5,
+      );
       if (Array.isArray(sheets)) {
         for (const sheet of sheets) {
           const status = (sheet as Record<string, unknown>)?.status;
