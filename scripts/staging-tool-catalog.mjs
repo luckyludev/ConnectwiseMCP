@@ -9,7 +9,7 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   upload_connectwise_image:
     "9eb19e791cbb14b0d694934c576a5fba44b27d45fb85177dbcb734d5bcd6f8cb",
   search_tickets_by_content:
-    "93091be5a773f8b00cf7384643d5707d20c2da66efd861353bf1b4efc8d3fcbf",
+    "d737f858b358706c0cd277f4f3ad123d3dcc4e215c3b4e0f0cdbb34fe23eb493",
   get_ticket_notes_with_content:
     "bd4860b1bba092191983eb40420fdb65550f22ee13b3a014c575807469d270bd",
   get_ticket_attachments_with_details:
@@ -33,7 +33,7 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   create_agreement_addition:
     "2300e860e85aed8a3930eabd91c2e52896233b697a2aace9f088b4e45f79fb8e",
   search_agreement_additions:
-    "c7cc0e2e05ddfe41ebbd679fae736fa3fd2477931481e7331d5fd35e960d45bf",
+    "5d91d4d2c0ee3593ed5b94d7fcef11d89877276bfb5e32d7f0ce70bc5fa93258",
   get_agreement_billing_summary:
     "c2b17768e4fd4303a589b74c5e7c09f5b70730a48a72b31ac69d6b1a0dd61d84",
   get_service_boards:
@@ -51,11 +51,11 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   get_my_member:
     "93ab7499dc3c616f8db8780fed0d9f69270803cda913882ad2ef3943db8d7225",
   search_members:
-    "15171b145237ea80b813c18694b4143df2574a8d322f446d56ccef94d3e585ee",
+    "3dd0f16265878c5c9a2b11777d1f979b63a60611afdb0a1f9f21ac22b08f89e3",
   search_companies:
-    "15171b145237ea80b813c18694b4143df2574a8d322f446d56ccef94d3e585ee",
+    "3dd0f16265878c5c9a2b11777d1f979b63a60611afdb0a1f9f21ac22b08f89e3",
   search_contacts:
-    "15171b145237ea80b813c18694b4143df2574a8d322f446d56ccef94d3e585ee",
+    "3dd0f16265878c5c9a2b11777d1f979b63a60611afdb0a1f9f21ac22b08f89e3",
   list_time_entries:
     "d092755cbe07b7355c5abb5569e8dd15c1d4a0b4be02c1d26b15c4026996b853",
   list_schedule_entries:
@@ -65,7 +65,7 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   download_ticket_attachment:
     "1f9fbb5ae048a534b0f1ae21814df160a00f97d1e1b6b9ce6ed1238f6638edd6",
   call_connectwise:
-    "a654164d163313f496de41e326660e5923981e73178419f363ac91d93cd2e48e",
+    "9014fd72f00704345d3ce4fdff2cfd215a17a81b820b0812ef1606bb7a504c61",
   create_service_ticket:
     "65753c79701ae624f3a6f66736b2e4a60f237ed4b18caf23c89dc592349e1089",
   update_service_ticket:

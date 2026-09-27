@@ -347,6 +347,111 @@ describe("authenticated MCP transport", () => {
 
   it.each([
     {
+      name: "search_tickets_by_content",
+      arguments: { searchText: "printer\n", maxResults: 5 },
+    },
+    {
+      name: "search_members",
+      arguments: { query: "\tprinter", maxResults: 5 },
+    },
+    {
+      name: "search_companies",
+      arguments: { query: "printer\rstatus", maxResults: 5 },
+    },
+    {
+      name: "search_contacts",
+      arguments: { query: "printer\u007fstatus", maxResults: 5 },
+    },
+    {
+      name: "call_connectwise",
+      arguments: {
+        route: "company.configurations",
+        query: "printer\u0001status",
+        pageSize: 5,
+      },
+    },
+    {
+      name: "call_connectwise",
+      arguments: {
+        route: "finance.agreements.byName",
+        name: "printer\n",
+        pageSize: 5,
+      },
+    },
+    {
+      name: "search_agreement_additions",
+      arguments: {
+        agreementId: 123,
+        productName: "printer\nstatus",
+        maxResults: 5,
+      },
+    },
+  ])(
+    "rejects control characters for $name before resolving ConnectWise secrets",
+    async ({ name, arguments: toolArguments }) => {
+      const auditMessages: string[] = [];
+      const bindingReads: string[] = [];
+      let clientCreated = false;
+      const guardedEnv = new Proxy(env, {
+        get(target, property, receiver) {
+          bindingReads.push(String(property));
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      const handler = createMcpHandler(
+        () =>
+          createMcpServer(guardedEnv, {
+            audit: { logger: (message) => auditMessages.push(message) },
+            createBusinessClient: () => {
+              clientCreated = true;
+              return businessClient();
+            },
+          }),
+        {
+          route: "/mcp",
+          corsOptions: false,
+          authContext: {
+            props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          },
+        },
+      );
+
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "tools/call",
+            params: {
+              name,
+              arguments: toolArguments,
+            },
+          }),
+        }),
+      );
+      const eventStream = await response.text();
+      expect(response.status, eventStream).toBe(200);
+      const rpc = parseSseJsonRpcResponse(eventStream, 3) as {
+        result?: { isError?: boolean; content?: Array<{ text?: string }> };
+        error?: { message?: string };
+      };
+      expect(rpc.result?.isError ?? rpc.error !== undefined).toBe(true);
+      expect(eventStream).toContain("Invalid");
+      expect(bindingReads).toEqual([]);
+      expect(clientCreated).toBe(false);
+      expect(auditMessages).toEqual([]);
+    },
+  );
+
+  it.each([
+    {
       name: "list_ticket_tasks",
       clientMethod: "getTicketTasks",
       upstream: {
