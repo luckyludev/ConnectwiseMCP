@@ -18,6 +18,9 @@ const credentials: ConnectWiseCredentials = {
 
 const serviceTicketCollectionFields =
   "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
+const agreementCollectionFields =
+  "id,name,type,company,agreementStatus,billingCycle,billAmount,nextInvoiceDate";
+const agreementInvoiceCollectionFields = "id,invoiceNumber,total,date";
 
 function fragmentedResponse(
   firstChunk: Uint8Array,
@@ -463,6 +466,30 @@ describe("ConnectWiseClient", () => {
     expect(attempts).toBe(1);
   });
 
+  it("requests only projected fields for recent agreement invoices", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.getRecentAgreementInvoices(7, 5);
+
+    const invoicesUrl = new URL(urls[0]!);
+    expect(invoicesUrl.pathname).toBe(
+      "/v4_6_release/apis/3.0/finance/invoices",
+    );
+    expect(Object.fromEntries(invoicesUrl.searchParams)).toEqual({
+      conditions: "agreement/id=7",
+      fields: agreementInvoiceCollectionFields,
+      pageSize: "5",
+      orderBy: "date desc",
+    });
+    expect(invoicesUrl.searchParams.getAll("fields")).toHaveLength(1);
+  });
+
   it("sends a fixed agreement-addition payload without caller-selected paths", async () => {
     let capturedUrl = "";
     let capturedInit: RequestInit | undefined;
@@ -732,9 +759,13 @@ describe("ConnectWiseClient", () => {
       name: "Managed Services",
       pageSize: 20,
     });
-    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
+    const agreementUrl = new URL(urls[1]!);
+    expect(agreementUrl.searchParams.get("conditions")).toBe(
       "name like '%Managed Services%'",
     );
+    expect(agreementUrl.searchParams.getAll("fields")).toEqual([
+      agreementCollectionFields,
+    ]);
 
     await expect(
       client.catalogGet("company.configurations", { pageSize: 20 }),
