@@ -412,6 +412,31 @@ describe("ConnectWiseClient", () => {
     );
   });
 
+  it("rejects list responses that exceed dedicated and targeted bounds", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        const requested = Number(
+          new URL(String(input)).searchParams.get("pageSize"),
+        );
+        return Response.json(
+          Array.from({ length: requested + 1 }, (_, index) => ({
+            id: index + 1,
+          })),
+        );
+      },
+    });
+
+    await expect(client.searchServiceTickets("printer", 50)).rejects.toThrow(
+      "ConnectWise response exceeded requested page size",
+    );
+    await expect(client.searchMembers("printer", 20)).rejects.toThrow(
+      "ConnectWise response exceeded requested page size",
+    );
+    await expect(client.getServiceBoards()).rejects.toThrow(
+      "ConnectWise response exceeded requested page size",
+    );
+  });
+
   it("does not retry a ticket-note write after an ambiguous fetch failure", async () => {
     let attempts = 0;
     const client = createConnectWiseClient(credentials, {
