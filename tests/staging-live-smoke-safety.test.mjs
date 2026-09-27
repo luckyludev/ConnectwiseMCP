@@ -7,6 +7,7 @@ import { createMcpHandler } from "agents/mcp/server";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { createMcpServer } from "../src/mcp-server";
+import { hasExactReadScope } from "../scripts/staging-token-scope.mjs";
 
 import {
   MAX_SMOKE_RESPONSE_BYTES,
@@ -63,6 +64,24 @@ beforeAll(async () => {
 });
 
 describe("staging smoke output safety", () => {
+  it("accepts only the exact read-only granted scope", () => {
+    expect(hasExactReadScope("mcp:read")).toBe(true);
+    for (const scope of [
+      undefined,
+      null,
+      "",
+      "mcp:write",
+      "mcp:read mcp:write",
+      "mcp:write mcp:read",
+      "mcp:read mcp:read",
+      " mcp:read",
+      "mcp:read ",
+      ["mcp:read"],
+    ]) {
+      expect(hasExactReadScope(scope), JSON.stringify(scope)).toBe(false);
+    }
+  });
+
   it("requires the exact 38 model-visible and one app-only tool catalog", () => {
     const expected = expectedToolCatalog();
     expect(expected).toHaveLength(39);
@@ -990,6 +1009,19 @@ await fetch(callback);
       expect(output).not.toContain(value);
     }
     expect(output).not.toContain(baseUrl);
+  });
+
+  it("prohibits pre-approval live write-tool probes", async () => {
+    const checklist = await readFile(
+      new URL("../docs/v2-staging-acceptance-checklist.md", import.meta.url),
+      "utf8",
+    );
+
+    expect(checklist).toContain(
+      "Do not invoke any write-capable tool against live staging",
+    );
+    expect(checklist).toContain("exact-release CI transport evidence");
+    expect(checklist).not.toContain("call every write-capable tool");
   });
 
   it("does not contain response, authorization, or business-data log paths", async () => {
