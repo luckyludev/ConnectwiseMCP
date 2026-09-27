@@ -468,6 +468,7 @@ const TARGETED_SEARCH_CATALOG_ROUTES = new Set<CatalogRouteId>([
 const SERVICE_TICKET_COLLECTION_FIELDS =
   "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
 const MEMBER_SEARCH_FIELDS = "id,name,status";
+const COMPANY_SEARCH_FIELDS = "id,name,phoneNumber,addressLine1,status";
 
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
@@ -1149,6 +1150,7 @@ export function createConnectWiseClient(
         "/company/companies",
         {
           conditions: `name like '%${escaped}%'`,
+          fields: COMPANY_SEARCH_FIELDS,
           orderBy: "name asc",
           pageSize,
         },

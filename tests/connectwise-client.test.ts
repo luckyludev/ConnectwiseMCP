@@ -613,9 +613,19 @@ describe("ConnectWiseClient", () => {
     });
 
     await client.searchCompanies("  O'Brien  ", 20);
-    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
-      "name like '%O''Brien%'",
+    const companyUrl = new URL(urls[0]!);
+    expect(`${companyUrl.origin}${companyUrl.pathname}`).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/company/companies",
     );
+    expect(Object.fromEntries(companyUrl.searchParams)).toEqual({
+      conditions: "name like '%O''Brien%'",
+      fields: "id,name,phoneNumber,addressLine1,status",
+      orderBy: "name asc",
+      pageSize: "20",
+    });
+    expect(companyUrl.searchParams.getAll("fields")).toEqual([
+      "id,name,phoneNumber,addressLine1,status",
+    ]);
 
     await client.searchContacts("a@b.com", 20);
     expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
