@@ -467,6 +467,7 @@ const TARGETED_SEARCH_CATALOG_ROUTES = new Set<CatalogRouteId>([
 // `_info` preserves the created/updated metadata exposed by the ticket projector.
 const SERVICE_TICKET_COLLECTION_FIELDS =
   "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
+const MEMBER_SEARCH_FIELDS = "id,name,status";
 
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
@@ -1133,6 +1134,7 @@ export function createConnectWiseClient(
         "/system/members",
         {
           conditions: `name like '%${escaped}%'`,
+          fields: MEMBER_SEARCH_FIELDS,
           orderBy: "name asc",
           pageSize,
         },

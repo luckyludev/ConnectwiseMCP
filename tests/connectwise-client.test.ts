@@ -584,9 +584,11 @@ describe("ConnectWiseClient", () => {
     );
     expect(Object.fromEntries(url.searchParams)).toEqual({
       conditions: "name like '%O''Brien%'",
+      fields: "id,name,status",
       orderBy: "name asc",
       pageSize: "20",
     });
+    expect(url.searchParams.getAll("fields")).toEqual(["id,name,status"]);
 
     for (const query of ["", " ", "x", "%%", "A_", "x".repeat(101), "ok\nno"]) {
       await expect(client.searchMembers(query, 10)).rejects.toThrow(
