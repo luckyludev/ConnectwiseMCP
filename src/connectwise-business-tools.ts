@@ -259,11 +259,10 @@ function failureMessage(error: unknown): string {
   return "ConnectWise operation failed";
 }
 
-async function runBusinessTool(
+async function runAuthorizedTool(
   props: AuthProps,
-  env: object,
   tool: ToolAuditName,
-  operation: (client: ConnectWiseClient) => Promise<unknown>,
+  operation: (profileAlias: string) => Promise<unknown>,
   dependencies: BusinessToolDependencies,
 ): Promise<CallToolResult> {
   const startedAtMs = getAuditStartTime(dependencies.audit);
@@ -301,14 +300,7 @@ async function runBusinessTool(
     };
   }
   try {
-    const requestLog = dependencies.requestLog ?? ((message: string) => {});
-    const credentials = resolveConnectWiseCredentials(env, props.profileAlias);
-    const clientFactory =
-      dependencies.createClient ??
-      ((c: ConnectWiseCredentials) =>
-        createConnectWiseClient(c, { log: requestLog }));
-    const client = clientFactory(credentials);
-    const result = await operation(client);
+    const result = await operation(props.profileAlias);
     emitToolAudit(
       {
         props,
@@ -344,6 +336,29 @@ async function runBusinessTool(
       content: [{ type: "text", text: failureMessage(error) }],
     };
   }
+}
+
+async function runBusinessTool(
+  props: AuthProps,
+  env: object,
+  tool: ToolAuditName,
+  operation: (client: ConnectWiseClient) => Promise<unknown>,
+  dependencies: BusinessToolDependencies,
+): Promise<CallToolResult> {
+  return runAuthorizedTool(
+    props,
+    tool,
+    async (profileAlias) => {
+      const requestLog = dependencies.requestLog ?? ((message: string) => {});
+      const credentials = resolveConnectWiseCredentials(env, profileAlias);
+      const clientFactory =
+        dependencies.createClient ??
+        ((c: ConnectWiseCredentials) =>
+          createConnectWiseClient(c, { log: requestLog }));
+      return operation(clientFactory(credentials));
+    },
+    dependencies,
+  );
 }
 
 const positiveId = z.number().int().positive();
@@ -592,9 +607,8 @@ export function registerConnectWiseBusinessTools(
       },
     },
     ({ recordType, recordId }) =>
-      runBusinessTool(
+      runAuthorizedTool(
         getProps(),
-        env,
         "open_attachment_uploader",
         async () => ({
           recordType,
