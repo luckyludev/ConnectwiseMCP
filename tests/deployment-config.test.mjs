@@ -53,6 +53,49 @@ describe("dependency maintenance configuration", () => {
       expect(workflow.match(/- "\.github\/dependabot\.yml"/gu)).toHaveLength(2);
     }
   });
+
+  it("installs legacy CI tooling only from a reproducible hash lock", async () => {
+    const [workflow, input, lock] = await Promise.all([
+      readFile(
+        new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../deploy/http-gateway/requirements-ci.in", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../deploy/http-gateway/requirements-ci.lock", import.meta.url),
+        "utf8",
+      ),
+    ]);
+
+    expect(input.trim().split("\n")).toEqual([
+      "uv==0.12.0",
+      "pytest==9.1.1",
+      "ruff==0.16.1",
+      "pip-audit==2.10.1",
+    ]);
+    for (const dependency of input.trim().split("\n")) {
+      expect(lock).toContain(`${dependency} \\`);
+    }
+    expect(lock).toContain("--hash=sha256:");
+    expect(workflow).toContain("deploy/http-gateway/requirements-ci.lock");
+    expect(workflow).toContain(
+      "uv pip compile deploy/http-gateway/requirements-ci.in --python-version 3.12 --generate-hashes --no-emit-index-url --output-file deploy/http-gateway/requirements-ci.lock",
+    );
+    expect(workflow).toContain(
+      "git diff --exit-code -- deploy/http-gateway/requirements-ci.lock deploy/http-gateway/requirements.lock",
+    );
+    expect(workflow).toContain(
+      "pip-audit -r deploy/http-gateway/requirements-ci.lock",
+    );
+    const pipInstalls = workflow.match(/^\s*python -m pip install.*$/gmu) ?? [];
+    expect(pipInstalls).toHaveLength(2);
+    for (const command of pipInstalls) {
+      expect(command).toContain("--require-hashes");
+    }
+  });
 });
 
 describe("legacy rollback deployment surface", () => {
