@@ -469,6 +469,8 @@ const SERVICE_TICKET_COLLECTION_FIELDS =
   "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
 const MEMBER_SEARCH_FIELDS = "id,name,status";
 const COMPANY_SEARCH_FIELDS = "id,name,phoneNumber,addressLine1,status";
+const CONTACT_SEARCH_FIELDS =
+  "id,name,firstName,lastName,title,phone,cellPhone,email,company";
 
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
@@ -1165,6 +1167,7 @@ export function createConnectWiseClient(
         "/company/contacts",
         {
           conditions: `(name like '%${escaped}%' OR email like '%${escaped}%')`,
+          fields: CONTACT_SEARCH_FIELDS,
           orderBy: "name asc",
           pageSize,
         },

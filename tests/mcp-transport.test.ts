@@ -2038,8 +2038,14 @@ describe("authenticated MCP transport", () => {
                   {
                     id: 81,
                     name: "Luis Rivera",
+                    firstName: "Luis",
+                    lastName: "Rivera",
+                    title: "Engineer",
+                    phone: "555-0101",
+                    cellPhone: "555-0102",
                     email: "luis@funcshun.com",
                     company: { id: 250, name: "FUNCSHUN" },
+                    unexpectedSecret: "must not escape",
                   },
                 ];
               },
@@ -2104,6 +2110,17 @@ describe("authenticated MCP transport", () => {
     );
     const contactBody = await contacts.text();
     expect(contactBody).toContain('\\"id\\":81');
+    expect(contactBody).toContain('\\"name\\":\\"Luis Rivera\\"');
+    expect(contactBody).toContain('\\"firstName\\":\\"Luis\\"');
+    expect(contactBody).toContain('\\"lastName\\":\\"Rivera\\"');
+    expect(contactBody).toContain('\\"title\\":\\"Engineer\\"');
+    expect(contactBody).toContain('\\"phone\\":\\"555-0101\\"');
+    expect(contactBody).toContain('\\"cellPhone\\":\\"555-0102\\"');
+    expect(contactBody).toContain('\\"email\\":\\"luis@funcshun.com\\"');
+    expect(contactBody).toContain(
+      '\\"company\\":{\\"id\\":250,\\"name\\":\\"FUNCSHUN\\"}',
+    );
+    expect(contactBody).not.toContain("unexpectedSecret");
   });
 
   it("rejects wildcard and underspecified directory searches before profile access", async () => {

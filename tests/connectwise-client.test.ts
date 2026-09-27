@@ -628,9 +628,19 @@ describe("ConnectWiseClient", () => {
     ]);
 
     await client.searchContacts("a@b.com", 20);
-    expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
-      "(name like '%a@b.com%' OR email like '%a@b.com%')",
+    const contactUrl = new URL(urls[1]!);
+    expect(`${contactUrl.origin}${contactUrl.pathname}`).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/company/contacts",
     );
+    expect(Object.fromEntries(contactUrl.searchParams)).toEqual({
+      conditions: "(name like '%a@b.com%' OR email like '%a@b.com%')",
+      fields: "id,name,firstName,lastName,title,phone,cellPhone,email,company",
+      orderBy: "name asc",
+      pageSize: "20",
+    });
+    expect(contactUrl.searchParams.getAll("fields")).toEqual([
+      "id,name,firstName,lastName,title,phone,cellPhone,email,company",
+    ]);
 
     for (const query of ["", " ", "x", "%", "A_", "x".repeat(101), "ok\nno"]) {
       await expect(client.searchCompanies(query, 10)).rejects.toThrow(
