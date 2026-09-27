@@ -275,6 +275,76 @@ describe("authenticated MCP transport", () => {
     }
   });
 
+  it("opens the attachment uploader without resolving ConnectWise secrets", async () => {
+    const auditMessages: string[] = [];
+    const bindingReads: string[] = [];
+    let clientCreated = false;
+    const guardedEnv = new Proxy(env, {
+      get(target, property, receiver) {
+        bindingReads.push(String(property));
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(guardedEnv, {
+          audit: { logger: (message) => auditMessages.push(message) },
+          createBusinessClient: () => {
+            clientCreated = true;
+            return businessClient();
+          },
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: {
+            name: "open_attachment_uploader",
+            arguments: { recordType: "TimeEntry", recordId: 123 },
+          },
+        }),
+      }),
+    );
+    const eventStream = await response.text();
+    expect(response.status, eventStream).toBe(200);
+    const rpc = parseSseJsonRpcResponse(eventStream, 2) as {
+      result: { content: Array<{ type: string; text: string }> };
+    };
+    expect(JSON.parse(rpc.result.content[0]!.text)).toEqual({
+      recordType: "TimeEntry",
+      recordId: 123,
+      maxImageBytes: 1_000_000,
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"],
+    });
+    expect(bindingReads).toEqual([]);
+    expect(clientCreated).toBe(false);
+    expect(auditMessages).toHaveLength(1);
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      profileAlias: "LUIS",
+      tool: "open_attachment_uploader",
+      outcome: "success",
+      reason: "ok",
+    });
+  });
+
   it.each([
     {
       name: "list_ticket_tasks",
