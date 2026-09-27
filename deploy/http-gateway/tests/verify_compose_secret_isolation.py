@@ -49,6 +49,21 @@ def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> No
     gateway_keys = _environment_keys(gateway, "mcp-gateway")
     tunnel_keys = _environment_keys(tunnel, "cloudflared")
 
+    tunnel_dependencies = tunnel.get("depends_on")
+    if not isinstance(tunnel_dependencies, dict) or set(tunnel_dependencies) != {
+        "mcp-gateway"
+    }:
+        raise ValueError("cloudflared must depend only on mcp-gateway")
+    gateway_dependency = tunnel_dependencies["mcp-gateway"]
+    if (
+        not isinstance(gateway_dependency, dict)
+        or gateway_dependency.get("condition") != "service_healthy"
+        or gateway_dependency.get("required", True) is not True
+    ):
+        raise ValueError(
+            "cloudflared must wait for required mcp-gateway service_healthy"
+        )
+
     if gateway_keys != GATEWAY_ENVIRONMENT:
         raise ValueError(
             "mcp-gateway environment differs from the required allowlist: "

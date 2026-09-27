@@ -32,4 +32,4 @@ services:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       mcp-gateway:
-        condition: service_started
+        condition: service_healthy
