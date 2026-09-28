@@ -471,6 +471,8 @@ const MEMBER_SEARCH_FIELDS = "id,name,status";
 const COMPANY_SEARCH_FIELDS = "id,name,phoneNumber,addressLine1,status";
 const CONTACT_SEARCH_FIELDS =
   "id,name,firstName,lastName,title,phone,cellPhone,email,company";
+const CONFIGURATION_COLLECTION_FIELDS =
+  "id,name,type,status,company,site,contact";
 const AGREEMENT_COLLECTION_FIELDS =
   "id,name,type,company,agreementStatus,billingCycle,billAmount,nextInvoiceDate";
 const AGREEMENT_INVOICE_COLLECTION_FIELDS = "id,invoiceNumber,total,date";
@@ -523,6 +525,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     path: () => "/company/configurations",
     query: (p) => ({
       conditions: `name like '%${targetedSearchString(String(p.query))}%'`,
+      fields: CONFIGURATION_COLLECTION_FIELDS,
       pageSize: p.pageSize ?? 20,
     }),
     required: ["query"],

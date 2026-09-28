@@ -18,6 +18,8 @@ const credentials: ConnectWiseCredentials = {
 
 const serviceTicketCollectionFields =
   "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
+const configurationCollectionFields =
+  "id,name,type,status,company,site,contact";
 const agreementCollectionFields =
   "id,name,type,company,agreementStatus,billingCycle,billAmount,nextInvoiceDate";
 const agreementInvoiceCollectionFields = "id,invoiceNumber,total,date";
@@ -751,9 +753,14 @@ describe("ConnectWiseClient", () => {
       query: "  O'Brien  ",
       pageSize: 20,
     });
-    expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
+    const configurationUrl = new URL(urls[0]!);
+    expect(configurationUrl.searchParams.get("conditions")).toBe(
       "name like '%O''Brien%'",
     );
+    expect(configurationUrl.searchParams.getAll("fields")).toEqual([
+      configurationCollectionFields,
+    ]);
+    expect(configurationUrl.searchParams.getAll("pageSize")).toEqual(["20"]);
 
     await client.catalogGet("finance.agreements.byName", {
       name: "Managed Services",
