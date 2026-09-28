@@ -33,6 +33,51 @@ The service and security owners must approve numeric thresholds before cutover. 
 
 The rollback authority may roll back before a threshold is crossed when evidence indicates an active security or data-isolation incident. Do not weaken Entra eligibility, ConnectWise roles, profile mapping, output bounds, or audit controls to avoid rollback.
 
+### Verified rollback image artifact
+
+Every successful canonical `main` run of `legacy-oauth-ci` retains `legacy-rollback-image-<release-commit>` for 90 days. The artifact contains the exact image archive that CI reloaded and smoke-tested, its SHA-256 checksum, and a manifest binding the archive and image ID to the workflow commit and run. A pull-request merge commit, a failed run, an expired artifact, or a local rebuild is not rollback evidence.
+
+Before the change window, select a successful `push` or `schedule` run whose full 40-character `headSha` is the reviewed release commit. Record its run URL/ID in the approved operations system. Download the artifact without renaming its files:
+
+```bash
+gh run download <SUCCESSFUL_MAIN_RUN_ID> \
+  --repo luckyludev/ConnectwiseMCP \
+  --name legacy-rollback-image-<FULL_RELEASE_COMMIT> \
+  --dir rollback-image-<FULL_RELEASE_COMMIT>
+cd rollback-image-<FULL_RELEASE_COMMIT>
+sha256sum --check connectwise-legacy-rollback-image.sha256
+```
+
+Inspect `connectwise-legacy-rollback-image.json` without editing it. Confirm `schemaVersion` is `1`, `releaseCommit` and the selected run's `headSha` both equal the approved full commit, `workflowRunId` equals the selected successful run ID, `imageRepository` is `connectwise-legacy-rollback-ci`, and the archive name and SHA-256 equal the downloaded file and checksum. Stop on any mismatch.
+
+Load and verify the tested image before rehearsal and preflight:
+
+```bash
+gzip -dc connectwise-legacy-rollback-image.tar.gz | docker load
+expected_image_id=$(python3 -c 'import json; print(json.load(open("connectwise-legacy-rollback-image.json", encoding="utf-8"))["imageId"])')
+test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)" = "$expected_image_id"
+```
+
+The Compose file uses a separate `connectwise-legacy-rollback-local` tag for ordinary local builds. Rollback must stop and verify the existing tunnel is stopped, then use the loaded CI tag, start only the gateway, and prohibit rebuilds and pulls:
+
+```bash
+cd <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway
+export MCP_GATEWAY_IMAGE=connectwise-legacy-rollback-ci
+docker compose stop cloudflared || exit 1
+if [ "$(docker inspect --format '{{.State.Running}}' connectwise-mcp-cloudflared 2>/dev/null || printf 'false')" != "false" ]; then
+  exit 1
+fi
+docker compose up -d --no-build --pull never mcp-gateway
+actual_image_id=$(docker inspect --format '{{.Image}}' connectwise-mcp-gateway)
+if [ "$actual_image_id" != "$expected_image_id" ]; then
+  docker compose stop mcp-gateway
+  exit 1
+fi
+docker compose up -d --no-build --pull never cloudflared
+```
+
+The image-ID comparison must pass before starting the tunnel or routing any client. If it fails, immediately stop the gateway and investigate; do not retag, rebuild, or continue. Confirm the digest-pinned `cloudflared` image is available before the window. Do not use `--build`, retag a different image as `connectwise-legacy-rollback-ci`, or allow Compose to substitute another gateway image. If the artifact will expire before the monitoring window ends, obtain a fresh successful scheduled run for the same reviewed `main` commit or retain the verified files in the approved artifact system before expiry; reverify the checksum, manifest, and loaded image ID afterward.
+
 ## 3. Preflight gate
 
 Complete immediately before routing production clients:

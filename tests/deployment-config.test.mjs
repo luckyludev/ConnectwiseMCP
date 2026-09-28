@@ -162,8 +162,8 @@ describe("legacy rollback deployment surface", () => {
 });
 
 describe("legacy rollback image security", () => {
-  it("fails CI when the built rollback image has fixable severe vulnerabilities", async () => {
-    const [workflow, dockerfile] = await Promise.all([
+  it("fails CI on severe findings and retains the exact smoke-tested image", async () => {
+    const [workflow, dockerfile, compose] = await Promise.all([
       readFile(
         new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
         "utf8",
@@ -172,18 +172,34 @@ describe("legacy rollback image security", () => {
         new URL("../deploy/http-gateway/Dockerfile", import.meta.url),
         "utf8",
       ),
+      readFile(
+        new URL("../deploy/http-gateway/docker-compose.yml", import.meta.url),
+        "utf8",
+      ),
     ]);
     const buildOffset = workflow.indexOf("- name: Build rollback image");
     const scanOffset = workflow.indexOf(
       "- name: Scan rollback image for fixable severe vulnerabilities",
     );
+    const contentValidationOffset = workflow.indexOf(
+      "- name: Verify allowlisted rollback image contents",
+    );
+    const packageOffset = workflow.indexOf(
+      "- name: Package the verified rollback image",
+    );
     const smokeOffset = workflow.indexOf(
-      "- name: Smoke-test rollback image startup and auth boundary",
+      "- name: Smoke-test packaged rollback image startup and auth boundary",
+    );
+    const retainOffset = workflow.indexOf(
+      "- name: Retain the verified rollback image",
     );
 
     expect(buildOffset).toBeGreaterThan(-1);
     expect(scanOffset).toBeGreaterThan(buildOffset);
-    expect(smokeOffset).toBeGreaterThan(scanOffset);
+    expect(contentValidationOffset).toBeGreaterThan(scanOffset);
+    expect(packageOffset).toBeGreaterThan(contentValidationOffset);
+    expect(smokeOffset).toBeGreaterThan(packageOffset);
+    expect(retainOffset).toBeGreaterThan(smokeOffset);
     expect(workflow).toContain(
       "uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
     );
@@ -193,8 +209,57 @@ describe("legacy rollback image security", () => {
     expect(workflow).toContain("severity: HIGH,CRITICAL");
     expect(workflow).toContain("ignore-unfixed: true");
     expect(workflow).toContain('exit-code: "1"');
+    expect(workflow).toContain(
+      "docker save connectwise-legacy-rollback-ci | gzip -n -9",
+    );
+    expect(workflow).toContain(
+      "image_id=$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)",
+    );
+    expect(workflow).toContain(
+      "archive_sha256=$(sha256sum \"$archive\" | cut -d ' ' -f 1)",
+    );
+    expect(workflow).toContain(
+      'printf \'%s  %s\\n\' "$archive_sha256" "$archive" > "$checksum"',
+    );
+    for (const manifestBinding of [
+      '"releaseCommit":"%s"',
+      '"workflowRunId":"%s"',
+      '"imageRepository":"connectwise-legacy-rollback-ci"',
+      '"imageId":"%s"',
+      '"archive":"%s"',
+      '"archiveSha256":"%s"',
+      '"$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256"',
+    ]) {
+      expect(workflow).toContain(manifestBinding);
+    }
+    expect(workflow).toContain(
+      "docker image rm connectwise-legacy-rollback-ci",
+    );
+    expect(workflow).toContain('gzip -dc "$archive" | docker load');
+    expect(workflow).toContain(
+      'test "$(docker image inspect --format \'{{.Id}}\' connectwise-legacy-rollback-ci)" = "$image_id"',
+    );
+    expect(workflow).toContain(
+      "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+    );
+    expect(workflow).toContain("name: legacy-rollback-image-${{ github.sha }}");
+    expect(workflow).toContain(
+      "if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')",
+    );
+    for (const artifactFile of [
+      "connectwise-legacy-rollback-image.tar.gz",
+      "connectwise-legacy-rollback-image.sha256",
+      "connectwise-legacy-rollback-image.json",
+    ]) {
+      expect(workflow).toContain(artifactFile);
+    }
+    expect(workflow).toContain("if-no-files-found: error");
+    expect(workflow).toContain("retention-days: 90");
     expect(dockerfile).toMatch(
       /^FROM python:3\.12-slim@sha256:[0-9a-f]{64}$/mu,
+    );
+    expect(compose).toContain(
+      "image: ${MCP_GATEWAY_IMAGE:-connectwise-legacy-rollback-local}",
     );
   });
 });
@@ -291,6 +356,12 @@ describe("staging deployment configuration", () => {
       "approved production monitoring period",
       "A failed or late rehearsal blocks cutover",
       "non-production rehearsal",
+      "legacy-rollback-image-<release-commit>",
+      "sha256sum --check connectwise-legacy-rollback-image.sha256",
+      "docker compose up -d --no-build --pull never",
+      "docker compose stop cloudflared || exit 1",
+      "The image-ID comparison must pass before starting the tunnel or routing any client",
+      "A pull-request merge commit, a failed run, an expired artifact, or a local rebuild is not rollback evidence",
     ]) {
       expect(runbook).toContain(requiredControl);
     }
