@@ -1883,6 +1883,41 @@ describe("authenticated MCP transport", () => {
     expect(thirdBody).toContain(
       '\\"dateResolved\\":\\"2026-08-29T17:45:00Z\\"',
     );
+
+    const validScheduleRanges = [
+      { startDate: "2026-09-01", endDate: "2026-09-01" },
+      { startDate: "2026-09-01", endDate: "2026-10-01" },
+    ];
+    for (const [index, range] of validScheduleRanges.entries()) {
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 532 + index,
+            method: "tools/call",
+            params: {
+              name: "call_connectwise",
+              arguments: {
+                route: "schedule.entries.byMember",
+                ...range,
+              },
+            },
+          }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(calls[3 + index]).toEqual({
+        route: "schedule.entries.byMember",
+        params: { pageSize: 20, ...range },
+      });
+    }
   });
 
   it("does not expose upstream response bodies or internal errors", async () => {
@@ -2127,11 +2162,23 @@ describe("authenticated MCP transport", () => {
     expect(contactBody).not.toContain("unexpectedSecret");
   });
 
-  it("rejects wildcard and underspecified directory searches before profile access", async () => {
+  it("rejects malformed bounded searches before profile access", async () => {
     let clientCreations = 0;
+    let credentialBindingReads = 0;
+    const guardedEnv = new Proxy(env, {
+      get(target, property, receiver) {
+        if (
+          property === "CONNECTWISE_ALLOWED_ORIGINS" ||
+          (typeof property === "string" && property.startsWith("CW_PROFILE_"))
+        ) {
+          credentialBindingReads += 1;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
     const handler = createMcpHandler(
       () =>
-        createMcpServer(env, {
+        createMcpServer(guardedEnv, {
           createBusinessClient: () => {
             clientCreations += 1;
             return businessClient();
@@ -2176,6 +2223,36 @@ describe("authenticated MCP transport", () => {
         name: "call_connectwise",
         arguments: { route: "finance.agreements.byName", name: "x" },
       },
+      {
+        name: "call_connectwise",
+        arguments: {
+          route: "schedule.entries.byMember",
+          startDate: "2026-09-01",
+        },
+      },
+      {
+        name: "call_connectwise",
+        arguments: {
+          route: "schedule.entries.byMember",
+          endDate: "2026-09-01",
+        },
+      },
+      {
+        name: "call_connectwise",
+        arguments: {
+          route: "schedule.entries.byMember",
+          startDate: "2026-09-02",
+          endDate: "2026-09-01",
+        },
+      },
+      {
+        name: "call_connectwise",
+        arguments: {
+          route: "schedule.entries.byMember",
+          startDate: "2026-09-01",
+          endDate: "2026-10-02",
+        },
+      },
     ];
     for (const [index, params] of invalidCalls.entries()) {
       const response = await handler.fetch(
@@ -2198,6 +2275,7 @@ describe("authenticated MCP transport", () => {
       expect(await response.text()).toMatch(/invalid|wildcard|too_small/i);
     }
     expect(clientCreations).toBe(0);
+    expect(credentialBindingReads).toBe(0);
   });
 
   it("returns the authenticated member record for get_my_member", async () => {

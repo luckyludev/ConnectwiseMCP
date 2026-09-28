@@ -464,7 +464,7 @@ const date = z
 
 const catalogPageSize = pageSize;
 const catalogTargetedPageSize = z.number().int().min(1).max(20).default(20);
-const catalogToolInput = z.discriminatedUnion("route", [
+const catalogToolInputBase = z.discriminatedUnion("route", [
   z
     .object({
       route: z.literal("service.boards.statuses"),
@@ -539,6 +539,40 @@ const catalogToolInput = z.discriminatedUnion("route", [
     })
     .strict(),
 ]);
+
+const catalogToolInput = catalogToolInputBase.superRefine((value, context) => {
+  if (value.route !== "schedule.entries.byMember") return;
+
+  const hasStartDate = value.startDate !== undefined;
+  const hasEndDate = value.endDate !== undefined;
+  if (hasStartDate !== hasEndDate) {
+    context.addIssue({
+      code: "custom",
+      message: "startDate and endDate must be provided together",
+      path: hasStartDate ? ["endDate"] : ["startDate"],
+    });
+    return;
+  }
+  if (!hasStartDate || !hasEndDate) return;
+
+  const startMs = Date.parse(`${value.startDate}T00:00:00Z`);
+  const endMs = Date.parse(`${value.endDate}T00:00:00Z`);
+  if (endMs < startMs) {
+    context.addIssue({
+      code: "custom",
+      message: "endDate must be on or after startDate",
+      path: ["endDate"],
+    });
+    return;
+  }
+  if (endMs - startMs > 30 * 86_400_000) {
+    context.addIssue({
+      code: "custom",
+      message: "Date range must be 31 days or less",
+      path: ["endDate"],
+    });
+  }
+});
 
 export function registerConnectWiseBusinessTools(
   server: McpServer,
