@@ -20,6 +20,12 @@ const INVALID_OAUTH_SCOPES: { scope: string[] }[] = [
   { scope: ["mcp:read", "mcp:read"] },
 ];
 
+function authorizationUrl(redirectUri: string): string {
+  const url = new URL("https://mcp.example.com/authorize");
+  url.searchParams.set("redirect_uri", redirectUri);
+  return url.toString();
+}
+
 describe("canonical MCP resource validation", () => {
   it("accepts only a literal canonical HTTPS /mcp URL", () => {
     expect(isCanonicalMcpResource("https://mcp.example.com/mcp")).toBe(true);
@@ -53,6 +59,9 @@ describe("Entra auth handler", () => {
       let lookedUp = false;
       const env = {
         MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+          "https://client.example.com/callback",
+        ]),
         OAUTH_PROVIDER: {
           async parseAuthRequest() {
             return {
@@ -74,7 +83,9 @@ describe("Entra auth handler", () => {
       } as unknown as WorkerEnv;
 
       const response = await createEntraAuthHandler().fetch!(
-        new Request("https://mcp.example.com/authorize") as never,
+        new Request(
+          authorizationUrl("https://client.example.com/callback"),
+        ) as never,
         env,
         {} as ExecutionContext,
       );
@@ -91,6 +102,9 @@ describe("Entra auth handler", () => {
       let lookedUp = false;
       const env = {
         MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+          "https://client.example.com/callback",
+        ]),
         OAUTH_PROVIDER: {
           async parseAuthRequest() {
             return {
@@ -112,7 +126,9 @@ describe("Entra auth handler", () => {
       } as unknown as WorkerEnv;
 
       const response = await createEntraAuthHandler().fetch!(
-        new Request("https://mcp.example.com/authorize") as never,
+        new Request(
+          authorizationUrl("https://client.example.com/callback"),
+        ) as never,
         env,
         {} as ExecutionContext,
       );
@@ -380,7 +396,9 @@ describe("Entra auth handler", () => {
     } as unknown as WorkerEnv;
 
     const response = await createEntraAuthHandler().fetch!(
-      new Request("https://mcp.example.com/authorize") as never,
+      new Request(
+        authorizationUrl("https://client.example.com/callback"),
+      ) as never,
       env,
       {} as ExecutionContext,
     );
@@ -394,6 +412,9 @@ describe("Entra auth handler", () => {
     const env = {
       OAUTH_STATE_SECRET: "0123456789abcdef0123456789abcdef",
       MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+        "http://127.0.0.1/callback",
+      ]),
       OAUTH_PROVIDER: {
         async parseAuthRequest() {
           return {
@@ -418,7 +439,9 @@ describe("Entra auth handler", () => {
     } as unknown as WorkerEnv;
 
     const response = await createEntraAuthHandler().fetch!(
-      new Request("https://mcp.example.com/authorize") as never,
+      new Request(
+        authorizationUrl("http://127.0.0.1:49152/a/../callback"),
+      ) as never,
       env,
       {} as ExecutionContext,
     );
@@ -427,7 +450,50 @@ describe("Entra auth handler", () => {
     expect(await response.text()).toBe("Invalid client redirect URI");
   });
 
-  it("rejects a redirect supplied by client metadata when it is not deployment-allowlisted", async () => {
+  it.each([
+    ["missing", "https://mcp.example.com/authorize"],
+    ["unapproved", authorizationUrl("https://attacker.example/callback")],
+    [
+      "duplicated",
+      `${authorizationUrl("https://approved.example.com/callback")}&redirect_uri=${encodeURIComponent("https://attacker.example/callback")}`,
+    ],
+  ])(
+    "rejects a %s redirect before parsing client metadata",
+    async (_case, requestUrl) => {
+      let parsed = false;
+      const env = {
+        OAUTH_STATE_SECRET: "0123456789abcdef0123456789abcdef",
+        MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+          "https://approved.example.com/callback",
+        ]),
+        OAUTH_PROVIDER: {
+          async parseAuthRequest() {
+            parsed = true;
+            throw new Error(
+              "must not parse or fetch unapproved client metadata",
+            );
+          },
+          async lookupClient() {
+            throw new Error("must not look up unapproved client metadata");
+          },
+        },
+      } as unknown as WorkerEnv;
+
+      const response = await createEntraAuthHandler().fetch!(
+        new Request(requestUrl) as never,
+        env,
+        {} as ExecutionContext,
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.text()).toBe("Invalid client redirect URI");
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(parsed).toBe(false);
+    },
+  );
+
+  it("returns a bounded client error when approved metadata lookup fails", async () => {
     const env = {
       OAUTH_STATE_SECRET: "0123456789abcdef0123456789abcdef",
       MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
@@ -438,8 +504,8 @@ describe("Entra auth handler", () => {
         async parseAuthRequest() {
           return {
             responseType: "code",
-            clientId: "https://attacker.example/client-metadata.json",
-            redirectUri: "https://attacker.example/callback",
+            clientId: "https://client.example/client-metadata.json",
+            redirectUri: "https://approved.example.com/callback",
             scope: ["mcp:read"],
             state: "client-state",
             codeChallenge: "challenge",
@@ -448,23 +514,22 @@ describe("Entra auth handler", () => {
           };
         },
         async lookupClient() {
-          return {
-            clientId: "https://attacker.example/client-metadata.json",
-            clientName: "Untrusted metadata client",
-            redirectUris: ["https://attacker.example/callback"],
-          };
+          throw new Error("upstream details must not escape");
         },
       },
     } as unknown as WorkerEnv;
 
     const response = await createEntraAuthHandler().fetch!(
-      new Request("https://mcp.example.com/authorize") as never,
+      new Request(
+        authorizationUrl("https://approved.example.com/callback"),
+      ) as never,
       env,
       {} as ExecutionContext,
     );
 
     expect(response.status).toBe(400);
-    expect(await response.text()).toBe("Invalid client redirect URI");
+    expect(await response.text()).toBe("Unknown OAuth client");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("allows a canonical loopback authorization redirect with only port variance", async () => {
@@ -498,7 +563,7 @@ describe("Entra auth handler", () => {
     } as unknown as WorkerEnv;
 
     const response = await createEntraAuthHandler().fetch!(
-      new Request("https://mcp.example.com/authorize") as never,
+      new Request(authorizationUrl("http://127.0.0.1:49152/callback")) as never,
       env,
       {} as ExecutionContext,
     );
@@ -550,7 +615,9 @@ describe("Entra auth handler", () => {
 
     const handler = createEntraAuthHandler();
     const response = await handler.fetch!(
-      new Request("https://mcp.example.com/authorize") as never,
+      new Request(
+        authorizationUrl("https://client.example.com/callback"),
+      ) as never,
       env,
       {} as ExecutionContext,
     );
@@ -611,7 +678,9 @@ describe("Entra auth handler", () => {
     }) as unknown as WorkerEnv;
     const handler = createEntraAuthHandler();
     const consent = await handler.fetch!(
-      new Request("https://mcp.example.com/authorize") as never,
+      new Request(
+        authorizationUrl("https://client.example.com/callback"),
+      ) as never,
       env,
       {} as ExecutionContext,
     );
@@ -711,7 +780,9 @@ describe("Entra auth handler", () => {
     const handler = createEntraAuthHandler({ fetcher, getKey });
 
     const consent = await handler.fetch!(
-      new Request("https://mcp.example.com/authorize") as never,
+      new Request(
+        authorizationUrl("https://client.example.com/callback"),
+      ) as never,
       env,
       {} as ExecutionContext,
     );

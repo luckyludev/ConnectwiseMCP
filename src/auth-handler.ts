@@ -228,6 +228,24 @@ async function beginAuthorization(
     });
   }
 
+  const requestedRedirectUris = new URL(request.url).searchParams.getAll(
+    "redirect_uri",
+  );
+  const requestedRedirectUri = requestedRedirectUris[0];
+  if (
+    requestedRedirectUris.length !== 1 ||
+    requestedRedirectUri === undefined ||
+    !isConfiguredClientRedirectUri(
+      requestedRedirectUri,
+      env.ALLOWED_CLIENT_REDIRECT_URIS,
+    )
+  ) {
+    return new Response("Invalid client redirect URI", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
   let oauthRequest: AuthRequest;
   try {
     oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
@@ -246,20 +264,36 @@ async function beginAuthorization(
     return invalidScopeResponse("authorize_scope");
   }
 
-  const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
-  if (!client) {
-    return new Response("Unknown OAuth client", { status: 400 });
-  }
   if (
     typeof oauthRequest.redirectUri !== "string" ||
-    !isApprovedClientRedirectUri(
-      oauthRequest.redirectUri,
-      client.redirectUris,
-    ) ||
     !isConfiguredClientRedirectUri(
       oauthRequest.redirectUri,
       env.ALLOWED_CLIENT_REDIRECT_URIS,
     )
+  ) {
+    return new Response("Invalid client redirect URI", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
+  let client: Awaited<ReturnType<WorkerEnv["OAUTH_PROVIDER"]["lookupClient"]>>;
+  try {
+    client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
+  } catch {
+    return new Response("Unknown OAuth client", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+  if (!client) {
+    return new Response("Unknown OAuth client", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+  if (
+    !isApprovedClientRedirectUri(oauthRequest.redirectUri, client.redirectUris)
   ) {
     return new Response("Invalid client redirect URI", {
       status: 400,
