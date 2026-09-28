@@ -244,7 +244,7 @@ describe("legacy rollback image security", () => {
     );
     expect(workflow).toContain("name: legacy-rollback-image-${{ github.sha }}");
     expect(workflow).toContain(
-      "if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')",
+      "if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')",
     );
     for (const artifactFile of [
       "connectwise-legacy-rollback-image.tar.gz",

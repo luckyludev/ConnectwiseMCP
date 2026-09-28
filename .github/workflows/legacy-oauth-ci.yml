@@ -174,7 +174,7 @@ jobs:
       - name: Smoke-test packaged rollback image startup and auth boundary
         run: bash deploy/http-gateway/tests/smoke_rollback_image.sh
       - name: Retain the verified rollback image
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: legacy-rollback-image-${{ github.sha }}

@@ -37,7 +37,7 @@ The rollback authority may roll back before a threshold is crossed when evidence
 
 Every successful canonical `main` run of `legacy-oauth-ci` retains `legacy-rollback-image-<release-commit>` for 90 days. The artifact contains the exact image archive that CI reloaded and smoke-tested, its SHA-256 checksum, and a manifest binding the archive and image ID to the workflow commit and run. A pull-request merge commit, a failed run, an expired artifact, or a local rebuild is not rollback evidence.
 
-Before the change window, select a successful `push` or `schedule` run whose full 40-character `headSha` is the reviewed release commit. Record its run URL/ID in the approved operations system. Download the artifact without renaming its files:
+Before the change window, select a successful `push`, `schedule`, or manually dispatched run on `refs/heads/main` whose full 40-character `headSha` is the reviewed release commit. Record its run URL/ID in the approved operations system. Download the artifact without renaming its files:
 
 ```bash
 gh run download <SUCCESSFUL_MAIN_RUN_ID> \
@@ -76,7 +76,7 @@ fi
 docker compose up -d --no-build --pull never cloudflared
 ```
 
-The image-ID comparison must pass before starting the tunnel or routing any client. If it fails, immediately stop the gateway and investigate; do not retag, rebuild, or continue. Confirm the digest-pinned `cloudflared` image is available before the window. Do not use `--build`, retag a different image as `connectwise-legacy-rollback-ci`, or allow Compose to substitute another gateway image. If the artifact will expire before the monitoring window ends, obtain a fresh successful scheduled run for the same reviewed `main` commit or retain the verified files in the approved artifact system before expiry; reverify the checksum, manifest, and loaded image ID afterward.
+The image-ID comparison must pass before starting the tunnel or routing any client. If it fails, immediately stop the gateway and investigate; do not retag, rebuild, or continue. Confirm the digest-pinned `cloudflared` image is available before the window. Do not use `--build`, retag a different image as `connectwise-legacy-rollback-ci`, or allow Compose to substitute another gateway image. If the artifact will expire before the monitoring window ends, manually dispatch `legacy-oauth-ci` against the unchanged reviewed `main` commit or retain the verified files in the approved artifact system before expiry; reverify the successful run's `headSha`, checksum, manifest, and loaded image ID afterward.
 
 ## 3. Preflight gate
 
