@@ -154,5 +154,36 @@ jobs:
           && test -f /app/mcp-server/api_gateway/fast_memory_db.py
           && test -f /app/mcp-server/api_gateway/connectwise_api.db
           && test -f /app/gateway/main.py'
-      - name: Smoke-test rollback image startup and auth boundary
+      - name: Package the verified rollback image
+        id: rollback-image
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=connectwise-legacy-rollback-image.tar.gz
+          manifest=connectwise-legacy-rollback-image.json
+          checksum=connectwise-legacy-rollback-image.sha256
+          image_id=$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)
+          docker save connectwise-legacy-rollback-ci | gzip -n -9 > "$archive"
+          archive_sha256=$(sha256sum "$archive" | cut -d ' ' -f 1)
+          printf '%s  %s\n' "$archive_sha256" "$archive" > "$checksum"
+          printf '{"schemaVersion":1,"releaseCommit":"%s","workflowRunId":"%s","imageRepository":"connectwise-legacy-rollback-ci","imageId":"%s","archive":"%s","archiveSha256":"%s"}\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" > "$manifest"
+          docker image rm connectwise-legacy-rollback-ci
+          gzip -dc "$archive" | docker load
+          test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)" = "$image_id"
+      - name: Smoke-test packaged rollback image startup and auth boundary
         run: bash deploy/http-gateway/tests/smoke_rollback_image.sh
+      - name: Retain the verified rollback image
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: legacy-rollback-image-${{ github.sha }}
+          path: |
+            connectwise-legacy-rollback-image.tar.gz
+            connectwise-legacy-rollback-image.sha256
+            connectwise-legacy-rollback-image.json
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
