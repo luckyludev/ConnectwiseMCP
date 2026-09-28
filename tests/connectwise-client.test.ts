@@ -22,6 +22,9 @@ const configurationCollectionFields =
   "id,name,type,status,company,site,contact";
 const agreementCollectionFields =
   "id,name,type,company,agreementStatus,billingCycle,billAmount,nextInvoiceDate";
+const agreementAdditionCollectionFields =
+  "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description";
+const agreementAdditionSummaryFields = "extPrice,extCost";
 const agreementInvoiceCollectionFields = "id,invoiceNumber,total,date";
 
 function fragmentedResponse(
@@ -466,6 +469,49 @@ describe("ConnectWiseClient", () => {
       }),
     ).rejects.toThrow("ConnectWise request unavailable");
     expect(attempts).toBe(1);
+  });
+
+  it("requests only projected fields for agreement additions", async () => {
+    let capturedUrl = "";
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        capturedUrl = String(input);
+        return Response.json([]);
+      },
+    });
+
+    await client.getAgreementAdditions(7, 5);
+
+    const additionsUrl = new URL(capturedUrl);
+    expect(additionsUrl.pathname).toBe(
+      "/v4_6_release/apis/3.0/finance/agreements/7/additions",
+    );
+    expect(Object.fromEntries(additionsUrl.searchParams)).toEqual({
+      fields: agreementAdditionCollectionFields,
+      pageSize: "5",
+    });
+    expect(additionsUrl.searchParams.getAll("fields")).toHaveLength(1);
+  });
+
+  it("requests only aggregate fields for agreement addition summaries", async () => {
+    let capturedUrl = "";
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        capturedUrl = String(input);
+        return Response.json([]);
+      },
+    });
+
+    await client.getAgreementAdditionSummary(7, 5);
+
+    const summaryUrl = new URL(capturedUrl);
+    expect(summaryUrl.pathname).toBe(
+      "/v4_6_release/apis/3.0/finance/agreements/7/additions",
+    );
+    expect(Object.fromEntries(summaryUrl.searchParams)).toEqual({
+      fields: agreementAdditionSummaryFields,
+      pageSize: "5",
+    });
   });
 
   it("requests only projected fields for recent agreement invoices", async () => {

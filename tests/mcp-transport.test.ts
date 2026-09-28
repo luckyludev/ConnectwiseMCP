@@ -96,6 +96,7 @@ function businessClient(
     searchServiceTickets: unused,
     getAgreement: unused,
     getAgreementAdditions: unused,
+    getAgreementAdditionSummary: unused,
     createAgreementAddition: unused,
     getRecentAgreementInvoices: unused,
     ...overrides,
