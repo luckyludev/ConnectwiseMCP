@@ -19,6 +19,8 @@ describe("Entra token refresh reauthorization", () => {
       const options = {
         grantType: "refresh_token" as never,
         clientId: "mcp-client",
+        subjectClientId: "mcp-client",
+        resource: "https://mcp.example.com/mcp",
         userId: "tenant-a:user-1",
         grantId: "grant-1",
         scope,
@@ -56,6 +58,8 @@ describe("Entra token refresh reauthorization", () => {
     const result = await createTokenExchangeCallback({} as WorkerEnv)({
       grantType: "authorization_code" as never,
       clientId: "mcp-client",
+      subjectClientId: "mcp-client",
+      resource: "https://mcp.example.com/mcp",
       userId: "tenant-a:user-1",
       grantId: "grant-1",
       scope: ["mcp:read"],
@@ -127,6 +131,8 @@ describe("Entra token refresh reauthorization", () => {
     })({
       grantType: "refresh_token" as never,
       clientId: "mcp-client",
+      subjectClientId: "mcp-client",
+      resource: "https://mcp.example.com/mcp",
       userId: "tenant-a:user-1",
       grantId: "grant-1",
       scope: ["mcp:read"],
@@ -188,6 +194,8 @@ describe("Entra token refresh reauthorization", () => {
       })({
         grantType: "refresh_token" as never,
         clientId: "mcp-client",
+        subjectClientId: "mcp-client",
+        resource: "https://mcp.example.com/mcp",
         userId: "tenant-a:user-1",
         grantId: "grant-1",
         scope: ["mcp:read"],
@@ -230,6 +238,8 @@ describe("Entra token refresh reauthorization", () => {
       })({
         grantType: "refresh_token" as never,
         clientId: "mcp-client",
+        subjectClientId: "mcp-client",
+        resource: "https://mcp.example.com/mcp",
         userId: "tenant-a:user-1",
         grantId: "grant-1",
         scope: ["mcp:read"],
