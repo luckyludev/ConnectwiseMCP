@@ -24,6 +24,13 @@ const agreementCollectionFields =
   "id,name,type,company,agreementStatus,billingCycle,billAmount,nextInvoiceDate";
 const agreementAdditionCollectionFields =
   "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description";
+const timeEntryCollectionFields =
+  "id,actualHours,timeStart,member,notes,workType";
+const timeEntryReadFields = `${timeEntryCollectionFields},dateEntered,chargeToType`;
+const scheduleEntryCollectionFields =
+  "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
+const timeSheetCollectionFields =
+  "id,member,year,period,dateStart,dateEnd,status,hours,deadline";
 const agreementAdditionSummaryFields = "extPrice,extCost";
 const agreementInvoiceCollectionFields = "id,invoiceNumber,total,date";
 
@@ -114,6 +121,32 @@ describe("ConnectWiseClient", () => {
       pageSize: "50",
     });
     expect(capturedInit?.method).toBe("GET");
+  });
+
+  it("minimizes ticket time-entry reads at the upstream boundary", async () => {
+    let capturedUrl = "";
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        capturedUrl = String(input);
+        return Response.json([{ id: 401 }]);
+      },
+    });
+
+    await expect(client.getTicketTimeEntries(123, 20)).resolves.toEqual([
+      { id: 401 },
+    ]);
+    const url = new URL(capturedUrl);
+    expect(`${url.origin}${url.pathname}`).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/time/entries",
+    );
+    expect(url.searchParams.get("conditions")).toBe(
+      "(chargeToType='ServiceTicket' OR chargeToType='ProjectTicket') AND chargeToId=123",
+    );
+    expect(url.searchParams.getAll("fields")).toEqual([
+      timeEntryCollectionFields,
+    ]);
+    expect(url.searchParams.get("orderBy")).toBe("dateEntered desc");
+    expect(url.searchParams.get("pageSize")).toBe("20");
   });
 
   it("rejects an invalid ticket ID without making a request", async () => {
@@ -623,6 +656,9 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[6]!).searchParams.get("conditions")).toBe(
       "member/id=149",
     );
+    expect(new URL(urls[6]!).searchParams.getAll("fields")).toEqual([
+      timeEntryReadFields,
+    ]);
     expect(new URL(urls[6]!).searchParams.get("pageSize")).toBe("5");
   });
 
@@ -865,9 +901,15 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
       "member/id=149",
     );
+    expect(new URL(urls[1]!).searchParams.getAll("fields")).toEqual([
+      timeEntryReadFields,
+    ]);
     expect(new URL(urls[2]!).searchParams.get("conditions")).toBe(
       "member/id=149",
     );
+    expect(new URL(urls[2]!).searchParams.getAll("fields")).toEqual([
+      scheduleEntryCollectionFields,
+    ]);
   });
 
   it("rejects catalog member overrides and missing profile member IDs", async () => {
@@ -998,6 +1040,9 @@ describe("ConnectWiseClient", () => {
     ]);
     const url = new URL(urls[0]!);
     expect(url.searchParams.get("conditions")).toBe("member/id=149");
+    expect(url.searchParams.getAll("fields")).toEqual([
+      scheduleEntryCollectionFields,
+    ]);
     expect(url.searchParams.get("pageSize")).toBe("7");
     expect(url.searchParams.has("orderBy")).toBe(false);
   });
@@ -1032,6 +1077,9 @@ describe("ConnectWiseClient", () => {
     await expect(client.getTimeSheets(9)).resolves.toEqual([{ id: 21 }]);
     const url = new URL(urls[0]!);
     expect(url.searchParams.get("conditions")).toBe("member/id=149");
+    expect(url.searchParams.getAll("fields")).toEqual([
+      timeSheetCollectionFields,
+    ]);
     expect(url.searchParams.get("orderBy")).toBe("dateStart desc");
     expect(url.searchParams.get("pageSize")).toBe("9");
   });
@@ -1448,11 +1496,34 @@ describe("ConnectWiseClient", () => {
     expect(calls[2]).toContain("/time/entries/42");
   });
 
+  it("minimizes object-scoped schedule reads at the upstream boundary", async () => {
+    let capturedUrl = "";
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        capturedUrl = String(input);
+        return Response.json([{ id: 81 }]);
+      },
+    });
+
+    await expect(client.openScheduleEntriesForObject(123)).resolves.toEqual([
+      { id: 81 },
+    ]);
+    const url = new URL(capturedUrl);
+    expect(url.pathname).toBe("/v4_6_release/apis/3.0/schedule/entries");
+    expect(url.searchParams.get("conditions")).toBe("objectId=123");
+    expect(url.searchParams.getAll("fields")).toEqual([
+      scheduleEntryCollectionFields,
+    ]);
+    expect(url.searchParams.get("pageSize")).toBe("50");
+  });
+
   it("rejects createTimeEntry when a timesheet is pending approval", async () => {
+    let capturedSheetUrl = "";
     const client = createConnectWiseClient(credentials, {
       fetcher: async (_input, init) => {
         const url = String(_input);
         if (url.includes("/time/sheets")) {
+          capturedSheetUrl = url;
           return Response.json([
             { id: 99, status: "PendingApproval", period: 43 },
           ]);
@@ -1466,6 +1537,10 @@ describe("ConnectWiseClient", () => {
         timeEnd: "2026-09-01T13:00:00-04:00",
       }),
     ).rejects.toThrow(/pending approval/);
+    const sheetUrl = new URL(capturedSheetUrl);
+    expect(sheetUrl.searchParams.get("conditions")).toBe("member/id=149");
+    expect(sheetUrl.searchParams.getAll("fields")).toEqual(["status"]);
+    expect(sheetUrl.searchParams.get("pageSize")).toBe("5");
   });
 
   it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
