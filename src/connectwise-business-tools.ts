@@ -191,17 +191,20 @@ function agreement(value: unknown): Record<string, unknown> {
   });
 }
 
-function addition(value: Record<string, unknown>): Record<string, unknown> {
+export function projectAgreementAddition(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
   return compact({
     id: id(value.id),
     product: reference(value.product),
     quantity: number(value.quantity),
     unitPrice: number(value.unitPrice),
-    extendedPrice: number(value.extendedPrice),
-    cost: number(value.cost),
+    unitCost: number(value.unitCost),
+    extendedPrice: number(value.extPrice),
+    extendedCost: number(value.extCost),
     effectiveDate: text(value.effectiveDate, 100),
     cancelledDate: text(value.cancelledDate, 100),
-    billableOption: text(value.billableOption, 100),
+    billCustomer: text(value.billCustomer, 100),
     description: text(value.description, 1_000),
   });
 }
@@ -215,8 +218,8 @@ function invoice(value: Record<string, unknown>): Record<string, unknown> {
   });
 }
 
-function additionsSummary(values: Record<string, unknown>[]) {
-  const sanitized = values.map(addition);
+export function summarizeAgreementAdditions(values: Record<string, unknown>[]) {
+  const sanitized = values.map(projectAgreementAddition);
   return {
     count: sanitized.length,
     totalExtendedPrice: sanitized.reduce(
@@ -224,8 +227,7 @@ function additionsSummary(values: Record<string, unknown>[]) {
       0,
     ),
     totalCost: sanitized.reduce(
-      (sum, item) =>
-        sum + (number(item.cost) ?? 0) * (number(item.quantity) ?? 0),
+      (sum, item) => sum + (number(item.extendedCost) ?? 0),
       0,
     ),
   };
@@ -1025,7 +1027,7 @@ export function registerConnectWiseBusinessTools(
           list(
             await client.getAgreementAdditions(agreementId, maxResults),
             maxResults,
-          ).map(addition),
+          ).map(projectAgreementAddition),
         dependencies,
       ),
   );
@@ -1044,9 +1046,9 @@ export function registerConnectWiseBusinessTools(
         env,
         "get_agreement_additions_summary",
         async (client) =>
-          additionsSummary(
+          summarizeAgreementAdditions(
             list(
-              await client.getAgreementAdditions(agreementId, maxResults),
+              await client.getAgreementAdditionSummary(agreementId, maxResults),
               maxResults,
             ),
           ),
@@ -1143,7 +1145,7 @@ export function registerConnectWiseBusinessTools(
             await client.getAgreementAdditions(agreementId, maxResults),
             maxResults,
           )
-            .map(addition)
+            .map(projectAgreementAddition)
             .filter((entry) => {
               const name = object(entry.product)?.name;
               const effectiveDate = entry.effectiveDate;
@@ -1180,13 +1182,13 @@ export function registerConnectWiseBusinessTools(
           const [agreementValue, additionValues, invoiceValues] =
             await Promise.all([
               client.getAgreement(agreementId),
-              client.getAgreementAdditions(agreementId, maxAdditions),
+              client.getAgreementAdditionSummary(agreementId, maxAdditions),
               client.getRecentAgreementInvoices(agreementId, 5),
             ]);
           const rawAdditions = list(additionValues, maxAdditions);
           return {
             agreement: agreement(agreementValue),
-            additions: additionsSummary(rawAdditions),
+            additions: summarizeAgreementAdditions(rawAdditions),
             recentInvoices: list(invoiceValues, 5).map(invoice),
           };
         },

@@ -137,6 +137,10 @@ export type ConnectWiseClient = {
     agreementId: number,
     pageSize: number,
   ): Promise<unknown>;
+  getAgreementAdditionSummary(
+    agreementId: number,
+    pageSize: number,
+  ): Promise<unknown>;
   createAgreementAddition(
     agreementId: number,
     input: {
@@ -475,6 +479,9 @@ const CONFIGURATION_COLLECTION_FIELDS =
   "id,name,type,status,company,site,contact";
 const AGREEMENT_COLLECTION_FIELDS =
   "id,name,type,company,agreementStatus,billingCycle,billAmount,nextInvoiceDate";
+const AGREEMENT_ADDITION_COLLECTION_FIELDS =
+  "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description";
+const AGREEMENT_ADDITION_SUMMARY_FIELDS = "extPrice,extCost";
 const AGREEMENT_INVOICE_COLLECTION_FIELDS = "id,invoiceNumber,total,date";
 
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
@@ -1464,7 +1471,26 @@ export function createConnectWiseClient(
       boundedPageSize(pageSize);
       return requestBoundedList(
         `/finance/agreements/${agreementId}/additions`,
-        { pageSize },
+        {
+          fields: AGREEMENT_ADDITION_COLLECTION_FIELDS,
+          pageSize,
+        },
+        pageSize,
+      );
+    },
+
+    async getAgreementAdditionSummary(
+      agreementId: number,
+      pageSize: number,
+    ): Promise<unknown> {
+      positiveId(agreementId, "agreement ID");
+      boundedPageSize(pageSize);
+      return requestBoundedList(
+        `/finance/agreements/${agreementId}/additions`,
+        {
+          fields: AGREEMENT_ADDITION_SUMMARY_FIELDS,
+          pageSize,
+        },
         pageSize,
       );
     },
