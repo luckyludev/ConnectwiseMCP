@@ -483,6 +483,14 @@ const AGREEMENT_ADDITION_COLLECTION_FIELDS =
   "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description";
 const AGREEMENT_ADDITION_SUMMARY_FIELDS = "extPrice,extCost";
 const AGREEMENT_INVOICE_COLLECTION_FIELDS = "id,invoiceNumber,total,date";
+const TIME_ENTRY_COLLECTION_FIELDS =
+  "id,actualHours,timeStart,member,notes,workType";
+const TIME_ENTRY_READ_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},dateEntered,chargeToType`;
+const SCHEDULE_ENTRY_COLLECTION_FIELDS =
+  "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
+const TIME_SHEET_COLLECTION_FIELDS =
+  "id,member,year,period,dateStart,dateEnd,status,hours,deadline";
+const TIME_SHEET_STATUS_FIELDS = "status";
 
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
@@ -562,6 +570,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     path: () => "/time/entries",
     query: (p) => ({
       conditions: `member/id=${p.memberId}`,
+      fields: TIME_ENTRY_READ_FIELDS,
       pageSize: p.pageSize ?? 20,
     }),
     required: ["memberId"],
@@ -574,6 +583,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
         `member/id=${p.memberId}`,
         ...scheduleDateConditions(p),
       ].join(" and "),
+      fields: SCHEDULE_ENTRY_COLLECTION_FIELDS,
       pageSize: p.pageSize ?? 20,
     }),
     required: ["memberId"],
@@ -985,6 +995,7 @@ export function createConnectWiseClient(
         "/time/entries",
         {
           conditions: `(chargeToType='ServiceTicket' OR chargeToType='ProjectTicket') AND chargeToId=${ticketId}`,
+          fields: TIME_ENTRY_COLLECTION_FIELDS,
           pageSize,
           orderBy: "dateEntered desc",
         },
@@ -1201,6 +1212,7 @@ export function createConnectWiseClient(
         "/time/entries",
         {
           conditions: `member/id=${memberId}`,
+          fields: TIME_ENTRY_READ_FIELDS,
           orderBy: "dateEntered desc",
           pageSize,
         },
@@ -1219,7 +1231,11 @@ export function createConnectWiseClient(
       // CW rejects orderBy on /schedule/entries; do not imply recency here.
       return requestBoundedList(
         "/schedule/entries",
-        { conditions: `member/id=${memberId}`, pageSize },
+        {
+          conditions: `member/id=${memberId}`,
+          fields: SCHEDULE_ENTRY_COLLECTION_FIELDS,
+          pageSize,
+        },
         pageSize,
       );
     },
@@ -1236,6 +1252,7 @@ export function createConnectWiseClient(
         "/time/sheets",
         {
           conditions: `member/id=${memberId}`,
+          fields: TIME_SHEET_COLLECTION_FIELDS,
           orderBy: "dateStart desc",
           pageSize,
         },
@@ -1753,7 +1770,11 @@ export function createConnectWiseClient(
       positiveId(objectId, "object ID");
       const found = await requestBoundedList(
         "/schedule/entries",
-        { conditions: `objectId=${objectId}`, pageSize: 50 },
+        {
+          conditions: `objectId=${objectId}`,
+          fields: SCHEDULE_ENTRY_COLLECTION_FIELDS,
+          pageSize: 50,
+        },
         50,
       );
       return Array.isArray(found) ? found : [];
@@ -1782,7 +1803,11 @@ export function createConnectWiseClient(
       // a clear recall instruction instead of a generic CW error.
       const sheets = await requestBoundedList(
         "/time/sheets",
-        { conditions: `member/id=${memberId}`, pageSize: 5 },
+        {
+          conditions: `member/id=${memberId}`,
+          fields: TIME_SHEET_STATUS_FIELDS,
+          pageSize: 5,
+        },
         5,
       );
       if (Array.isArray(sheets)) {

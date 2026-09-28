@@ -748,6 +748,69 @@ describe("authenticated MCP transport", () => {
     );
   });
 
+  it("projects the ConnectWise dateEntered field from bounded time entries", async () => {
+    const calls: number[] = [];
+    const client = businessClient({
+      async listTimeEntries(maxResults: number) {
+        calls.push(maxResults);
+        return [
+          {
+            id: 8,
+            actualHours: 1.5,
+            timeStart: "2026-09-12T12:00:00Z",
+            dateEntered: "2026-09-12T12:05:00Z",
+            date: "legacy-field-must-not-be-used",
+            member: { id: 149, name: "Mapped Member", secret: "drop" },
+            chargeToType: "ServiceTicket",
+            privateField: "drop",
+          },
+        ];
+      },
+    });
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () => client,
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 26,
+          method: "tools/call",
+          params: {
+            name: "list_time_entries",
+            arguments: { maxResults: 2 },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+    expect(response.status, body).toBe(200);
+    expect(calls).toEqual([2]);
+    expect(body).toContain('\\"date\\":\\"2026-09-12T12:05:00Z\\"');
+    expect(body).toContain('\\"chargeToType\\":\\"ServiceTicket\\"');
+    expect(body).not.toContain("legacy-field-must-not-be-used");
+    expect(body).not.toContain("privateField");
+    expect(body).not.toContain("secret");
+  });
+
   it("bounds and projects schedule entries without accepting a caller member", async () => {
     const calls: number[] = [];
     const client = businessClient({

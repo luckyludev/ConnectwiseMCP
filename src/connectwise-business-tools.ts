@@ -1290,7 +1290,7 @@ export function registerConnectWiseBusinessTools(
   const timeEntryRead = (value: Record<string, unknown>) =>
     compact({
       ...timeEntry(value),
-      date: text(value.date, 100),
+      date: text(value.dateEntered, 100),
       chargeToType: text(value.chargeToType, 100),
     });
 
