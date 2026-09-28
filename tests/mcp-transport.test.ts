@@ -2029,6 +2029,7 @@ describe("authenticated MCP transport", () => {
                     name: "FUNCSHUN",
                     phoneNumber: "555-0100",
                     addressLine1: "1 Main St",
+                    email: "private-company-email@example.com",
                     unexpectedSecret: "must not escape",
                   },
                 ];
@@ -2086,6 +2087,8 @@ describe("authenticated MCP transport", () => {
     expect(companyBody).toContain('\\"address\\":\\"1 Main St\\"');
     expect(companyBody).not.toContain("phoneNumber");
     expect(companyBody).not.toContain("addressLine1");
+    expect(companyBody).not.toContain("private-company-email@example.com");
+    expect(companyBody).not.toContain('\\"email\\"');
     expect(companyBody).not.toContain("unexpectedSecret");
 
     const contacts = await handler.fetch(
