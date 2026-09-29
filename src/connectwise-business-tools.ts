@@ -159,9 +159,7 @@ function task(value: Record<string, unknown>): Record<string, unknown> {
   return compact({
     id: id(value.id),
     summary: text(value.summary, 1_000),
-    priority: reference(value.priority),
-    status: reference(value.status),
-    dueDate: text(value.dueDate, 100),
+    priority: number(value.priority),
     notes: text(value.notes, 4_000),
   });
 }
