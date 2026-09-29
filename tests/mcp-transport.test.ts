@@ -62,6 +62,7 @@ function businessClient(
   };
   return {
     getServiceTicket: unused,
+    getServiceTicketStatus: unused,
     getTicketNotes: unused,
     getTicketAttachments: unused,
     getTicketTasks: unused,
@@ -752,8 +753,10 @@ describe("authenticated MCP transport", () => {
       result: { content: Array<{ type: string; text: string }> };
     };
     const complete = JSON.parse(rpc.result.content[0]!.text) as {
+      ticket: { summary?: string };
       notes: Array<{ id: number; internal?: boolean; external?: boolean }>;
     };
+    expect(complete.ticket.summary).toBe("Safe summary");
     expect(complete.notes.map(({ id }) => id)).toEqual([1, 2, 4]);
     expect(complete.notes.find(({ id }) => id === 4)).toEqual(
       expect.objectContaining({ internal: true, external: false }),
@@ -1603,7 +1606,7 @@ describe("authenticated MCP transport", () => {
             createClient: (credentials) => {
               selectedCompanies.push(credentials.companyId);
               return {
-                async getServiceTicket(id) {
+                async getServiceTicketStatus(id) {
                   await new Promise((resolve) => setTimeout(resolve, 5));
                   return {
                     id,

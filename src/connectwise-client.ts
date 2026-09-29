@@ -76,6 +76,7 @@ export type ConnectWiseClientDependencies = {
 
 export type ConnectWiseClient = {
   getServiceTicket(ticketId: number): Promise<unknown>;
+  getServiceTicketStatus(ticketId: number): Promise<unknown>;
   getTicketNotes(ticketId: number, pageSize: number): Promise<unknown>;
   getTicketAttachments(ticketId: number, pageSize: number): Promise<unknown>;
   getTicketTasks(ticketId: number, pageSize: number): Promise<unknown>;
@@ -468,6 +469,7 @@ const TARGETED_SEARCH_CATALOG_ROUTES = new Set<CatalogRouteId>([
   "finance.agreements.byName",
 ]);
 
+const SERVICE_TICKET_LOOKUP_FIELDS = "id,status";
 // `_info` preserves the created/updated metadata exposed by the ticket projector.
 const SERVICE_TICKET_COLLECTION_FIELDS =
   "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
@@ -948,6 +950,13 @@ export function createConnectWiseClient(
     async getServiceTicket(ticketId: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       return requestJson("GET", `/service/tickets/${ticketId}`);
+    },
+
+    async getServiceTicketStatus(ticketId: number): Promise<unknown> {
+      positiveId(ticketId, "service ticket ID");
+      return requestJson("GET", `/service/tickets/${ticketId}`, {
+        fields: SERVICE_TICKET_LOOKUP_FIELDS,
+      });
     },
 
     async getTicketNotes(ticketId: number, pageSize: number): Promise<unknown> {

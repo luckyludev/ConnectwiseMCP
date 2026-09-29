@@ -88,7 +88,7 @@ const serviceTicketSchema = z.object({
 export type ServiceTicketDependencies = AuditedToolDependencies & {
   createClient?: (
     credentials: ConnectWiseCredentials,
-  ) => Pick<ConnectWiseClient, "getServiceTicket">;
+  ) => Pick<ConnectWiseClient, "getServiceTicketStatus">;
   createBusinessClient?: (
     credentials: ConnectWiseCredentials,
   ) => ConnectWiseClient;
@@ -144,7 +144,7 @@ export async function getServiceTicketResult(
         createConnectWiseClient(c, { log: requestLog }));
     const client = clientFactory(credentials);
     const parsed = serviceTicketSchema.parse(
-      await client.getServiceTicket(ticketId),
+      await client.getServiceTicketStatus(ticketId),
     );
     emitToolAudit(
       {
