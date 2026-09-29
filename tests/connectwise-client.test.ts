@@ -40,6 +40,11 @@ const projectTicketNoteCollectionFields =
 const ticketAttachmentCollectionFields =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
 const ticketTaskCollectionFields = "id,summary,priority,notes";
+const serviceBoardCollectionFields = "id,name";
+const boardStatusCollectionFields = "id,name";
+const boardTypeCollectionFields = "id,name";
+const servicePriorityCollectionFields = "id,name";
+const serviceSourceCollectionFields = "id,name";
 
 function fragmentedResponse(
   firstChunk: Uint8Array,
@@ -720,6 +725,63 @@ describe("ConnectWiseClient", () => {
       timeEntryReadFields,
     ]);
     expect(new URL(urls[6]!).searchParams.get("pageSize")).toBe("5");
+  });
+
+  it("minimizes documented board and reference collections upstream", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.getServiceBoards();
+    await client.getBoardStatuses(32);
+    await client.getBoardTypes(32);
+    await client.getServicePriorities();
+    await client.getServiceSources();
+    await client.catalogGet("service.boards.statuses", {
+      boardId: 32,
+      pageSize: 5,
+    });
+    await client.catalogGet("service.boards.types", { boardId: 32 });
+
+    expect(urls).toHaveLength(7);
+    expect(Object.fromEntries(new URL(urls[0]!).searchParams)).toEqual({
+      fields: serviceBoardCollectionFields,
+      orderBy: "name asc",
+      pageSize: "50",
+    });
+    expect(Object.fromEntries(new URL(urls[1]!).searchParams)).toEqual({
+      fields: boardStatusCollectionFields,
+      pageSize: "50",
+    });
+    expect(Object.fromEntries(new URL(urls[2]!).searchParams)).toEqual({
+      fields: boardTypeCollectionFields,
+      pageSize: "50",
+    });
+    expect(Object.fromEntries(new URL(urls[3]!).searchParams)).toEqual({
+      fields: servicePriorityCollectionFields,
+      orderBy: "name asc",
+      pageSize: "50",
+    });
+    expect(Object.fromEntries(new URL(urls[4]!).searchParams)).toEqual({
+      fields: serviceSourceCollectionFields,
+      orderBy: "name asc",
+      pageSize: "50",
+    });
+    expect(Object.fromEntries(new URL(urls[5]!).searchParams)).toEqual({
+      fields: boardStatusCollectionFields,
+      pageSize: "5",
+    });
+    expect(Object.fromEntries(new URL(urls[6]!).searchParams)).toEqual({
+      fields: boardTypeCollectionFields,
+      pageSize: "20",
+    });
+    for (const url of urls) {
+      expect(new URL(url).searchParams.getAll("fields")).toHaveLength(1);
+    }
   });
 
   it("refuses time-entry listing without a profile member ID", async () => {

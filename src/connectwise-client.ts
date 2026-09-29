@@ -498,15 +498,28 @@ const PROJECT_TICKET_NOTE_COLLECTION_FIELDS =
 const TICKET_ATTACHMENT_COLLECTION_FIELDS =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
 const TICKET_TASK_COLLECTION_FIELDS = "id,summary,priority,notes";
+const SERVICE_BOARD_COLLECTION_FIELDS = "id,name";
+const BOARD_STATUS_COLLECTION_FIELDS = "id,name";
+const BOARD_TYPE_COLLECTION_FIELDS = "id,name";
+const SERVICE_PRIORITY_COLLECTION_FIELDS = "id,name";
+const SERVICE_SOURCE_COLLECTION_FIELDS = "id,name";
 
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
     path: (p) => `/service/boards/${p.boardId}/statuses`,
+    query: (p) => ({
+      fields: BOARD_STATUS_COLLECTION_FIELDS,
+      pageSize: p.pageSize ?? 20,
+    }),
     required: ["boardId"],
     allowed: ["boardId", "pageSize"],
   },
   "service.boards.types": {
     path: (p) => `/service/boards/${p.boardId}/types`,
+    query: (p) => ({
+      fields: BOARD_TYPE_COLLECTION_FIELDS,
+      pageSize: p.pageSize ?? 20,
+    }),
     required: ["boardId"],
     allowed: ["boardId", "pageSize"],
   },
@@ -1091,7 +1104,11 @@ export function createConnectWiseClient(
     async getServiceBoards(): Promise<unknown> {
       return requestBoundedList(
         "/service/boards",
-        { orderBy: "name asc", pageSize: 50 },
+        {
+          fields: SERVICE_BOARD_COLLECTION_FIELDS,
+          orderBy: "name asc",
+          pageSize: 50,
+        },
         50,
       );
     },
@@ -1100,7 +1117,7 @@ export function createConnectWiseClient(
       positiveId(boardId, "board ID");
       return requestBoundedList(
         `/service/boards/${boardId}/statuses`,
-        { pageSize: 50 },
+        { fields: BOARD_STATUS_COLLECTION_FIELDS, pageSize: 50 },
         50,
       );
     },
@@ -1109,7 +1126,7 @@ export function createConnectWiseClient(
       positiveId(boardId, "board ID");
       return requestBoundedList(
         `/service/boards/${boardId}/types`,
-        { pageSize: 50 },
+        { fields: BOARD_TYPE_COLLECTION_FIELDS, pageSize: 50 },
         50,
       );
     },
@@ -1143,7 +1160,11 @@ export function createConnectWiseClient(
     async getServicePriorities(): Promise<unknown> {
       return requestBoundedList(
         "/service/priorities",
-        { orderBy: "name asc", pageSize: 50 },
+        {
+          fields: SERVICE_PRIORITY_COLLECTION_FIELDS,
+          orderBy: "name asc",
+          pageSize: 50,
+        },
         50,
       );
     },
@@ -1151,7 +1172,11 @@ export function createConnectWiseClient(
     async getServiceSources(): Promise<unknown> {
       return requestBoundedList(
         "/service/sources",
-        { orderBy: "name asc", pageSize: 50 },
+        {
+          fields: SERVICE_SOURCE_COLLECTION_FIELDS,
+          orderBy: "name asc",
+          pageSize: 50,
+        },
         50,
       );
     },
