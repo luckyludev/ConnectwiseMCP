@@ -501,6 +501,7 @@ const TICKET_TASK_COLLECTION_FIELDS = "id,summary,priority,notes";
 const SERVICE_BOARD_COLLECTION_FIELDS = "id,name";
 const BOARD_STATUS_COLLECTION_FIELDS = "id,name";
 const BOARD_TYPE_COLLECTION_FIELDS = "id,name";
+const SERVICE_STATUS_COLLECTION_FIELDS = "id,name";
 const SERVICE_PRIORITY_COLLECTION_FIELDS = "id,name";
 const SERVICE_SOURCE_COLLECTION_FIELDS = "id,name";
 
@@ -1152,7 +1153,11 @@ export function createConnectWiseClient(
     async getServiceStatuses(): Promise<unknown> {
       return requestBoundedList(
         "/service/statuses",
-        { orderBy: "name asc", pageSize: 50 },
+        {
+          fields: SERVICE_STATUS_COLLECTION_FIELDS,
+          orderBy: "name asc",
+          pageSize: 50,
+        },
         50,
       );
     },

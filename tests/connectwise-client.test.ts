@@ -43,6 +43,7 @@ const ticketTaskCollectionFields = "id,summary,priority,notes";
 const serviceBoardCollectionFields = "id,name";
 const boardStatusCollectionFields = "id,name";
 const boardTypeCollectionFields = "id,name";
+const serviceStatusCollectionFields = "id,name";
 const servicePriorityCollectionFields = "id,name";
 const serviceSourceCollectionFields = "id,name";
 
@@ -739,6 +740,7 @@ describe("ConnectWiseClient", () => {
     await client.getServiceBoards();
     await client.getBoardStatuses(32);
     await client.getBoardTypes(32);
+    await client.getServiceStatuses();
     await client.getServicePriorities();
     await client.getServiceSources();
     await client.catalogGet("service.boards.statuses", {
@@ -747,7 +749,7 @@ describe("ConnectWiseClient", () => {
     });
     await client.catalogGet("service.boards.types", { boardId: 32 });
 
-    expect(urls).toHaveLength(7);
+    expect(urls).toHaveLength(8);
     expect(Object.fromEntries(new URL(urls[0]!).searchParams)).toEqual({
       fields: serviceBoardCollectionFields,
       orderBy: "name asc",
@@ -762,20 +764,25 @@ describe("ConnectWiseClient", () => {
       pageSize: "50",
     });
     expect(Object.fromEntries(new URL(urls[3]!).searchParams)).toEqual({
-      fields: servicePriorityCollectionFields,
+      fields: serviceStatusCollectionFields,
       orderBy: "name asc",
       pageSize: "50",
     });
     expect(Object.fromEntries(new URL(urls[4]!).searchParams)).toEqual({
-      fields: serviceSourceCollectionFields,
+      fields: servicePriorityCollectionFields,
       orderBy: "name asc",
       pageSize: "50",
     });
     expect(Object.fromEntries(new URL(urls[5]!).searchParams)).toEqual({
+      fields: serviceSourceCollectionFields,
+      orderBy: "name asc",
+      pageSize: "50",
+    });
+    expect(Object.fromEntries(new URL(urls[6]!).searchParams)).toEqual({
       fields: boardStatusCollectionFields,
       pageSize: "5",
     });
-    expect(Object.fromEntries(new URL(urls[6]!).searchParams)).toEqual({
+    expect(Object.fromEntries(new URL(urls[7]!).searchParams)).toEqual({
       fields: boardTypeCollectionFields,
       pageSize: "20",
     });
