@@ -179,7 +179,7 @@ describe("get_service_ticket", () => {
           createCorrelationId: () => correlationId,
         },
         createClient: (selectedCredentials) => ({
-          async getServiceTicket(ticketId) {
+          async getServiceTicketStatus(ticketId) {
             expect(selectedCredentials.companyId).toBe("acme");
             expect(ticketId).toBe(123);
             return {
@@ -257,7 +257,7 @@ describe("get_service_ticket", () => {
           createCorrelationId: () => correlationId,
         },
         createClient: () => ({
-          async getServiceTicket() {
+          async getServiceTicketStatus() {
             throw new Error("upstream included credential=[REDACTED]");
           },
         }),
@@ -304,7 +304,7 @@ describe("get_service_ticket", () => {
       123,
       {
         createClient: () => ({
-          async getServiceTicket() {
+          async getServiceTicketStatus() {
             return {
               id: 123,
               summary: "x".repeat(1_001),
@@ -342,7 +342,7 @@ describe("get_service_ticket", () => {
       123,
       {
         createClient: () => ({
-          async getServiceTicket() {
+          async getServiceTicketStatus() {
             return {
               id: 123,
               status: { name: "n".repeat(100) },
@@ -374,7 +374,7 @@ describe("get_service_ticket", () => {
       123,
       {
         createClient: () => ({
-          async getServiceTicket() {
+          async getServiceTicketStatus() {
             return {
               id: 123,
               summary: "ok",
@@ -511,7 +511,7 @@ describe("get_service_ticket", () => {
     const createClient = (selectedCredentials: { companyId: string }) => {
       selectedCompanies.push(selectedCredentials.companyId);
       return {
-        async getServiceTicket(ticketId: number) {
+        async getServiceTicketStatus(ticketId: number) {
           return {
             id: ticketId,
             summary: selectedCredentials.companyId,

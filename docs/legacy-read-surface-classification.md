@@ -49,7 +49,7 @@ Ticket-note text and commercial fields are returned only when the mapped Connect
 
 ## V2 bounded additions
 
-`list_schedule_entries` and `get_time_sheets` are bounded V2 additions rather than dedicated active-legacy tools. They use fixed schedule/time routes, 50-item caps, allowlisted projections, and mandatory server-side scoping to the member ID in the mapped profile; callers cannot select a member.
+`get_service_ticket`, `list_schedule_entries`, and `get_time_sheets` are bounded V2 additions rather than dedicated active-legacy tools. The ticket-status lookup uses a fixed ticket-by-ID route with upstream `id,status` selection and an allowlisted two-field output projection. The schedule/time tools use fixed routes, 50-item caps, allowlisted projections, and mandatory server-side scoping to the member ID in the mapped profile; callers cannot select a member.
 
 ## Remaining boundary
 

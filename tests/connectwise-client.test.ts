@@ -81,23 +81,28 @@ function fragmentedResponse(
 }
 
 describe("ConnectWiseClient", () => {
-  it("gets one service ticket with request-scoped authentication", async () => {
+  it("gets one service ticket with minimized fields and request-scoped authentication", async () => {
     let capturedUrl = "";
     let capturedInit: RequestInit | undefined;
     const fetcher: typeof fetch = async (input, init) => {
       capturedUrl = String(input);
       capturedInit = init;
-      return Response.json({ id: 123, summary: "Printer offline" });
+      return Response.json({ id: 123, status: { name: "New" } });
     };
     const client = createConnectWiseClient(credentials, { fetcher });
 
-    await expect(client.getServiceTicket(123)).resolves.toEqual({
+    await expect(client.getServiceTicketStatus(123)).resolves.toEqual({
       id: 123,
-      summary: "Printer offline",
+      status: { name: "New" },
     });
-    expect(capturedUrl).toBe(
+    const url = new URL(capturedUrl);
+    expect(`${url.origin}${url.pathname}`).toBe(
       "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/123",
     );
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      fields: "id,status",
+    });
+    expect(url.searchParams.getAll("fields")).toEqual(["id,status"]);
     expect(capturedInit?.method).toBe("GET");
     // Workers does not implement redirect:"error" (throws synchronously);
     // 3xx responses are refused explicitly by the client instead.
@@ -108,6 +113,29 @@ describe("ConnectWiseClient", () => {
     );
     expect(headers.get("clientId")).toBe("partner-client-id");
     expect(headers.get("Accept")).toBe("application/json");
+  });
+
+  it("preserves the detailed service-ticket request for aggregate views", async () => {
+    let capturedUrl = "";
+    const detailedTicket = {
+      id: 123,
+      summary: "Printer offline",
+      status: { name: "New" },
+      company: { id: 7, name: "Acme" },
+    };
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        capturedUrl = String(input);
+        return Response.json(detailedTicket);
+      },
+    });
+
+    await expect(client.getServiceTicket(123)).resolves.toEqual(detailedTicket);
+    const url = new URL(capturedUrl);
+    expect(`${url.origin}${url.pathname}`).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/123",
+    );
+    expect([...url.searchParams]).toEqual([]);
   });
 
   it("scopes attachment lookup to one ticket and a bounded page", async () => {
