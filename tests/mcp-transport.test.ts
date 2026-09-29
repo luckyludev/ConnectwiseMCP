@@ -458,13 +458,16 @@ describe("authenticated MCP transport", () => {
       upstream: {
         id: 7,
         summary: "Replace switch",
-        priority: { id: 2, name: "High", secret: "drop" },
+        priority: 2,
         status: { id: 3, name: "Open" },
         dueDate: "2026-09-15T12:00:00Z",
         notes: "n".repeat(4_100),
         privateField: "drop",
       },
       expected: '\\"summary\\":\\"Replace switch\\"',
+      additionalExpected: ['\\"priority\\":2'],
+      forbidden: ['\\"status\\"', '\\"dueDate\\"'],
+      expectedIdCount: 2,
       truncated: `\\"notes\\":\\"${"n".repeat(4_000)}\\"`,
     },
     {
@@ -480,6 +483,9 @@ describe("authenticated MCP transport", () => {
         privateField: "drop",
       },
       expected: '\\"actualHours\\":1.5',
+      additionalExpected: [] as string[],
+      forbidden: [] as string[],
+      expectedIdCount: 6,
       truncated: '\\"notes\\":\\"worked\\"',
     },
   ])("returns bounded allowlisted projections from $name", async (testCase) => {
@@ -537,10 +543,16 @@ describe("authenticated MCP transport", () => {
     expect(response.status, body).toBe(200);
     expect(calls).toEqual([{ ticketId: 123, maxResults: 2 }]);
     expect(body).toContain(testCase.expected);
+    for (const expected of testCase.additionalExpected) {
+      expect(body).toContain(expected);
+    }
     expect(body).toContain(testCase.truncated);
+    for (const forbidden of testCase.forbidden) {
+      expect(body).not.toContain(forbidden);
+    }
     expect(body).not.toContain("privateField");
     expect(body).not.toContain("secret");
-    expect(body.match(/\\\"id\\\":/g)).toHaveLength(6);
+    expect(body.match(/\\\"id\\\":/g)).toHaveLength(testCase.expectedIdCount);
   });
 
   it("fails closed when ticket-note visibility flags are missing or contradictory", async () => {

@@ -491,6 +491,13 @@ const SCHEDULE_ENTRY_COLLECTION_FIELDS =
 const TIME_SHEET_COLLECTION_FIELDS =
   "id,member,year,period,dateStart,dateEnd,status,hours,deadline";
 const TIME_SHEET_STATUS_FIELDS = "status";
+const SERVICE_TICKET_NOTE_COLLECTION_FIELDS =
+  "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
+const PROJECT_TICKET_NOTE_COLLECTION_FIELDS =
+  "id,text,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
+const TICKET_ATTACHMENT_COLLECTION_FIELDS =
+  "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
+const TICKET_TASK_COLLECTION_FIELDS = "id,summary,priority,notes";
 
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
@@ -551,6 +558,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     query: (p) => ({
       recordType: p.recordType ?? "Ticket",
       recordId: Number(p.recordId),
+      fields: TICKET_ATTACHMENT_COLLECTION_FIELDS,
       pageSize: p.pageSize ?? 20,
     }),
     required: ["recordId"],
@@ -935,6 +943,7 @@ export function createConnectWiseClient(
         return await requestBoundedList(
           `/service/tickets/${ticketId}/notes`,
           {
+            fields: SERVICE_TICKET_NOTE_COLLECTION_FIELDS,
             pageSize,
             orderBy: "dateCreated asc",
           },
@@ -950,8 +959,9 @@ export function createConnectWiseClient(
         return requestBoundedList(
           `/project/tickets/${ticketId}/notes`,
           {
+            fields: PROJECT_TICKET_NOTE_COLLECTION_FIELDS,
             pageSize,
-            orderBy: "dateCreated asc",
+            orderBy: "id asc",
           },
           pageSize,
         );
@@ -969,6 +979,7 @@ export function createConnectWiseClient(
         {
           recordType: "Ticket",
           recordId: ticketId,
+          fields: TICKET_ATTACHMENT_COLLECTION_FIELDS,
           pageSize,
         },
         pageSize,
@@ -980,7 +991,7 @@ export function createConnectWiseClient(
       boundedPageSize(pageSize);
       return requestBoundedList(
         `/service/tickets/${ticketId}/tasks`,
-        { pageSize },
+        { fields: TICKET_TASK_COLLECTION_FIELDS, pageSize },
         pageSize,
       );
     },

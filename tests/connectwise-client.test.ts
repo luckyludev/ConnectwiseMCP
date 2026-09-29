@@ -33,6 +33,13 @@ const timeSheetCollectionFields =
   "id,member,year,period,dateStart,dateEnd,status,hours,deadline";
 const agreementAdditionSummaryFields = "extPrice,extCost";
 const agreementInvoiceCollectionFields = "id,invoiceNumber,total,date";
+const serviceTicketNoteCollectionFields =
+  "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
+const projectTicketNoteCollectionFields =
+  "id,text,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
+const ticketAttachmentCollectionFields =
+  "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
+const ticketTaskCollectionFields = "id,summary,priority,notes";
 
 function fragmentedResponse(
   firstChunk: Uint8Array,
@@ -118,9 +125,62 @@ describe("ConnectWiseClient", () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({
       recordType: "Ticket",
       recordId: "123",
+      fields: ticketAttachmentCollectionFields,
       pageSize: "50",
     });
+    expect(url.searchParams.getAll("fields")).toEqual([
+      ticketAttachmentCollectionFields,
+    ]);
     expect(capturedInit?.method).toBe("GET");
+  });
+
+  it("minimizes ticket notes and tasks at the upstream boundary", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        if (urls.length === 1) return new Response(null, { status: 404 });
+        return Response.json([]);
+      },
+    });
+
+    await expect(client.getTicketNotes(123, 20)).resolves.toEqual([]);
+    await expect(client.getTicketTasks(123, 20)).resolves.toEqual([]);
+
+    expect(urls).toHaveLength(3);
+    const serviceNotesUrl = new URL(urls[0]!);
+    const projectNotesUrl = new URL(urls[1]!);
+    const tasksUrl = new URL(urls[2]!);
+    expect(
+      serviceNotesUrl.pathname.endsWith("/service/tickets/123/notes"),
+    ).toBe(true);
+    expect(
+      projectNotesUrl.pathname.endsWith("/project/tickets/123/notes"),
+    ).toBe(true);
+    expect(Object.fromEntries(serviceNotesUrl.searchParams)).toEqual({
+      fields: serviceTicketNoteCollectionFields,
+      pageSize: "20",
+      orderBy: "dateCreated asc",
+    });
+    expect(serviceNotesUrl.searchParams.getAll("fields")).toEqual([
+      serviceTicketNoteCollectionFields,
+    ]);
+    expect(Object.fromEntries(projectNotesUrl.searchParams)).toEqual({
+      fields: projectTicketNoteCollectionFields,
+      pageSize: "20",
+      orderBy: "id asc",
+    });
+    expect(projectNotesUrl.searchParams.getAll("fields")).toEqual([
+      projectTicketNoteCollectionFields,
+    ]);
+    expect(tasksUrl.pathname.endsWith("/service/tickets/123/tasks")).toBe(true);
+    expect(Object.fromEntries(tasksUrl.searchParams)).toEqual({
+      fields: ticketTaskCollectionFields,
+      pageSize: "20",
+    });
+    expect(tasksUrl.searchParams.getAll("fields")).toEqual([
+      ticketTaskCollectionFields,
+    ]);
   });
 
   it("minimizes ticket time-entry reads at the upstream boundary", async () => {
@@ -799,6 +859,9 @@ describe("ConnectWiseClient", () => {
     });
     expect(new URL(urls[1]!).searchParams.get("recordType")).toBe("Ticket");
     expect(new URL(urls[1]!).searchParams.get("recordId")).toBe("77");
+    expect(new URL(urls[1]!).searchParams.getAll("fields")).toEqual([
+      ticketAttachmentCollectionFields,
+    ]);
 
     await expect(
       client.catalogGet("finance.invoices.byRaw", { pageSize: 5 }),
