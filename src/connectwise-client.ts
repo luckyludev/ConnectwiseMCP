@@ -907,7 +907,10 @@ export function createConnectWiseClient(
     maxItems: number,
   ): Promise<unknown> {
     const result = await requestJson("GET", path, query);
-    if (Array.isArray(result) && result.length > maxItems) {
+    if (!Array.isArray(result)) {
+      throw new Error("Invalid ConnectWise list response");
+    }
+    if (result.length > maxItems) {
       throw new Error("ConnectWise response exceeded requested page size");
     }
     return result;
