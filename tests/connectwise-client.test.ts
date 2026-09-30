@@ -598,6 +598,30 @@ describe("ConnectWiseClient", () => {
     expect(attempts).toBe(1);
   });
 
+  it("requests only projected fields for an agreement record", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        capturedUrl = String(input);
+        capturedInit = init;
+        return Response.json({ id: 7 });
+      },
+    });
+
+    await client.getAgreement(7);
+
+    const agreementUrl = new URL(capturedUrl);
+    expect(agreementUrl.pathname).toBe(
+      "/v4_6_release/apis/3.0/finance/agreements/7",
+    );
+    expect(capturedInit?.method).toBe("GET");
+    expect(Object.fromEntries(agreementUrl.searchParams)).toEqual({
+      fields: agreementCollectionFields,
+    });
+    expect(agreementUrl.searchParams.getAll("fields")).toHaveLength(1);
+  });
+
   it("requests only projected fields for agreement additions", async () => {
     let capturedUrl = "";
     const client = createConnectWiseClient(credentials, {
