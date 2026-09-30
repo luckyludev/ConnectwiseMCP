@@ -938,17 +938,34 @@ export function createConnectWiseClient(
     return memberId;
   }
 
-  function assertMappedMember(record: unknown, memberId: number): void {
+  function assertMappedMember(
+    record: unknown,
+    memberId: number,
+    referenceField = "member",
+  ): void {
     if (!record || typeof record !== "object") {
       throw new Error("Invalid ConnectWise ownership response");
     }
-    const member = (record as Record<string, unknown>).member;
+    const member = (record as Record<string, unknown>)[referenceField];
     if (!member || typeof member !== "object") {
       throw new Error("ConnectWise record is not assigned to mapped member");
     }
     const recordMemberId = (member as Record<string, unknown>).id;
     if (recordMemberId !== memberId) {
       throw new Error("ConnectWise record is not assigned to mapped member");
+    }
+  }
+
+  function assertMappedMemberList(
+    records: unknown,
+    memberId: number,
+    referenceField = "member",
+  ): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise ownership response");
+    }
+    for (const record of records) {
+      assertMappedMember(record, memberId, referenceField);
     }
   }
 
@@ -1271,13 +1288,8 @@ export function createConnectWiseClient(
 
     async listTimeEntries(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
-      const memberId = credentials.memberId;
-      if (memberId === undefined) {
-        throw new Error(
-          "ConnectWise profile is missing memberId; add it to enable list_time_entries",
-        );
-      }
-      return requestBoundedList(
+      const memberId = mappedMemberId("list_time_entries");
+      const result = await requestBoundedList(
         "/time/entries",
         {
           conditions: `member/id=${memberId}`,
@@ -1287,18 +1299,15 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      assertMappedMemberList(result, memberId);
+      return result;
     },
 
     async listScheduleEntries(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
-      const memberId = credentials.memberId;
-      if (memberId === undefined) {
-        throw new Error(
-          "ConnectWise profile is missing memberId; add it to enable list_schedule_entries",
-        );
-      }
+      const memberId = mappedMemberId("list_schedule_entries");
       // CW rejects orderBy on /schedule/entries; do not imply recency here.
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/schedule/entries",
         {
           conditions: `member/id=${memberId}`,
@@ -1307,17 +1316,14 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      assertMappedMemberList(result, memberId);
+      return result;
     },
 
     async getTimeSheets(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
-      const memberId = credentials.memberId;
-      if (memberId === undefined) {
-        throw new Error(
-          "ConnectWise profile is missing memberId; add it to enable get_time_sheets",
-        );
-      }
-      return requestBoundedList(
+      const memberId = mappedMemberId("get_time_sheets");
+      const result = await requestBoundedList(
         "/time/sheets",
         {
           conditions: `member/id=${memberId}`,
@@ -1327,6 +1333,8 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      assertMappedMemberList(result, memberId);
+      return result;
     },
 
     async downloadDocument(
@@ -1460,12 +1468,7 @@ export function createConnectWiseClient(
       }
       const effectiveParams = { ...params };
       if (MEMBER_SCOPED_CATALOG_ROUTES.has(route as CatalogRouteId)) {
-        const profileMemberId = credentials.memberId;
-        if (profileMemberId === undefined) {
-          throw new Error(
-            `ConnectWise profile is missing memberId; add it to enable ${route}`,
-          );
-        }
+        const profileMemberId = mappedMemberId(route);
         if (
           effectiveParams.memberId !== undefined &&
           effectiveParams.memberId !== profileMemberId
@@ -1523,6 +1526,13 @@ export function createConnectWiseClient(
         boundedPageSize(requestedPageSize);
       }
       const result = await requestBoundedList(path, query, requestedPageSize);
+      if (MEMBER_SCOPED_CATALOG_ROUTES.has(route as CatalogRouteId)) {
+        assertMappedMemberList(
+          result,
+          Number(effectiveParams.memberId),
+          route === "service.tickets.byOwner" ? "owner" : "member",
+        );
+      }
       return definition.transform ? definition.transform(result) : result;
     },
 

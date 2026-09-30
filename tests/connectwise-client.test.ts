@@ -1286,12 +1286,14 @@ describe("ConnectWiseClient", () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         urls.push(String(input));
-        return Response.json([{ id: 2, privateField: "not projected here" }]);
+        return Response.json([
+          { id: 2, member: { id: 149 }, privateField: "not projected here" },
+        ]);
       },
     });
 
     await expect(client.listScheduleEntries(7)).resolves.toEqual([
-      { id: 2, privateField: "not projected here" },
+      { id: 2, member: { id: 149 }, privateField: "not projected here" },
     ]);
     const url = new URL(urls[0]!);
     expect(url.searchParams.get("conditions")).toBe("member/id=149");
@@ -1325,11 +1327,13 @@ describe("ConnectWiseClient", () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         urls.push(String(input));
-        return Response.json([{ id: 21 }]);
+        return Response.json([{ id: 21, member: { id: 149 } }]);
       },
     });
 
-    await expect(client.getTimeSheets(9)).resolves.toEqual([{ id: 21 }]);
+    await expect(client.getTimeSheets(9)).resolves.toEqual([
+      { id: 21, member: { id: 149 } },
+    ]);
     const url = new URL(urls[0]!);
     expect(url.searchParams.get("conditions")).toBe("member/id=149");
     expect(url.searchParams.getAll("fields")).toEqual([
@@ -1363,9 +1367,21 @@ describe("ConnectWiseClient", () => {
       fetcher: async (input) => {
         urls.push(String(input));
         return Response.json([
-          { id: 2, dateStart: "2026-09-02T13:30:00Z" },
-          { id: 1, dateStart: "2026-08-31T18:15:00Z" },
-          { id: 3, dateStart: "2026-09-01T12:30:00Z" },
+          {
+            id: 2,
+            member: { id: 149 },
+            dateStart: "2026-09-02T13:30:00Z",
+          },
+          {
+            id: 1,
+            member: { id: 149 },
+            dateStart: "2026-08-31T18:15:00Z",
+          },
+          {
+            id: 3,
+            member: { id: 149 },
+            dateStart: "2026-09-01T12:30:00Z",
+          },
         ]);
       },
     });
@@ -1377,9 +1393,21 @@ describe("ConnectWiseClient", () => {
     });
     expect(new URL(urls[0]!).searchParams.has("orderBy")).toBe(false);
     expect(result).toEqual([
-      { id: 1, dateStart: "2026-08-31T18:15:00Z" },
-      { id: 3, dateStart: "2026-09-01T12:30:00Z" },
-      { id: 2, dateStart: "2026-09-02T13:30:00Z" },
+      {
+        id: 1,
+        member: { id: 149 },
+        dateStart: "2026-08-31T18:15:00Z",
+      },
+      {
+        id: 3,
+        member: { id: 149 },
+        dateStart: "2026-09-01T12:30:00Z",
+      },
+      {
+        id: 2,
+        member: { id: 149 },
+        dateStart: "2026-09-02T13:30:00Z",
+      },
     ]);
   });
 
@@ -1463,6 +1491,48 @@ describe("ConnectWiseClient", () => {
         includeClosed: "yes",
       }),
     ).rejects.toThrow("includeClosed must be 'true' or 'false'");
+  });
+
+  it("fails closed when member-scoped reads return missing or mismatched ownership", async () => {
+    const exerciseMemberScopedReads = async (
+      client: ReturnType<typeof createConnectWiseClient>,
+    ) => {
+      const reads = [
+        () => client.listTimeEntries(20),
+        () => client.listScheduleEntries(20),
+        () => client.getTimeSheets(20),
+        () => client.catalogGet("service.tickets.byOwner", { pageSize: 20 }),
+        () => client.catalogGet("time.entries.byMember", { pageSize: 20 }),
+        () => client.catalogGet("schedule.entries.byMember", { pageSize: 20 }),
+      ];
+      for (const read of reads) {
+        await expect(read()).rejects.toThrow(
+          "ConnectWise record is not assigned to mapped member",
+        );
+      }
+    };
+
+    for (const returnedMemberId of [undefined, 150]) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input) => {
+          const conditions = new URL(String(input)).searchParams.get(
+            "conditions",
+          );
+          const referenceField = conditions?.startsWith("owner/")
+            ? "owner"
+            : "member";
+          return Response.json([
+            {
+              id: 1,
+              ...(returnedMemberId === undefined
+                ? {}
+                : { [referenceField]: { id: returnedMemberId } }),
+            },
+          ]);
+        },
+      });
+      await exerciseMemberScopedReads(client);
+    }
   });
 
   it("creates a schedule entry with UTC conversion and an explicit conflict flag", async () => {
