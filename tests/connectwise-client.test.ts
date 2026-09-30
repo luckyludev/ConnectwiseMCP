@@ -240,7 +240,10 @@ describe("ConnectWiseClient", () => {
       "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/time/entries",
     );
     expect(url.searchParams.get("conditions")).toBe(
-      "(chargeToType='ServiceTicket' OR chargeToType='ProjectTicket') AND chargeToId=123",
+      "chargeToType='ServiceTicket' AND chargeToId=123",
+    );
+    expect(url.searchParams.get("conditions")).not.toMatch(
+      /ProjectTicket|\bOR\b/,
     );
     expect(url.searchParams.getAll("fields")).toEqual([
       timeEntryCollectionFields,

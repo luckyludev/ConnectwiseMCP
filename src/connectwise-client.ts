@@ -1045,7 +1045,7 @@ export function createConnectWiseClient(
       return requestBoundedList(
         "/time/entries",
         {
-          conditions: `(chargeToType='ServiceTicket' OR chargeToType='ProjectTicket') AND chargeToId=${ticketId}`,
+          conditions: `chargeToType='ServiceTicket' AND chargeToId=${ticketId}`,
           fields: TIME_ENTRY_COLLECTION_FIELDS,
           pageSize,
           orderBy: "dateEntered desc",
