@@ -564,16 +564,18 @@ describe("ConnectWiseClient", () => {
     expect(attempts).toBe(1);
   });
 
-  it("escapes ticket-search conditions and enforces the result bound", async () => {
+  it("escapes ticket-search conditions and enforces targeted bounds", async () => {
     let capturedUrl = "";
+    let fetchCount = 0;
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
+        fetchCount += 1;
         capturedUrl = String(input);
         return Response.json([]);
       },
     });
 
-    await client.searchServiceTickets("Luis's laptop", 12);
+    await client.searchServiceTickets("  Luis's laptop  ", 12);
     const url = new URL(capturedUrl);
     expect(url.pathname).toBe("/v4_6_release/apis/3.0/service/tickets");
     expect(url.searchParams.get("conditions")).toBe(
@@ -582,9 +584,18 @@ describe("ConnectWiseClient", () => {
     expect(url.searchParams.get("fields")).toBe(serviceTicketReadFields);
     expect(url.searchParams.getAll("fields")).toHaveLength(1);
     expect(url.searchParams.get("pageSize")).toBe("12");
-    await expect(client.searchServiceTickets("x", 51)).rejects.toThrow(
-      "Invalid page size",
+    await expect(client.searchServiceTickets("x", 10)).rejects.toThrow(
+      "Invalid ticket search text",
     );
+    for (const searchText of ["\nprinter", "printer\t", "print\u007fer"]) {
+      await expect(client.searchServiceTickets(searchText, 10)).rejects.toThrow(
+        "Invalid ticket search text",
+      );
+    }
+    await expect(client.searchServiceTickets("printer", 21)).rejects.toThrow(
+      "Invalid targeted search page size",
+    );
+    expect(fetchCount).toBe(1);
   });
 
   it("rejects list responses that exceed dedicated and targeted bounds", async () => {
@@ -601,7 +612,7 @@ describe("ConnectWiseClient", () => {
       },
     });
 
-    await expect(client.searchServiceTickets("printer", 50)).rejects.toThrow(
+    await expect(client.searchServiceTickets("printer", 20)).rejects.toThrow(
       "ConnectWise response exceeded requested page size",
     );
     await expect(client.searchMembers("printer", 20)).rejects.toThrow(

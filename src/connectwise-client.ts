@@ -737,6 +737,17 @@ function conditionString(value: string): string {
   return value.replaceAll("'", "''");
 }
 
+function ticketSearchString(value: string): string {
+  if (/[\u0000-\u001F\u007F]/.test(value)) {
+    throw new Error("Invalid ticket search text");
+  }
+  const normalized = value.trim();
+  if (normalized.length < 2 || normalized.length > 100) {
+    throw new Error("Invalid ticket search text");
+  }
+  return conditionString(normalized);
+}
+
 function targetedSearchString(value: string): string {
   const normalized = value.trim();
   if (
@@ -1519,8 +1530,8 @@ export function createConnectWiseClient(
       searchText: string,
       pageSize: number,
     ): Promise<unknown> {
-      boundedPageSize(pageSize);
-      const escaped = conditionString(searchText);
+      targetedSearchPageSize(pageSize);
+      const escaped = ticketSearchString(searchText);
       return requestBoundedList(
         "/service/tickets",
         {

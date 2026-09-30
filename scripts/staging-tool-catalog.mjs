@@ -9,7 +9,7 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   upload_connectwise_image:
     "9eb19e791cbb14b0d694934c576a5fba44b27d45fb85177dbcb734d5bcd6f8cb",
   search_tickets_by_content:
-    "d737f858b358706c0cd277f4f3ad123d3dcc4e215c3b4e0f0cdbb34fe23eb493",
+    "9892c1279f8fda87ad69ba8d1b87a53d44b271d4e18f668919124f5536443591",
   get_ticket_notes_with_content:
     "bd4860b1bba092191983eb40420fdb65550f22ee13b3a014c575807469d270bd",
   get_ticket_attachments_with_details:
