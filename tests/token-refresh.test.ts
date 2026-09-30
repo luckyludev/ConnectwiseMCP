@@ -6,6 +6,25 @@ import {
   type WorkerEnv,
 } from "../src/auth-handler";
 
+function authorizationCodeEnv(
+  identityProfileMap = JSON.stringify({ "tenant-a:user-1": "LUIS" }),
+  revokeGrant?: (...args: unknown[]) => Promise<void>,
+): WorkerEnv {
+  const env = {
+    ENTRA_TENANT_ID: "tenant-a",
+    IDENTITY_PROFILE_MAP: identityProfileMap,
+    ALLOWED_GROUP_IDS: JSON.stringify(["group-mcp-users"]),
+    ALLOWED_APP_ROLES: "[]",
+    ...(revokeGrant ? { OAUTH_PROVIDER: { revokeGrant } } : {}),
+  };
+  Object.defineProperty(env, "ENTRA_CLIENT_SECRET", {
+    get() {
+      throw new Error("authorization-code exchange accessed Entra secret");
+    },
+  });
+  return env as unknown as WorkerEnv;
+}
+
 describe("Entra token refresh reauthorization", () => {
   it.each([
     { scope: ["mcp:read"], requestedScope: [] },
@@ -55,7 +74,7 @@ describe("Entra token refresh reauthorization", () => {
       upstreamExpiresIn: 3600,
     };
 
-    const result = await createTokenExchangeCallback({} as WorkerEnv)({
+    const result = await createTokenExchangeCallback(authorizationCodeEnv())({
       grantType: "authorization_code" as never,
       clientId: "mcp-client",
       subjectClientId: "mcp-client",
@@ -76,6 +95,82 @@ describe("Entra token refresh reauthorization", () => {
       roles: [],
       scopes: ["mcp:read"],
     });
+  });
+
+  it.each([
+    ["removes", "{}"],
+    [
+      "remaps",
+      JSON.stringify({
+        "tenant-a:user-1": "ALICE",
+        "tenant-a:user-2": "LUIS",
+      }),
+    ],
+  ])(
+    "rejects and revokes an authorization code when policy %s the identity mapping",
+    async (_action, identityProfileMap) => {
+      let revokedWith: unknown[] | undefined;
+      const callback = createTokenExchangeCallback(
+        authorizationCodeEnv(identityProfileMap, async (...args) => {
+          revokedWith = args;
+        }),
+      );
+
+      await expect(
+        callback({
+          grantType: "authorization_code" as never,
+          clientId: "mcp-client",
+          subjectClientId: "mcp-client",
+          resource: "https://mcp.example.com/mcp",
+          userId: "tenant-a:user-1",
+          grantId: "grant-1",
+          scope: ["mcp:read"],
+          requestedScope: ["mcp:read"],
+          props: {
+            tenantId: "tenant-a",
+            objectId: "user-1",
+            profileAlias: "LUIS",
+            groups: ["group-mcp-users"],
+            roles: [],
+            upstreamRefreshToken: "current-refresh-token",
+            upstreamExpiresIn: 3600,
+          },
+        }),
+      ).rejects.toThrow();
+      expect(revokedWith).toEqual(["grant-1", "tenant-a:user-1"]);
+    },
+  );
+
+  it("fails closed without revoking when authorization-code policy configuration is invalid", async () => {
+    let revoked = false;
+    const callback = createTokenExchangeCallback(
+      authorizationCodeEnv("not-json", async () => {
+        revoked = true;
+      }),
+    );
+
+    await expect(
+      callback({
+        grantType: "authorization_code" as never,
+        clientId: "mcp-client",
+        subjectClientId: "mcp-client",
+        resource: "https://mcp.example.com/mcp",
+        userId: "tenant-a:user-1",
+        grantId: "grant-1",
+        scope: ["mcp:read"],
+        requestedScope: ["mcp:read"],
+        props: {
+          tenantId: "tenant-a",
+          objectId: "user-1",
+          profileAlias: "LUIS",
+          groups: ["removed-group"],
+          roles: [],
+          upstreamRefreshToken: "current-refresh-token",
+          upstreamExpiresIn: 3600,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_configuration" });
+    expect(revoked).toBe(false);
   });
 
   it("rotates the upstream refresh token and rechecks the immutable profile", async () => {

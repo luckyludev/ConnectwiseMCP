@@ -179,6 +179,10 @@ export function resolveCredentialProfile(
 
   const allowedGroups = parseStringSet(config.allowedGroupIds);
   const allowedRoles = parseStringSet(config.allowedAppRoles);
+  const profileMap = parseIdentityProfileMap(
+    config.identityProfileMap,
+    config.tenantId,
+  );
   if (allowedGroups.size === 0 && allowedRoles.size === 0) {
     throw new AuthorizationPolicyError("invalid_configuration");
   }
@@ -196,10 +200,6 @@ export function resolveCredentialProfile(
     throw new AuthorizationPolicyError("not_authorized");
   }
 
-  const profileMap = parseIdentityProfileMap(
-    config.identityProfileMap,
-    config.tenantId,
-  );
   const profileAlias = profileMap[`${tenantId}:${objectId}`];
 
   if (!profileAlias) {

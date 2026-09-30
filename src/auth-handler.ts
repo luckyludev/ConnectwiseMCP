@@ -459,6 +459,30 @@ function isTerminalGrantFailure(error: unknown): boolean {
   );
 }
 
+function reauthorizeGrantProfile(props: EntraGrantProps, env: WorkerEnv): void {
+  const profile = resolveCredentialProfile(
+    {
+      tid: props.tenantId,
+      oid: props.objectId,
+      groups: props.groups,
+      roles: props.roles,
+    },
+    {
+      tenantId: env.ENTRA_TENANT_ID,
+      identityProfileMap: env.IDENTITY_PROFILE_MAP,
+      allowedGroupIds: env.ALLOWED_GROUP_IDS,
+      allowedAppRoles: env.ALLOWED_APP_ROLES,
+    },
+  );
+  if (
+    profile.tenantId !== props.tenantId ||
+    profile.objectId !== props.objectId ||
+    profile.profileAlias !== props.profileAlias
+  ) {
+    throw new Error("identity_or_profile_changed");
+  }
+}
+
 async function completeEntraCallback(
   request: Request,
   env: WorkerEnv,
@@ -621,12 +645,23 @@ export function createTokenExchangeCallback(
     }
     const props = options.props as EntraGrantProps;
     if (options.grantType === "authorization_code") {
-      return {
-        accessTokenTTL: Math.min(props.upstreamExpiresIn, 3600),
-        refreshTokenTTL: 2_592_000,
-        newProps: props,
-        accessTokenProps: accessTokenProps(props, options.requestedScope),
-      };
+      try {
+        reauthorizeGrantProfile(props, env);
+        return {
+          accessTokenTTL: Math.min(props.upstreamExpiresIn, 3600),
+          refreshTokenTTL: 2_592_000,
+          newProps: props,
+          accessTokenProps: accessTokenProps(props, options.requestedScope),
+        };
+      } catch (error) {
+        if (isTerminalGrantFailure(error)) {
+          await env.OAUTH_PROVIDER?.revokeGrant(
+            options.grantId,
+            options.userId,
+          );
+        }
+        throw error;
+      }
     }
     if (options.grantType !== "refresh_token") return;
 
