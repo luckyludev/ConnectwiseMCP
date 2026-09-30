@@ -624,28 +624,48 @@ describe("ConnectWiseClient", () => {
     await expect(client.getServiceBoards()).rejects.toThrow(
       "ConnectWise response exceeded requested page size",
     );
+
+    const malformedOversized = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          null,
+          ...Array.from({ length: 20 }, (_, index) => ({ id: index + 1 })),
+        ]),
+    });
+    await expect(
+      malformedOversized.searchServiceTickets("printer", 20),
+    ).rejects.toThrow("ConnectWise response exceeded requested page size");
   });
 
   it("rejects malformed dedicated, targeted, and catalog list responses", async () => {
-    const client = createConnectWiseClient(credentials, {
-      fetcher: async () => Response.json({ value: [] }),
-    });
+    const malformedResponses: unknown[] = [
+      { value: [] },
+      [null],
+      ["unexpected"],
+      [[]],
+    ];
 
-    await expect(client.searchServiceTickets("printer", 10)).rejects.toThrow(
-      "Invalid ConnectWise list response",
-    );
-    await expect(client.searchMembers("printer", 10)).rejects.toThrow(
-      "Invalid ConnectWise list response",
-    );
-    await expect(client.getServiceBoards()).rejects.toThrow(
-      "Invalid ConnectWise list response",
-    );
-    await expect(
-      client.catalogGet("finance.agreements.byName", {
-        name: "Managed",
-        pageSize: 10,
-      }),
-    ).rejects.toThrow("Invalid ConnectWise list response");
+    for (const malformedResponse of malformedResponses) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(malformedResponse),
+      });
+
+      await expect(client.searchServiceTickets("printer", 10)).rejects.toThrow(
+        "Invalid ConnectWise list response",
+      );
+      await expect(client.searchMembers("printer", 10)).rejects.toThrow(
+        "Invalid ConnectWise list response",
+      );
+      await expect(client.getServiceBoards()).rejects.toThrow(
+        "Invalid ConnectWise list response",
+      );
+      await expect(
+        client.catalogGet("finance.agreements.byName", {
+          name: "Managed",
+          pageSize: 10,
+        }),
+      ).rejects.toThrow("Invalid ConnectWise list response");
+    }
   });
 
   it("does not retry a ticket-note write after an ambiguous fetch failure", async () => {

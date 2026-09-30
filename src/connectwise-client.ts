@@ -924,6 +924,14 @@ export function createConnectWiseClient(
     if (result.length > maxItems) {
       throw new Error("ConnectWise response exceeded requested page size");
     }
+    if (
+      result.some(
+        (item) =>
+          item === null || typeof item !== "object" || Array.isArray(item),
+      )
+    ) {
+      throw new Error("Invalid ConnectWise list response");
+    }
     return result;
   }
 
