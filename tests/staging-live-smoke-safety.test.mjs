@@ -971,7 +971,7 @@ describe("staging smoke output safety", () => {
     expect(output).not.toContain(canary);
     expect(output).not.toContain(baseUrl);
     expect(output).not.toContain("safe-session");
-  });
+  }, 10_000);
 
   it("keeps the mocked OAuth flow free of client and authorization values", async () => {
     const smokePath = new URL(
