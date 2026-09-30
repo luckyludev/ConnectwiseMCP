@@ -168,8 +168,17 @@ jobs:
           printf '%s  %s\n' "$archive_sha256" "$archive" > "$checksum"
           printf '{"schemaVersion":1,"releaseCommit":"%s","workflowRunId":"%s","imageRepository":"connectwise-legacy-rollback-ci","imageId":"%s","archive":"%s","archiveSha256":"%s"}\n' \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" > "$manifest"
+      - name: Verify packaged rollback artifact bindings and checksum
+        run: >-
+          python deploy/http-gateway/tests/verify_rollback_artifact.py
+          . "$GITHUB_SHA" "$GITHUB_RUN_ID"
+      - name: Reload the verified rollback image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_id=$(python -c 'import json; print(json.load(open("connectwise-legacy-rollback-image.json", encoding="utf-8"))["imageId"])')
           docker image rm connectwise-legacy-rollback-ci
-          gzip -dc "$archive" | docker load
+          gzip -dc connectwise-legacy-rollback-image.tar.gz | docker load
           test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)" = "$image_id"
       - name: Smoke-test packaged rollback image startup and auth boundary
         run: bash deploy/http-gateway/tests/smoke_rollback_image.sh
