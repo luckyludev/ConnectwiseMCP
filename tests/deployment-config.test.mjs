@@ -49,9 +49,10 @@ describe("dependency maintenance configuration", () => {
     expect(source.match(/interval: "weekly"/gu)).toHaveLength(5);
     expect(source.match(/timezone: "America\/New_York"/gu)).toHaveLength(5);
     expect(source).not.toContain('package-ecosystem: "pip"');
-    for (const workflow of [v2Workflow, legacyWorkflow]) {
-      expect(workflow.match(/- "\.github\/dependabot\.yml"/gu)).toHaveLength(2);
-    }
+    expect(v2Workflow.match(/- "\.github\/dependabot\.yml"/gu)).toHaveLength(2);
+    expect(
+      legacyWorkflow.match(/- "\.github\/dependabot\.yml"/gu),
+    ).toHaveLength(1);
   });
 
   it("installs legacy CI tooling only from a reproducible hash lock", async () => {
@@ -123,11 +124,19 @@ describe("legacy rollback deployment surface", () => {
       "http-gateway/Dockerfile",
       "http-gateway/docker-compose.yml",
     ]);
-    expect(legacyWorkflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(2);
+    expect(legacyWorkflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(1);
     expect(v2Workflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(2);
     expect(
       v2Workflow.match(/- "\.github\/workflows\/legacy-oauth-ci\.yml"/gu),
     ).toHaveLength(2);
+
+    const legacyPushTrigger = legacyWorkflow.match(
+      /^  push:\n(?<body>(?:    [^\n]*\n)*)/mu,
+    );
+    expect(legacyPushTrigger?.groups?.body).toBe("    branches: [main]\n");
+    expect(legacyWorkflow).toContain(
+      "group: legacy-oauth-ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}",
+    );
   });
 
   it("keeps local legacy credential artifacts out of version control", () => {
