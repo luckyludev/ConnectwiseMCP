@@ -612,6 +612,28 @@ describe("ConnectWiseClient", () => {
     );
   });
 
+  it("rejects malformed dedicated, targeted, and catalog list responses", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json({ value: [] }),
+    });
+
+    await expect(client.searchServiceTickets("printer", 10)).rejects.toThrow(
+      "Invalid ConnectWise list response",
+    );
+    await expect(client.searchMembers("printer", 10)).rejects.toThrow(
+      "Invalid ConnectWise list response",
+    );
+    await expect(client.getServiceBoards()).rejects.toThrow(
+      "Invalid ConnectWise list response",
+    );
+    await expect(
+      client.catalogGet("finance.agreements.byName", {
+        name: "Managed",
+        pageSize: 10,
+      }),
+    ).rejects.toThrow("Invalid ConnectWise list response");
+  });
+
   it("does not retry a ticket-note write after an ambiguous fetch failure", async () => {
     let attempts = 0;
     const client = createConnectWiseClient(credentials, {
