@@ -363,6 +363,7 @@ async function runBusinessTool(
 
 const positiveId = z.number().int().positive();
 const pageSize = z.number().int().min(1).max(50).default(20);
+const ticketSearchPageSize = z.number().int().min(1).max(20).default(20);
 const targetedSearchPageSize = z.number().int().min(1).max(20).default(10);
 const safeSearchText = z
   .string()
@@ -370,6 +371,7 @@ const safeSearchText = z
   .trim()
   .min(1)
   .max(100);
+const ticketSearchText = safeSearchText.min(2);
 const targetedSearchText = safeSearchText
   .min(2)
   .regex(/^[^%_]+$/, "Wildcard characters are not allowed");
@@ -723,8 +725,8 @@ export function registerConnectWiseBusinessTools(
       description:
         "Search recent service-ticket summaries. Results and access are limited by the authenticated user's ConnectWise API member.",
       inputSchema: {
-        searchText: safeSearchText,
-        maxResults: pageSize,
+        searchText: ticketSearchText,
+        maxResults: ticketSearchPageSize,
       },
       annotations: readAnnotations,
     },

@@ -353,6 +353,14 @@ describe("authenticated MCP transport", () => {
       arguments: { searchText: "printer\n", maxResults: 5 },
     },
     {
+      name: "search_tickets_by_content",
+      arguments: { searchText: "x", maxResults: 5 },
+    },
+    {
+      name: "search_tickets_by_content",
+      arguments: { searchText: "printer", maxResults: 21 },
+    },
+    {
       name: "search_members",
       arguments: { query: "\tprinter", maxResults: 5 },
     },
@@ -389,7 +397,7 @@ describe("authenticated MCP transport", () => {
       },
     },
   ])(
-    "rejects control characters for $name before resolving ConnectWise secrets",
+    "rejects unsafe search inputs for $name before resolving ConnectWise secrets",
     async ({ name, arguments: toolArguments }) => {
       const auditMessages: string[] = [];
       const bindingReads: string[] = [];
