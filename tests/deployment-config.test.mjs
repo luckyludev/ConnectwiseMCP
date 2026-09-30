@@ -308,7 +308,10 @@ describe("staging deployment configuration", () => {
       "wrangler deploy --env staging --keep-vars --strict --dry-run --outdir dist",
     );
     expect(packageJson.scripts?.["deploy:staging"]).toBe(
-      "node scripts/verify-staging-release.mjs && npm ci && npm run check && node scripts/verify-staging-release.mjs && wrangler deploy --env staging --keep-vars --strict",
+      "node scripts/verify-staging-release.mjs && npm ci && npm run check && node scripts/verify-staging-release.mjs && wrangler deploy dist/index.js --no-bundle --env staging --keep-vars --strict",
+    );
+    expect(packageJson.scripts?.["deploy:staging"]).toContain(
+      "npm run check && node scripts/verify-staging-release.mjs && wrangler deploy dist/index.js --no-bundle",
     );
 
     expect(stagingOAuthBindings).toHaveLength(1);
