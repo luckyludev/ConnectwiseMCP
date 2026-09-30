@@ -2367,10 +2367,14 @@ describe("authenticated MCP transport", () => {
               async getMyMember() {
                 return {
                   id: 149,
+                  name: "lrivera",
                   firstName: "Luis",
                   lastName: "Rivera",
                   email: "luis@funcshun.com",
+                  phone: "+1 555 0100",
                   status: { id: 1, name: "Active" },
+                  securityRole: { id: 99, name: "Administrator" },
+                  apiKey: "must-not-leak",
                 };
               },
             });
@@ -2404,6 +2408,16 @@ describe("authenticated MCP transport", () => {
     expect(received).toEqual({ companyId: "company-luis" });
     const body = await response.text();
     expect(body).toContain('\\"id\\":149');
+    expect(body).toContain('\\"name\\":\\"lrivera\\"');
+    expect(body).toContain('\\"firstName\\":\\"Luis\\"');
+    expect(body).toContain('\\"lastName\\":\\"Rivera\\"');
+    expect(body).toContain('\\"email\\":\\"luis@funcshun.com\\"');
+    expect(body).toContain('\\"phone\\":\\"+1 555 0100\\"');
+    expect(body).toContain('\\"status\\":{\\"id\\":1,\\"name\\":\\"Active\\"}');
+    expect(body).not.toContain("securityRole");
+    expect(body).not.toContain("Administrator");
+    expect(body).not.toContain("apiKey");
+    expect(body).not.toContain("must-not-leak");
   });
 
   // Phase 2 write tools must be exercised through the MCP tool interface with
