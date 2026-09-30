@@ -471,8 +471,8 @@ const TARGETED_SEARCH_CATALOG_ROUTES = new Set<CatalogRouteId>([
 
 const SERVICE_TICKET_LOOKUP_FIELDS = "id,status";
 // `_info` preserves the created/updated metadata exposed by the ticket projector.
-const SERVICE_TICKET_COLLECTION_FIELDS =
-  "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
+const SERVICE_TICKET_READ_FIELDS =
+  "id,summary,company,board,status,priority,type,owner,contact,closedFlag,closedDate,dateResolved,_info";
 const MEMBER_DETAIL_FIELDS = "id,name,firstName,lastName,email,phone,status";
 const MEMBER_SEARCH_FIELDS = "id,name,status";
 const COMPANY_SEARCH_FIELDS = "id,name,phoneNumber,addressLine1,status";
@@ -531,7 +531,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     path: () => "/service/tickets",
     query: (p) => ({
       conditions: `status/id=${p.statusId}`,
-      fields: SERVICE_TICKET_COLLECTION_FIELDS,
+      fields: SERVICE_TICKET_READ_FIELDS,
       pageSize: p.pageSize ?? 20,
     }),
     required: ["statusId"],
@@ -553,7 +553,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
           `owner/id=${p.memberId}`,
           ...(p.includeClosed === "true" ? [] : ["closedFlag=false"]),
         ].join(" and "),
-        fields: SERVICE_TICKET_COLLECTION_FIELDS,
+        fields: SERVICE_TICKET_READ_FIELDS,
         pageSize: p.pageSize ?? 20,
       };
     },
@@ -950,7 +950,9 @@ export function createConnectWiseClient(
   return {
     async getServiceTicket(ticketId: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
-      return requestJson("GET", `/service/tickets/${ticketId}`);
+      return requestJson("GET", `/service/tickets/${ticketId}`, {
+        fields: SERVICE_TICKET_READ_FIELDS,
+      });
     },
 
     async getServiceTicketStatus(ticketId: number): Promise<unknown> {
@@ -1152,7 +1154,7 @@ export function createConnectWiseClient(
         "/service/tickets",
         {
           conditions: `board/id=${boardId}`,
-          fields: SERVICE_TICKET_COLLECTION_FIELDS,
+          fields: SERVICE_TICKET_READ_FIELDS,
           orderBy: "dateEntered desc",
           pageSize,
         },
@@ -1520,7 +1522,7 @@ export function createConnectWiseClient(
         "/service/tickets",
         {
           conditions: `summary contains '${escaped}'`,
-          fields: SERVICE_TICKET_COLLECTION_FIELDS,
+          fields: SERVICE_TICKET_READ_FIELDS,
           pageSize,
           orderBy: "dateEntered desc",
         },
