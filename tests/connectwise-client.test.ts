@@ -46,6 +46,7 @@ const boardTypeCollectionFields = "id,name";
 const serviceStatusCollectionFields = "id,name";
 const servicePriorityCollectionFields = "id,name";
 const serviceSourceCollectionFields = "id,name";
+const memberDetailFields = "id,name,firstName,lastName,email,phone,status";
 
 function fragmentedResponse(
   firstChunk: Uint8Array,
@@ -505,6 +506,35 @@ describe("ConnectWiseClient", () => {
 
     await expect(client.getMyMember()).rejects.toThrow(/missing memberId/);
     expect(requests).toBe(0);
+  });
+
+  it("gets only the authenticated member fields exposed by the tool", async () => {
+    let capturedUrl = "";
+    const member = {
+      id: 149,
+      name: "lrivera",
+      firstName: "Luis",
+      lastName: "Rivera",
+      email: "luis@example.com",
+      phone: "+1 555 0100",
+      status: { id: 1, name: "Active" },
+    };
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        capturedUrl = String(input);
+        return Response.json(member);
+      },
+    });
+
+    await expect(client.getMyMember()).resolves.toEqual(member);
+    const url = new URL(capturedUrl);
+    expect(`${url.origin}${url.pathname}`).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/system/members/149",
+    );
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      fields: memberDetailFields,
+    });
+    expect(url.searchParams.getAll("fields")).toEqual([memberDetailFields]);
   });
 
   it("uses a Workers-supported redirect mode and refuses 3xx responses", async () => {

@@ -473,6 +473,7 @@ const SERVICE_TICKET_LOOKUP_FIELDS = "id,status";
 // `_info` preserves the created/updated metadata exposed by the ticket projector.
 const SERVICE_TICKET_COLLECTION_FIELDS =
   "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
+const MEMBER_DETAIL_FIELDS = "id,name,firstName,lastName,email,phone,status";
 const MEMBER_SEARCH_FIELDS = "id,name,status";
 const COMPANY_SEARCH_FIELDS = "id,name,phoneNumber,addressLine1,status";
 const CONTACT_SEARCH_FIELDS =
@@ -1202,7 +1203,9 @@ export function createConnectWiseClient(
           "ConnectWise profile is missing memberId; add it to enable get_my_member",
         );
       }
-      return requestJson("GET", `/system/members/${memberId}`);
+      return requestJson("GET", `/system/members/${memberId}`, {
+        fields: MEMBER_DETAIL_FIELDS,
+      });
     },
 
     async searchMembers(query: string, pageSize: number): Promise<unknown> {
