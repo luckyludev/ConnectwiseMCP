@@ -187,6 +187,12 @@ describe("legacy rollback image security", () => {
     const packageOffset = workflow.indexOf(
       "- name: Package the verified rollback image",
     );
+    const verifyArtifactOffset = workflow.indexOf(
+      "- name: Verify packaged rollback artifact bindings and checksum",
+    );
+    const reloadOffset = workflow.indexOf(
+      "- name: Reload the verified rollback image",
+    );
     const smokeOffset = workflow.indexOf(
       "- name: Smoke-test packaged rollback image startup and auth boundary",
     );
@@ -198,7 +204,9 @@ describe("legacy rollback image security", () => {
     expect(scanOffset).toBeGreaterThan(buildOffset);
     expect(contentValidationOffset).toBeGreaterThan(scanOffset);
     expect(packageOffset).toBeGreaterThan(contentValidationOffset);
-    expect(smokeOffset).toBeGreaterThan(packageOffset);
+    expect(verifyArtifactOffset).toBeGreaterThan(packageOffset);
+    expect(reloadOffset).toBeGreaterThan(verifyArtifactOffset);
+    expect(smokeOffset).toBeGreaterThan(reloadOffset);
     expect(retainOffset).toBeGreaterThan(smokeOffset);
     expect(workflow).toContain(
       "uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
@@ -233,9 +241,15 @@ describe("legacy rollback image security", () => {
       expect(workflow).toContain(manifestBinding);
     }
     expect(workflow).toContain(
+      "python deploy/http-gateway/tests/verify_rollback_artifact.py",
+    );
+    expect(workflow).toContain('. "$GITHUB_SHA" "$GITHUB_RUN_ID"');
+    expect(workflow).toContain(
       "docker image rm connectwise-legacy-rollback-ci",
     );
-    expect(workflow).toContain('gzip -dc "$archive" | docker load');
+    expect(workflow).toContain(
+      "gzip -dc connectwise-legacy-rollback-image.tar.gz | docker load",
+    );
     expect(workflow).toContain(
       'test "$(docker image inspect --format \'{{.Id}}\' connectwise-legacy-rollback-ci)" = "$image_id"',
     );
@@ -357,7 +371,7 @@ describe("staging deployment configuration", () => {
       "A failed or late rehearsal blocks cutover",
       "non-production rehearsal",
       "legacy-rollback-image-<release-commit>",
-      "sha256sum --check connectwise-legacy-rollback-image.sha256",
+      "python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py",
       "docker compose up -d --no-build --pull never",
       "docker compose stop cloudflared || exit 1",
       "The image-ID comparison must pass before starting the tunnel or routing any client",

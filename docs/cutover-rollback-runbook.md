@@ -45,10 +45,11 @@ gh run download <SUCCESSFUL_MAIN_RUN_ID> \
   --name legacy-rollback-image-<FULL_RELEASE_COMMIT> \
   --dir rollback-image-<FULL_RELEASE_COMMIT>
 cd rollback-image-<FULL_RELEASE_COMMIT>
-sha256sum --check connectwise-legacy-rollback-image.sha256
+python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py \
+  . <FULL_RELEASE_COMMIT> <SUCCESSFUL_MAIN_RUN_ID>
 ```
 
-Inspect `connectwise-legacy-rollback-image.json` without editing it. Confirm `schemaVersion` is `1`, `releaseCommit` and the selected run's `headSha` both equal the approved full commit, `workflowRunId` equals the selected successful run ID, `imageRepository` is `connectwise-legacy-rollback-ci`, and the archive name and SHA-256 equal the downloaded file and checksum. Stop on any mismatch.
+The verifier fails closed unless the manifest has the exact schema and expected release/run bindings, the three fixed artifact filenames are regular non-symlink files, the image repository and image ID are valid, the checksum file has the exact expected syntax, and the downloaded archive matches its SHA-256. Do not edit or rename artifact files to make verification pass.
 
 Load and verify the tested image before rehearsal and preflight:
 
