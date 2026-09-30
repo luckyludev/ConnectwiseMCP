@@ -848,10 +848,17 @@ describe("staging smoke output safety", () => {
         ]),
       ),
     );
-    const profileMismatch = await runSmoke("PROFILE_MISMATCH_CANARY");
-    const ticketProjection = await runSmoke("TICKET_PROJECTION_CANARY");
-    const ticketExtraContent = await runSmoke("TICKET_EXTRA_CONTENT_CANARY");
-    const ticketStructuredContent = await runSmoke("TICKET_STRUCTURED_CANARY");
+    const [
+      profileMismatch,
+      ticketProjection,
+      ticketExtraContent,
+      ticketStructuredContent,
+    ] = await Promise.all([
+      runSmoke("PROFILE_MISMATCH_CANARY"),
+      runSmoke("TICKET_PROJECTION_CANARY"),
+      runSmoke("TICKET_EXTRA_CONTENT_CANARY"),
+      runSmoke("TICKET_STRUCTURED_CANARY"),
+    ]);
     await new Promise((resolve) => mock.close(resolve));
 
     for (const rejected of [
