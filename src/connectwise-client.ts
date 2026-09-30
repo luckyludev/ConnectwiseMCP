@@ -1527,7 +1527,9 @@ export function createConnectWiseClient(
 
     async getAgreement(agreementId: number): Promise<unknown> {
       positiveId(agreementId, "agreement ID");
-      return requestJson("GET", `/finance/agreements/${agreementId}`);
+      return requestJson("GET", `/finance/agreements/${agreementId}`, {
+        fields: AGREEMENT_COLLECTION_FIELDS,
+      });
     },
 
     async getAgreementAdditions(
