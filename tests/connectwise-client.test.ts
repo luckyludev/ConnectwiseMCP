@@ -16,8 +16,8 @@ const credentials: ConnectWiseCredentials = {
   memberId: 149,
 };
 
-const serviceTicketCollectionFields =
-  "id,summary,recordType,status,board,priority,severity,impact,owner,contact,site,company,closedFlag,closedBy,closedDate,dateResolved,type,source,slaStatus,_info";
+const serviceTicketReadFields =
+  "id,summary,company,board,status,priority,type,owner,contact,closedFlag,closedDate,dateResolved,_info";
 const configurationCollectionFields =
   "id,name,type,status,company,site,contact";
 const agreementCollectionFields =
@@ -116,7 +116,7 @@ describe("ConnectWiseClient", () => {
     expect(headers.get("Accept")).toBe("application/json");
   });
 
-  it("preserves the detailed service-ticket request for aggregate views", async () => {
+  it("minimizes the detailed service-ticket request for aggregate views", async () => {
     let capturedUrl = "";
     const detailedTicket = {
       id: 123,
@@ -136,7 +136,12 @@ describe("ConnectWiseClient", () => {
     expect(`${url.origin}${url.pathname}`).toBe(
       "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/123",
     );
-    expect([...url.searchParams]).toEqual([]);
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      fields: serviceTicketReadFields,
+    });
+    expect(url.searchParams.getAll("fields")).toEqual([
+      serviceTicketReadFields,
+    ]);
   });
 
   it("scopes attachment lookup to one ticket and a bounded page", async () => {
@@ -574,7 +579,7 @@ describe("ConnectWiseClient", () => {
     expect(url.searchParams.get("conditions")).toBe(
       "summary contains 'Luis''s laptop'",
     );
-    expect(url.searchParams.get("fields")).toBe(serviceTicketCollectionFields);
+    expect(url.searchParams.get("fields")).toBe(serviceTicketReadFields);
     expect(url.searchParams.getAll("fields")).toHaveLength(1);
     expect(url.searchParams.get("pageSize")).toBe("12");
     await expect(client.searchServiceTickets("x", 51)).rejects.toThrow(
@@ -784,7 +789,7 @@ describe("ConnectWiseClient", () => {
       "board/id=32",
     );
     expect(new URL(urls[3]!).searchParams.get("fields")).toBe(
-      serviceTicketCollectionFields,
+      serviceTicketReadFields,
     );
 
     await client.getServiceStatuses();
@@ -1000,7 +1005,7 @@ describe("ConnectWiseClient", () => {
       "status/id=547",
     );
     expect(new URL(urls[0]!).searchParams.get("fields")).toBe(
-      serviceTicketCollectionFields,
+      serviceTicketReadFields,
     );
 
     await client.catalogGet("system.documents", {
@@ -1110,7 +1115,7 @@ describe("ConnectWiseClient", () => {
       "owner/id=149 and closedFlag=false",
     );
     expect(new URL(urls[0]!).searchParams.get("fields")).toBe(
-      serviceTicketCollectionFields,
+      serviceTicketReadFields,
     );
     expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
       "member/id=149",
