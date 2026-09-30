@@ -394,6 +394,7 @@ describe("staging smoke output safety", () => {
   it.each([
     ["SMOKE_EXPECT_MEMBER_ID", "0", "must be a positive integer"],
     ["SMOKE_BOARD_ID", "1.5", "must be a positive integer"],
+    ["SMOKE_TICKET_ID", "0", "must be a positive integer"],
     ["SMOKE_LOGIN_TIMEOUT_MS", "999", "is outside the allowed range"],
   ])(
     "rejects invalid bounded numeric configuration for %s",
@@ -409,6 +410,8 @@ describe("staging smoke output safety", () => {
           env: {
             ...process.env,
             SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
+            SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
+            SMOKE_TICKET_ID: "1234",
             [name]: value,
           },
         },
@@ -419,6 +422,36 @@ describe("staging smoke output safety", () => {
       );
     },
   );
+
+  it.each([
+    [
+      { SMOKE_EXPECT_PROFILE_ALIAS: "", SMOKE_TICKET_ID: "1234" },
+      "SMOKE_EXPECT_PROFILE_ALIAS must be a valid mapped profile alias",
+    ],
+    [
+      { SMOKE_EXPECT_PROFILE_ALIAS: "bad-alias", SMOKE_TICKET_ID: "1234" },
+      "SMOKE_EXPECT_PROFILE_ALIAS must be a valid mapped profile alias",
+    ],
+    [
+      { SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE", SMOKE_TICKET_ID: "" },
+      "SMOKE_TICKET_ID is required",
+    ],
+  ])("requires explicit approved smoke targets", (overrides, error) => {
+    const run = spawnSync(
+      process.execPath,
+      [new URL("../scripts/staging-live-smoke.mjs", import.meta.url).pathname],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
+          ...overrides,
+        },
+      },
+    );
+    expect(run.status).toBe(1);
+    expect(`${run.stdout}${run.stderr}`).toBe(`[smoke] FAIL ${error}\n`);
+  });
 
   it.each([
     [
@@ -455,6 +488,8 @@ describe("staging smoke output safety", () => {
           env: {
             ...process.env,
             SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
+            SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
+            SMOKE_TICKET_ID: "1234",
             SMOKE_SCHEDULE_START_DATE: startDate,
             SMOKE_SCHEDULE_END_DATE: endDate,
           },
@@ -474,6 +509,8 @@ describe("staging smoke output safety", () => {
         env: {
           ...process.env,
           SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
+          SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
+          SMOKE_TICKET_ID: "1234",
           SMOKE_SCHEDULE_START_DATE: "2026-09-01",
           SMOKE_SCHEDULE_END_DATE: "",
         },
@@ -514,6 +551,8 @@ describe("staging smoke output safety", () => {
           NODE_ENV: "test",
           SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
           SMOKE_ACCESS_TOKEN: canary,
+          SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
+          SMOKE_TICKET_ID: "1234",
           SMOKE_SCHEDULE_START_DATE: "2026-09-01",
           SMOKE_SCHEDULE_END_DATE: "2026-09-07",
         },
@@ -548,6 +587,8 @@ describe("staging smoke output safety", () => {
     expect(toolCatalog).toHaveLength(39);
 
     let baseUrl = "";
+    let capturedWhoamiArguments;
+    let capturedTicketArguments;
     let capturedScheduleArguments;
     let rejectedPostInitializeRequests = 0;
     const mcpMethodsByAuthorization = new Map();
@@ -675,7 +716,26 @@ describe("staging smoke output safety", () => {
       if (payload.method === "tools/call") {
         let data;
         let gate;
-        if (payload.params.name === "get_my_member") {
+        if (payload.params.name === "whoami") {
+          gate = "WHOAMI";
+          capturedWhoamiArguments = payload.params.arguments;
+          data = {
+            profileAlias:
+              authorization === "Bearer PROFILE_MISMATCH_CANARY"
+                ? "WRONG_PROFILE"
+                : "TEST_PROFILE",
+          };
+        } else if (payload.params.name === "get_service_ticket") {
+          gate = "TICKET";
+          capturedTicketArguments = payload.params.arguments;
+          data = {
+            id: 1234,
+            status: "New",
+            ...(authorization === "Bearer TICKET_PROJECTION_CANARY"
+              ? { summary: canary }
+              : {}),
+          };
+        } else if (payload.params.name === "get_my_member") {
           gate = "MEMBER";
           data = { member: { id: 149, firstName: canary, lastName: canary } };
         } else if (
@@ -697,7 +757,23 @@ describe("staging smoke output safety", () => {
             result: malformed
               ? { content: "BUSINESS_DATA_CANARY" }
               : {
-                  content: [{ type: "text", text: JSON.stringify(data) }],
+                  content: [
+                    { type: "text", text: JSON.stringify(data) },
+                    ...(gate === "TICKET" &&
+                    authorization === "Bearer TICKET_EXTRA_CONTENT_CANARY"
+                      ? [
+                          {
+                            type: "image",
+                            data: "Q0FOQVJZ",
+                            mimeType: "image/png",
+                          },
+                        ]
+                      : []),
+                  ],
+                  ...(gate === "TICKET" &&
+                  authorization === "Bearer TICKET_STRUCTURED_CANARY"
+                    ? { structuredContent: { secret: canary } }
+                    : {}),
                 },
           }),
         );
@@ -715,6 +791,8 @@ describe("staging smoke output safety", () => {
       NODE_ENV: "test",
       SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
       SMOKE_ACCESS_TOKEN: `TOKEN_${canary}`,
+      SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
+      SMOKE_TICKET_ID: "1234",
       SMOKE_SCHEDULE_START_DATE: "2026-09-01",
       SMOKE_SCHEDULE_END_DATE: "2026-09-07",
     };
@@ -762,7 +840,7 @@ describe("staging smoke output safety", () => {
       ),
     );
     const invalidCallRuns = await Promise.all(
-      ["MEMBER", "STATUSES", "SCHEDULE"].flatMap((gate) =>
+      ["WHOAMI", "TICKET", "MEMBER", "STATUSES", "SCHEDULE"].flatMap((gate) =>
         ["WRONG_ID", "MALFORMED"].map(async (fault) => [
           gate,
           fault,
@@ -770,6 +848,17 @@ describe("staging smoke output safety", () => {
         ]),
       ),
     );
+    const [
+      profileMismatch,
+      ticketProjection,
+      ticketExtraContent,
+      ticketStructuredContent,
+    ] = await Promise.all([
+      runSmoke("PROFILE_MISMATCH_CANARY"),
+      runSmoke("TICKET_PROJECTION_CANARY"),
+      runSmoke("TICKET_EXTRA_CONTENT_CANARY"),
+      runSmoke("TICKET_STRUCTURED_CANARY"),
+    ]);
     await new Promise((resolve) => mock.close(resolve));
 
     for (const rejected of [
@@ -803,9 +892,17 @@ describe("staging smoke output safety", () => {
     }
 
     const expectedCallMethods = {
-      MEMBER: ["tools/call"],
-      STATUSES: ["tools/call", "tools/call"],
-      SCHEDULE: ["tools/call", "tools/call", "tools/call"],
+      WHOAMI: ["tools/call"],
+      TICKET: ["tools/call", "tools/call"],
+      MEMBER: ["tools/call", "tools/call", "tools/call"],
+      STATUSES: ["tools/call", "tools/call", "tools/call", "tools/call"],
+      SCHEDULE: [
+        "tools/call",
+        "tools/call",
+        "tools/call",
+        "tools/call",
+        "tools/call",
+      ],
     };
     for (const [gate, fault, rejected] of invalidCallRuns) {
       expect(rejected.exitCode).toBe(1);
@@ -824,6 +921,26 @@ describe("staging smoke output safety", () => {
       ]);
     }
 
+    expect(profileMismatch.exitCode).toBe(1);
+    expect(profileMismatch.output).toContain("FAIL whoami profile mismatch");
+    expect(profileMismatch.output).not.toContain("WRONG_PROFILE");
+    expect(profileMismatch.output).not.toContain(baseUrl);
+    expect(ticketProjection.exitCode).toBe(1);
+    expect(ticketProjection.output).toContain(
+      "FAIL get_service_ticket returned an invalid projection",
+    );
+    expect(ticketProjection.output).not.toContain(canary);
+    expect(ticketProjection.output).not.toContain(baseUrl);
+
+    for (const rejected of [ticketExtraContent, ticketStructuredContent]) {
+      expect(rejected.exitCode).toBe(1);
+      expect(rejected.output).toContain(
+        "FAIL get_service_ticket failed (invalid_tool_content)",
+      );
+      expect(rejected.output).not.toContain(canary);
+      expect(rejected.output).not.toContain(baseUrl);
+    }
+
     expect(paginatedExitCode).toBe(1);
     expect(paginatedOutput).toContain(
       "FAIL tools/list pagination is not allowed for the fixed catalog",
@@ -832,8 +949,10 @@ describe("staging smoke output safety", () => {
     expect(paginatedOutput).not.toContain("PAGINATED_CANARY");
     expect(exitCode).toBe(0);
     expect(mcpIdsByAuthorization.get(`Bearer TOKEN_${canary}`)).toEqual([
-      1, 2, 3, 4, 5,
+      1, 2, 3, 4, 5, 6, 7,
     ]);
+    expect(capturedWhoamiArguments).toEqual({});
+    expect(capturedTicketArguments).toEqual({ ticketId: 1234 });
     expect(capturedScheduleArguments).toEqual({
       route: "schedule.entries.byMember",
       startDate: "2026-09-01",
@@ -937,10 +1056,16 @@ describe("staging smoke output safety", () => {
           }),
         );
       } else if (payload.method === "tools/call") {
-        const data =
-          payload.params.name === "get_my_member"
-            ? { member: { id: 149, firstName: canaries.business } }
-            : [{ id: 1, name: canaries.business }];
+        let data;
+        if (payload.params.name === "whoami") {
+          data = { profileAlias: "TEST_PROFILE" };
+        } else if (payload.params.name === "get_service_ticket") {
+          data = { id: 1234, status: "New" };
+        } else if (payload.params.name === "get_my_member") {
+          data = { member: { id: 149, firstName: canaries.business } };
+        } else {
+          data = [{ id: 1, name: canaries.business }];
+        }
         response.end(
           JSON.stringify({
             jsonrpc: "2.0",
@@ -981,6 +1106,8 @@ await fetch(callback);
         SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
         SMOKE_ACCESS_TOKEN: "",
         SMOKE_LOGIN_TIMEOUT_MS: "5000",
+        SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
+        SMOKE_TICKET_ID: "1234",
         SMOKE_SCHEDULE_START_DATE: "2026-09-01",
         SMOKE_SCHEDULE_END_DATE: "2026-09-07",
       },

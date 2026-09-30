@@ -5,8 +5,9 @@
  * Runs either the interactive user flow against a deployed ConnectWise MCP
  * Worker (DCR -> consent -> Microsoft login -> callback -> token), or a
  * supplied-token mode that skips the OAuth login and token-acquisition flow.
- * Both modes then run MCP `initialize`, `get_my_member`,
- * `call_connectwise service.boards.statuses`, and a bounded schedule read.
+ * Both modes then run MCP `initialize`, `whoami`, `get_service_ticket`,
+ * `get_my_member`, `call_connectwise service.boards.statuses`, and a bounded
+ * schedule read.
  *
  * This is a narrow read-path probe, not full staging acceptance. Success does
  * not cover multi-user isolation, revocation, permission denial, audit review,
@@ -20,6 +21,8 @@
  * Env:
  *   SMOKE_BASE_URL          (default: staging worker; canonical HTTPS origin)
  *   SMOKE_EXPECT_RESOURCE   (required with a non-default base URL)
+ *   SMOKE_EXPECT_PROFILE_ALIAS (required; mapped staging profile alias)
+ *   SMOKE_TICKET_ID         (required; approved non-sensitive test ticket)
  *   SMOKE_EXPECT_MEMBER_ID  (default: 149)
  *   SMOKE_BOARD_ID          (default: 32)
  *   SMOKE_SCHEDULE_START_DATE (required; YYYY-MM-DD)
@@ -56,6 +59,27 @@ const log = (...parts) => console.log("[smoke]", ...parts);
 function fail(message) {
   log("FAIL", message);
   process.exit(1);
+}
+
+function parseExpectedProfileAlias() {
+  const alias = process.env.SMOKE_EXPECT_PROFILE_ALIAS;
+  if (!alias || !/^[A-Z][A-Z0-9_]{0,31}$/.test(alias)) {
+    fail("SMOKE_EXPECT_PROFILE_ALIAS must be a valid mapped profile alias");
+  }
+  return alias;
+}
+
+function parseRequiredPositiveInteger(name, maximum) {
+  const raw = process.env[name];
+  if (!raw) fail(`${name} is required`);
+  if (!/^[1-9]\d*$/.test(raw)) {
+    fail(`${name} must be a positive integer`);
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value > maximum) {
+    fail(`${name} is outside the allowed range`);
+  }
+  return value;
 }
 
 function parsePositiveInteger(name, fallback, maximum) {
@@ -165,6 +189,11 @@ if (process.env.SMOKE_NO_BROWSER && !process.env.SMOKE_ACCESS_TOKEN) {
 
 const { baseUrl: BASE_URL, expectedResource: EXPECTED_RESOURCE } =
   parseTarget();
+const EXPECT_PROFILE_ALIAS = parseExpectedProfileAlias();
+const TICKET_ID = parseRequiredPositiveInteger(
+  "SMOKE_TICKET_ID",
+  2_147_483_647,
+);
 const EXPECT_MEMBER_ID = parsePositiveInteger(
   "SMOKE_EXPECT_MEMBER_ID",
   149,
@@ -554,10 +583,14 @@ async function callTool(name, args) {
   if (!toolResult) {
     return { ok: false, reason: "invalid_mcp_response" };
   }
-  const text = toolResult.content
-    ?.filter((c) => c.type === "text")
-    .map((c) => c.text)
-    .join("\n");
+  if (
+    toolResult.structuredContent !== undefined ||
+    toolResult.content.length !== 1 ||
+    toolResult.content[0]?.type !== "text"
+  ) {
+    return { ok: false, reason: "invalid_tool_content" };
+  }
+  const text = toolResult.content[0].text;
   let data;
   try {
     data = text ? JSON.parse(text) : undefined;
@@ -571,7 +604,45 @@ async function callTool(name, args) {
   };
 }
 
-// 10. Gate 1: get_my_member.
+// 10. Gate 1: immutable identity-to-profile mapping via whoami. The expected
+// alias is operator-supplied only for comparison and is never sent to a tool.
+log("calling whoami ...");
+const identity = await callTool("whoami", {});
+if (!identity.ok) {
+  fail(`whoami failed (${identity.reason})`);
+}
+if (
+  !identity.data ||
+  typeof identity.data !== "object" ||
+  Array.isArray(identity.data) ||
+  Object.keys(identity.data).length !== 1 ||
+  identity.data.profileAlias !== EXPECT_PROFILE_ALIAS
+) {
+  fail("whoami profile mismatch");
+}
+log("whoami ok (expected profile matched)");
+
+// 11. Gate 2: approved test-ticket lookup with the exact minimal projection.
+log("calling get_service_ticket ...");
+const ticket = await callTool("get_service_ticket", { ticketId: TICKET_ID });
+if (!ticket.ok) {
+  fail(`get_service_ticket failed (${ticket.reason})`);
+}
+if (
+  !ticket.data ||
+  typeof ticket.data !== "object" ||
+  Array.isArray(ticket.data) ||
+  Object.keys(ticket.data).sort().join(",") !== "id,status" ||
+  ticket.data.id !== TICKET_ID ||
+  typeof ticket.data.status !== "string" ||
+  ticket.data.status.length === 0 ||
+  ticket.data.status.length > 100
+) {
+  fail("get_service_ticket returned an invalid projection");
+}
+log("get_service_ticket ok (minimal projection matched)");
+
+// 12. Gate 3: get_my_member.
 log("calling get_my_member ...");
 const member = await callTool("get_my_member", {});
 if (!member.ok) {
@@ -583,7 +654,7 @@ if (memberId !== EXPECT_MEMBER_ID) {
 }
 log("get_my_member ok (expected identity matched)");
 
-// 11. Gate 2: board statuses via the catalog tool.
+// 13. Gate 4: board statuses via the catalog tool.
 log("calling call_connectwise service.boards.statuses ...");
 const statuses = await callTool("call_connectwise", {
   route: "service.boards.statuses",
@@ -600,7 +671,7 @@ if (!Array.isArray(statusList) || statusList.length === 0) {
 }
 log("board statuses ok");
 
-// 12. Gate 3: fixed-route schedule catalog date range.
+// 14. Gate 5: fixed-route schedule catalog date range.
 log("calling call_connectwise schedule.entries.byMember (date range) ...");
 const schedule = await callTool("call_connectwise", {
   route: "schedule.entries.byMember",
@@ -613,7 +684,7 @@ if (!schedule.ok || scheduleList.length === 0) {
 }
 log("schedule.entries.byMember ok");
 
-// 13. Done. This smoke remains read-only and does not satisfy the remaining
+// 15. Done. This smoke remains read-only and does not satisfy the remaining
 // manual staging acceptance gates.
 server.close();
 if (process.env.SMOKE_ACCESS_TOKEN) {
