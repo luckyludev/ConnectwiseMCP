@@ -39,7 +39,7 @@ const serviceTicketNoteCollectionFields =
 const projectTicketNoteCollectionFields =
   "id,text,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
 const ticketAttachmentCollectionFields =
-  "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
+  "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag,recordType,recordId";
 const ticketTaskCollectionFields = "id,summary,priority,notes";
 const serviceBoardCollectionFields = "id,name";
 const boardStatusCollectionFields = "id,name";
@@ -152,7 +152,9 @@ describe("ConnectWiseClient", () => {
       fetcher: async (input, init) => {
         capturedUrl = String(input);
         capturedInit = init;
-        return Response.json([{ id: 400 }]);
+        return Response.json([
+          { id: 400, recordType: "Ticket", recordId: 123 },
+        ]);
       },
     });
 
@@ -173,6 +175,62 @@ describe("ConnectWiseClient", () => {
       ticketAttachmentCollectionFields,
     ]);
     expect(capturedInit?.method).toBe("GET");
+  });
+
+  it("rejects attachment rows that do not match the requested ticket", async () => {
+    for (const document of [
+      { id: 400, recordType: "Ticket", recordId: 124 },
+      { id: 400, recordType: "Project", recordId: 123 },
+      { id: 400, recordType: "Ticket" },
+      { id: 400, recordId: 123 },
+    ]) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([document]),
+      });
+
+      await expect(client.getTicketAttachments(123, 50)).rejects.toThrow(
+        "ConnectWise document is not associated with requested record",
+      );
+    }
+  });
+
+  it("verifies and strips document relationships from catalog results", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          {
+            id: 400,
+            title: "router.pdf",
+            recordType: "Company",
+            recordId: 77,
+          },
+        ]),
+    });
+
+    await expect(
+      client.catalogGet("system.documents", {
+        recordType: "Company",
+        recordId: 77,
+        pageSize: 20,
+      }),
+    ).resolves.toEqual([{ id: 400, title: "router.pdf" }]);
+  });
+
+  it("rejects mismatched document relationships from catalog results", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([{ id: 400, recordType: "Company", recordId: 78 }]),
+    });
+
+    await expect(
+      client.catalogGet("system.documents", {
+        recordType: "Company",
+        recordId: 77,
+        pageSize: 20,
+      }),
+    ).rejects.toThrow(
+      "ConnectWise document is not associated with requested record",
+    );
   });
 
   it("minimizes ticket notes and tasks at the upstream boundary", async () => {

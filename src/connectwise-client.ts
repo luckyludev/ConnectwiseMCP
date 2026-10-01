@@ -501,6 +501,7 @@ const PROJECT_TICKET_NOTE_COLLECTION_FIELDS =
   "id,text,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
 const TICKET_ATTACHMENT_COLLECTION_FIELDS =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
+const TICKET_ATTACHMENT_RELATIONSHIP_FIELDS = `${TICKET_ATTACHMENT_COLLECTION_FIELDS},recordType,recordId`;
 const TICKET_TASK_COLLECTION_FIELDS = "id,summary,priority,notes";
 const SERVICE_BOARD_COLLECTION_FIELDS = "id,name";
 const BOARD_STATUS_COLLECTION_FIELDS = "id,name";
@@ -576,7 +577,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     query: (p) => ({
       recordType: p.recordType ?? "Ticket",
       recordId: Number(p.recordId),
-      fields: TICKET_ATTACHMENT_COLLECTION_FIELDS,
+      fields: TICKET_ATTACHMENT_RELATIONSHIP_FIELDS,
       pageSize: p.pageSize ?? 20,
     }),
     required: ["recordId"],
@@ -1004,6 +1005,36 @@ export function createConnectWiseClient(
     }
   }
 
+  function verifiedDocumentList(
+    records: unknown,
+    expectedRecordType: string,
+    expectedRecordId: number,
+  ): Array<Record<string, unknown>> {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise document relationship response");
+    }
+    return records.map((record) => {
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        throw new Error("Invalid ConnectWise document relationship response");
+      }
+      const item = record as Record<string, unknown>;
+      if (
+        item.recordType !== expectedRecordType ||
+        item.recordId !== expectedRecordId
+      ) {
+        throw new Error(
+          "ConnectWise document is not associated with requested record",
+        );
+      }
+      const {
+        recordType: _recordType,
+        recordId: _recordId,
+        ...projected
+      } = item;
+      return projected;
+    });
+  }
+
   async function assertTimeEntryOwnedByMappedMember(
     timeEntryId: number,
     operation: string,
@@ -1066,16 +1097,17 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       boundedPageSize(pageSize);
-      return requestBoundedList(
+      const attachments = await requestBoundedList(
         "/system/documents",
         {
           recordType: "Ticket",
           recordId: ticketId,
-          fields: TICKET_ATTACHMENT_COLLECTION_FIELDS,
+          fields: TICKET_ATTACHMENT_RELATIONSHIP_FIELDS,
           pageSize,
         },
         pageSize,
       );
+      return verifiedDocumentList(attachments, "Ticket", ticketId);
     },
 
     async getTicketTasks(ticketId: number, pageSize: number): Promise<unknown> {
@@ -1579,6 +1611,13 @@ export function createConnectWiseClient(
         boundedPageSize(requestedPageSize);
       }
       const result = await requestBoundedList(path, query, requestedPageSize);
+      if (route === "system.documents") {
+        return verifiedDocumentList(
+          result,
+          String(effectiveParams.recordType ?? "Ticket"),
+          Number(effectiveParams.recordId),
+        );
+      }
       if (MEMBER_SCOPED_CATALOG_ROUTES.has(route as CatalogRouteId)) {
         assertMappedMemberList(
           result,
