@@ -947,6 +947,22 @@ export function createConnectWiseClient(
     return memberId;
   }
 
+  function verifiedRecordIdentity(
+    record: unknown,
+    expectedId: number,
+    recordType: string,
+  ): Record<string, unknown> {
+    if (
+      !record ||
+      typeof record !== "object" ||
+      Array.isArray(record) ||
+      (record as Record<string, unknown>).id !== expectedId
+    ) {
+      throw new Error(`ConnectWise ${recordType} does not match requested ID`);
+    }
+    return record as Record<string, unknown>;
+  }
+
   function assertMappedMember(
     record: unknown,
     memberId: number,
@@ -1046,16 +1062,18 @@ export function createConnectWiseClient(
   return {
     async getServiceTicket(ticketId: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
-      return requestJson("GET", `/service/tickets/${ticketId}`, {
+      const ticket = await requestJson("GET", `/service/tickets/${ticketId}`, {
         fields: SERVICE_TICKET_READ_FIELDS,
       });
+      return verifiedRecordIdentity(ticket, ticketId, "service ticket");
     },
 
     async getServiceTicketStatus(ticketId: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
-      return requestJson("GET", `/service/tickets/${ticketId}`, {
+      const ticket = await requestJson("GET", `/service/tickets/${ticketId}`, {
         fields: SERVICE_TICKET_LOOKUP_FIELDS,
       });
+      return verifiedRecordIdentity(ticket, ticketId, "service ticket");
     },
 
     async getTicketNotes(ticketId: number, pageSize: number): Promise<unknown> {

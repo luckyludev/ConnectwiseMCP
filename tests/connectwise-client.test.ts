@@ -144,6 +144,29 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
+  it("rejects malformed or mismatched direct service-ticket responses", async () => {
+    const invalidTickets: unknown[] = [
+      null,
+      [],
+      {},
+      { id: "123" },
+      { id: 124, summary: "Wrong ticket" },
+    ];
+
+    for (const invalidTicket of invalidTickets) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(invalidTicket),
+      });
+
+      await expect(client.getServiceTicket(123)).rejects.toThrow(
+        "ConnectWise service ticket does not match requested ID",
+      );
+      await expect(client.getServiceTicketStatus(123)).rejects.toThrow(
+        "ConnectWise service ticket does not match requested ID",
+      );
+    }
+  });
+
   it("scopes attachment lookup to one ticket and a bounded page", async () => {
     let capturedUrl = "";
     let capturedInit: RequestInit | undefined;
