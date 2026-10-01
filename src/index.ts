@@ -40,13 +40,11 @@ const oauthProvider = new OAuthProvider({
   resourceMetadata: {
     resource: runtimeEnv.MCP_CANONICAL_URL,
     authorization_servers: [new URL(runtimeEnv.MCP_CANONICAL_URL).origin],
-    scopes_supported: ["mcp:read"],
     resource_name: "ConnectWise MCP v2",
   },
+  requiredScopes: ["mcp:read"],
   clientIdMetadataDocumentEnabled: true,
   clientRegistrationTTL: 604_800,
-  allowPlainPKCE: false,
-  allowImplicitFlow: false,
   tokenExchangeCallback: createTokenExchangeCallback(runtimeEnv),
   clientRegistrationCallback: ({ clientMetadata, request }) =>
     validateClientRegistration(
