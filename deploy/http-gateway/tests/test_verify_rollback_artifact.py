@@ -142,3 +142,14 @@ def test_rejects_symlinked_artifact_file(tmp_path, name):
 
     with pytest.raises(ValueError, match="non-symlink"):
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+@pytest.mark.parametrize("name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME])
+def test_rejects_hardlinked_artifact_file(tmp_path, name):
+    artifact_bundle(tmp_path)
+    path = tmp_path / name
+    external_alias = tmp_path.parent / f"{tmp_path.name}-{name}.alias"
+    external_alias.hardlink_to(path)
+
+    with pytest.raises(ValueError, match="single-link"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
