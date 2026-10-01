@@ -4,12 +4,14 @@ WORKDIR /app
 
 RUN apt-get update \
   && apt-get install --only-upgrade -y --no-install-recommends \
+    libpcre2-8-0 \
     libssl3t64 \
     openssl \
     openssl-provider-legacy \
   && for package in libssl3t64 openssl openssl-provider-legacy; do \
     dpkg --compare-versions "$(dpkg-query -W -f='${Version}' "$package")" ge '3.5.7-1~deb13u3' || exit 1; \
   done \
+  && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libpcre2-8-0)" ge '10.46-1~deb13u3' \
   && rm -rf /var/lib/apt/lists/*
 
 COPY http-gateway/requirements.lock /app/requirements.lock
