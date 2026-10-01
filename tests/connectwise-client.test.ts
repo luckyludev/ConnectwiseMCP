@@ -26,6 +26,7 @@ const agreementAdditionCollectionFields =
   "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description";
 const timeEntryCollectionFields =
   "id,actualHours,timeStart,member,notes,workType";
+const ticketTimeEntryRelationshipFields = `${timeEntryCollectionFields},chargeToType,chargeToId`;
 const timeEntryReadFields = `${timeEntryCollectionFields},dateEntered,chargeToType`;
 const scheduleEntryCollectionFields =
   "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
@@ -223,12 +224,18 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
-  it("minimizes ticket time-entry reads at the upstream boundary", async () => {
+  it("minimizes ticket time-entry reads, verifies their relationship, and strips verification fields", async () => {
     let capturedUrl = "";
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         capturedUrl = String(input);
-        return Response.json([{ id: 401 }]);
+        return Response.json([
+          {
+            id: 401,
+            chargeToType: "ServiceTicket",
+            chargeToId: 123,
+          },
+        ]);
       },
     });
 
@@ -246,11 +253,29 @@ describe("ConnectWiseClient", () => {
       /ProjectTicket|\bOR\b/,
     );
     expect(url.searchParams.getAll("fields")).toEqual([
-      timeEntryCollectionFields,
+      ticketTimeEntryRelationshipFields,
     ]);
     expect(url.searchParams.get("orderBy")).toBe("dateEntered desc");
     expect(url.searchParams.get("pageSize")).toBe("20");
   });
+
+  it.each([
+    { id: 401, chargeToType: "ServiceTicket", chargeToId: 124 },
+    { id: 401, chargeToType: "ProjectTicket", chargeToId: 123 },
+    { id: 401, chargeToType: "ServiceTicket" },
+    { id: 401, chargeToId: 123 },
+  ])(
+    "rejects a time entry without the exact requested ticket relationship: %j",
+    async (entry) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([entry]),
+      });
+
+      await expect(client.getTicketTimeEntries(123, 20)).rejects.toThrow(
+        "ConnectWise time entry is not associated with requested ticket",
+      );
+    },
+  );
 
   it("rejects an invalid ticket ID without making a request", async () => {
     let requests = 0;

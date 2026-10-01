@@ -488,6 +488,7 @@ const AGREEMENT_ADDITION_SUMMARY_FIELDS = "extPrice,extCost";
 const AGREEMENT_INVOICE_COLLECTION_FIELDS = "id,invoiceNumber,total,date";
 const TIME_ENTRY_COLLECTION_FIELDS =
   "id,actualHours,timeStart,member,notes,workType";
+const TICKET_TIME_ENTRY_RELATIONSHIP_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},chargeToType,chargeToId`;
 const TIME_ENTRY_READ_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},dateEntered,chargeToType`;
 const SCHEDULE_ENTRY_COLLECTION_FIELDS =
   "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
@@ -1067,16 +1068,32 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       boundedPageSize(pageSize);
-      return requestBoundedList(
+      const entries = await requestBoundedList(
         "/time/entries",
         {
           conditions: `chargeToType='ServiceTicket' AND chargeToId=${ticketId}`,
-          fields: TIME_ENTRY_COLLECTION_FIELDS,
+          fields: TICKET_TIME_ENTRY_RELATIONSHIP_FIELDS,
           pageSize,
           orderBy: "dateEntered desc",
         },
         pageSize,
       );
+      return (entries as Array<Record<string, unknown>>).map((entry) => {
+        if (
+          entry.chargeToType !== "ServiceTicket" ||
+          entry.chargeToId !== ticketId
+        ) {
+          throw new Error(
+            "ConnectWise time entry is not associated with requested ticket",
+          );
+        }
+        const {
+          chargeToType: _chargeToType,
+          chargeToId: _chargeToId,
+          ...item
+        } = entry;
+        return item;
+      });
     },
 
     async createTicketNote(ticketId, input): Promise<unknown> {
