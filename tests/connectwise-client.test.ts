@@ -896,6 +896,35 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[6]!).searchParams.get("pageSize")).toBe("5");
   });
 
+  it("verifies every board-ticket result belongs to the requested board", async () => {
+    const matchingClient = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json([{ id: 1, board: { id: 32 } }]),
+    });
+    await expect(matchingClient.listBoardTickets(32, 10)).resolves.toEqual([
+      { id: 1, board: { id: 32 } },
+    ]);
+
+    const laterMismatchClient = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          { id: 1, board: { id: 32 } },
+          { id: 2, board: { id: 33 } },
+        ]),
+    });
+    await expect(laterMismatchClient.listBoardTickets(32, 10)).rejects.toThrow(
+      "ConnectWise record does not match requested board",
+    );
+
+    for (const board of [undefined, null, [], {}, { id: "32" }, { id: 33 }]) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([{ id: 1, board }]),
+      });
+      await expect(client.listBoardTickets(32, 10)).rejects.toThrow(
+        "ConnectWise record does not match requested board",
+      );
+    }
+  });
+
   it("minimizes documented board and reference collections upstream", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
@@ -1120,6 +1149,44 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow(
       "Parameter query is not allowed for route service.boards.statuses",
     );
+  });
+
+  it("verifies every status-filtered ticket matches the requested status", async () => {
+    const matchingClient = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json([{ id: 1, status: { id: 547 } }]),
+    });
+    await expect(
+      matchingClient.catalogGet("service.tickets.byStatus", { statusId: 547 }),
+    ).resolves.toEqual([{ id: 1, status: { id: 547 } }]);
+
+    const laterMismatchClient = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          { id: 1, status: { id: 547 } },
+          { id: 2, status: { id: 548 } },
+        ]),
+    });
+    await expect(
+      laterMismatchClient.catalogGet("service.tickets.byStatus", {
+        statusId: 547,
+      }),
+    ).rejects.toThrow("ConnectWise record does not match requested status");
+
+    for (const status of [
+      undefined,
+      null,
+      [],
+      {},
+      { id: "547" },
+      { id: 548 },
+    ]) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([{ id: 1, status }]),
+      });
+      await expect(
+        client.catalogGet("service.tickets.byStatus", { statusId: 547 }),
+      ).rejects.toThrow("ConnectWise record does not match requested status");
+    }
   });
 
   it("requires targeted catalog name searches", async () => {
