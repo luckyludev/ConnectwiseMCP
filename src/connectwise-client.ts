@@ -978,6 +978,32 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertRequestedReferenceList(
+    records: unknown,
+    referenceField: "board" | "status",
+    expectedId: number,
+  ): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise relationship response");
+    }
+    for (const record of records) {
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        throw new Error("Invalid ConnectWise relationship response");
+      }
+      const reference = (record as Record<string, unknown>)[referenceField];
+      if (
+        !reference ||
+        typeof reference !== "object" ||
+        Array.isArray(reference) ||
+        (reference as Record<string, unknown>).id !== expectedId
+      ) {
+        throw new Error(
+          `ConnectWise record does not match requested ${referenceField}`,
+        );
+      }
+    }
+  }
+
   async function assertTimeEntryOwnedByMappedMember(
     timeEntryId: number,
     operation: string,
@@ -1206,7 +1232,7 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(boardId, "board ID");
       boundedPageSize(pageSize);
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/service/tickets",
         {
           conditions: `board/id=${boardId}`,
@@ -1216,6 +1242,8 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      assertRequestedReferenceList(result, "board", boardId);
+      return result;
     },
 
     async getServiceStatuses(): Promise<unknown> {
@@ -1556,6 +1584,13 @@ export function createConnectWiseClient(
           result,
           Number(effectiveParams.memberId),
           route === "service.tickets.byOwner" ? "owner" : "member",
+        );
+      }
+      if (route === "service.tickets.byStatus") {
+        assertRequestedReferenceList(
+          result,
+          "status",
+          Number(effectiveParams.statusId),
         );
       }
       return definition.transform ? definition.transform(result) : result;
