@@ -2,6 +2,16 @@ FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b
 
 WORKDIR /app
 
+RUN apt-get update \
+  && apt-get install --only-upgrade -y --no-install-recommends \
+    libssl3t64 \
+    openssl \
+    openssl-provider-legacy \
+  && for package in libssl3t64 openssl openssl-provider-legacy; do \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' "$package")" ge '3.5.7-1~deb13u3' || exit 1; \
+  done \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY http-gateway/requirements.lock /app/requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r /app/requirements.lock \
   && groupadd --gid 10001 app \
