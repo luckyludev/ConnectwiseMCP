@@ -412,6 +412,8 @@ describe("staging smoke output safety", () => {
             SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
             SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
             SMOKE_TICKET_ID: "1234",
+            SMOKE_EXPECT_MEMBER_ID: "149",
+            SMOKE_BOARD_ID: "32",
             [name]: value,
           },
         },
@@ -435,6 +437,23 @@ describe("staging smoke output safety", () => {
     [
       { SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE", SMOKE_TICKET_ID: "" },
       "SMOKE_TICKET_ID is required",
+    ],
+    [
+      {
+        SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
+        SMOKE_TICKET_ID: "1234",
+        SMOKE_EXPECT_MEMBER_ID: "",
+      },
+      "SMOKE_EXPECT_MEMBER_ID is required",
+    ],
+    [
+      {
+        SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
+        SMOKE_TICKET_ID: "1234",
+        SMOKE_EXPECT_MEMBER_ID: "149",
+        SMOKE_BOARD_ID: "",
+      },
+      "SMOKE_BOARD_ID is required",
     ],
   ])("requires explicit approved smoke targets", (overrides, error) => {
     const run = spawnSync(
@@ -490,6 +509,8 @@ describe("staging smoke output safety", () => {
             SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
             SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
             SMOKE_TICKET_ID: "1234",
+            SMOKE_EXPECT_MEMBER_ID: "149",
+            SMOKE_BOARD_ID: "32",
             SMOKE_SCHEDULE_START_DATE: startDate,
             SMOKE_SCHEDULE_END_DATE: endDate,
           },
@@ -511,6 +532,8 @@ describe("staging smoke output safety", () => {
           SMOKE_ACCESS_TOKEN: "CANARY_TOKEN",
           SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
           SMOKE_TICKET_ID: "1234",
+          SMOKE_EXPECT_MEMBER_ID: "149",
+          SMOKE_BOARD_ID: "32",
           SMOKE_SCHEDULE_START_DATE: "2026-09-01",
           SMOKE_SCHEDULE_END_DATE: "",
         },
@@ -553,6 +576,8 @@ describe("staging smoke output safety", () => {
           SMOKE_ACCESS_TOKEN: canary,
           SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
           SMOKE_TICKET_ID: "1234",
+          SMOKE_EXPECT_MEMBER_ID: "149",
+          SMOKE_BOARD_ID: "32",
           SMOKE_SCHEDULE_START_DATE: "2026-09-01",
           SMOKE_SCHEDULE_END_DATE: "2026-09-07",
         },
@@ -589,6 +614,7 @@ describe("staging smoke output safety", () => {
     let baseUrl = "";
     let capturedWhoamiArguments;
     let capturedTicketArguments;
+    const capturedStatusArguments = [];
     let capturedScheduleArguments;
     let rejectedPostInitializeRequests = 0;
     const mcpMethodsByAuthorization = new Map();
@@ -737,11 +763,12 @@ describe("staging smoke output safety", () => {
           };
         } else if (payload.params.name === "get_my_member") {
           gate = "MEMBER";
-          data = { member: { id: 149, firstName: canary, lastName: canary } };
+          data = { member: { id: 2468, firstName: canary, lastName: canary } };
         } else if (
           payload.params.arguments.route === "service.boards.statuses"
         ) {
           gate = "STATUSES";
+          capturedStatusArguments.push(payload.params.arguments);
           data = [{ id: 1, name: canary }];
         } else {
           gate = "SCHEDULE";
@@ -793,6 +820,8 @@ describe("staging smoke output safety", () => {
       SMOKE_ACCESS_TOKEN: `TOKEN_${canary}`,
       SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
       SMOKE_TICKET_ID: "1234",
+      SMOKE_EXPECT_MEMBER_ID: "2468",
+      SMOKE_BOARD_ID: "64",
       SMOKE_SCHEDULE_START_DATE: "2026-09-01",
       SMOKE_SCHEDULE_END_DATE: "2026-09-07",
     };
@@ -953,6 +982,13 @@ describe("staging smoke output safety", () => {
     ]);
     expect(capturedWhoamiArguments).toEqual({});
     expect(capturedTicketArguments).toEqual({ ticketId: 1234 });
+    expect(capturedStatusArguments.length).toBeGreaterThan(0);
+    for (const statusArguments of capturedStatusArguments) {
+      expect(statusArguments).toEqual({
+        route: "service.boards.statuses",
+        boardId: 64,
+      });
+    }
     expect(capturedScheduleArguments).toEqual({
       route: "schedule.entries.byMember",
       startDate: "2026-09-01",
@@ -1108,6 +1144,8 @@ await fetch(callback);
         SMOKE_LOGIN_TIMEOUT_MS: "5000",
         SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
         SMOKE_TICKET_ID: "1234",
+        SMOKE_EXPECT_MEMBER_ID: "149",
+        SMOKE_BOARD_ID: "32",
         SMOKE_SCHEDULE_START_DATE: "2026-09-01",
         SMOKE_SCHEDULE_END_DATE: "2026-09-07",
       },

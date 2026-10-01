@@ -23,8 +23,8 @@
  *   SMOKE_EXPECT_RESOURCE   (required with a non-default base URL)
  *   SMOKE_EXPECT_PROFILE_ALIAS (required; mapped staging profile alias)
  *   SMOKE_TICKET_ID         (required; approved non-sensitive test ticket)
- *   SMOKE_EXPECT_MEMBER_ID  (default: 149)
- *   SMOKE_BOARD_ID          (default: 32)
+ *   SMOKE_EXPECT_MEMBER_ID  (required; approved mapped member)
+ *   SMOKE_BOARD_ID          (required; approved service board)
  *   SMOKE_SCHEDULE_START_DATE (required; YYYY-MM-DD)
  *   SMOKE_SCHEDULE_END_DATE   (required; YYYY-MM-DD; at most 7 days inclusive)
  *   SMOKE_NO_BROWSER        (fail closed instead of opening a browser)
@@ -194,12 +194,11 @@ const TICKET_ID = parseRequiredPositiveInteger(
   "SMOKE_TICKET_ID",
   2_147_483_647,
 );
-const EXPECT_MEMBER_ID = parsePositiveInteger(
+const EXPECT_MEMBER_ID = parseRequiredPositiveInteger(
   "SMOKE_EXPECT_MEMBER_ID",
-  149,
   2_147_483_647,
 );
-const BOARD_ID = parsePositiveInteger("SMOKE_BOARD_ID", 32, 2_147_483_647);
+const BOARD_ID = parseRequiredPositiveInteger("SMOKE_BOARD_ID", 2_147_483_647);
 const LOGIN_TIMEOUT_MS = parsePositiveInteger(
   "SMOKE_LOGIN_TIMEOUT_MS",
   420_000,
