@@ -49,7 +49,7 @@ python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback
   . <FULL_RELEASE_COMMIT> <SUCCESSFUL_MAIN_RUN_ID>
 ```
 
-The verifier fails closed unless the manifest has the exact schema and expected release/run bindings, the three fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, and the downloaded archive matches its SHA-256. Do not edit, rename, or hard-link artifact files to make verification pass.
+The verifier fails closed unless the artifact directory itself is a real directory, the manifest has the exact schema and expected release/run bindings, the three fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, and the downloaded archive matches its SHA-256. It opens the directory and files without following symlinks and keeps every validation/read bound to the same file descriptors, rejecting metadata changes observed during a read. Do not edit, rename, symlink, or hard-link the artifact directory or files to make verification pass.
 
 Load and verify the tested image before rehearsal and preflight:
 
