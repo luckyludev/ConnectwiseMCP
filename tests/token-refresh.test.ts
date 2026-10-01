@@ -74,7 +74,9 @@ describe("Entra token refresh reauthorization", () => {
       upstreamExpiresIn: 3600,
     };
 
-    const result = await createTokenExchangeCallback(authorizationCodeEnv())({
+    const env = authorizationCodeEnv();
+    const result = await createTokenExchangeCallback(env)({
+      env,
       grantType: "authorization_code" as never,
       clientId: "mcp-client",
       subjectClientId: "mcp-client",
@@ -110,14 +112,14 @@ describe("Entra token refresh reauthorization", () => {
     "rejects and revokes an authorization code when policy %s the identity mapping",
     async (_action, identityProfileMap) => {
       let revokedWith: unknown[] | undefined;
-      const callback = createTokenExchangeCallback(
-        authorizationCodeEnv(identityProfileMap, async (...args) => {
-          revokedWith = args;
-        }),
-      );
+      const env = authorizationCodeEnv(identityProfileMap, async (...args) => {
+        revokedWith = args;
+      });
+      const callback = createTokenExchangeCallback(env);
 
       await expect(
         callback({
+          env,
           grantType: "authorization_code" as never,
           clientId: "mcp-client",
           subjectClientId: "mcp-client",
@@ -143,14 +145,14 @@ describe("Entra token refresh reauthorization", () => {
 
   it("fails closed without revoking when authorization-code policy configuration is invalid", async () => {
     let revoked = false;
-    const callback = createTokenExchangeCallback(
-      authorizationCodeEnv("not-json", async () => {
-        revoked = true;
-      }),
-    );
+    const env = authorizationCodeEnv("not-json", async () => {
+      revoked = true;
+    });
+    const callback = createTokenExchangeCallback(env);
 
     await expect(
       callback({
+        env,
         grantType: "authorization_code" as never,
         clientId: "mcp-client",
         subjectClientId: "mcp-client",
@@ -224,6 +226,7 @@ describe("Entra token refresh reauthorization", () => {
       fetcher,
       getKey,
     })({
+      env,
       grantType: "refresh_token" as never,
       clientId: "mcp-client",
       subjectClientId: "mcp-client",
@@ -287,6 +290,7 @@ describe("Entra token refresh reauthorization", () => {
           throw new TypeError("network unavailable");
         },
       })({
+        env,
         grantType: "refresh_token" as never,
         clientId: "mcp-client",
         subjectClientId: "mcp-client",
@@ -331,6 +335,7 @@ describe("Entra token refresh reauthorization", () => {
             { status: 400 },
           ),
       })({
+        env,
         grantType: "refresh_token" as never,
         clientId: "mcp-client",
         subjectClientId: "mcp-client",

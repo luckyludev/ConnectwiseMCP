@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 const downstream = vi.hoisted(() => ({
   mcpHandler: vi.fn(),
   oauthProviderFetch: vi.fn(),
+  oauthProviderOptions: undefined as Record<string, unknown> | undefined,
 }));
 
 vi.mock("cloudflare:workers", () => ({
@@ -18,6 +19,10 @@ vi.mock("agents/mcp/server", () => ({
 
 vi.mock("@cloudflare/workers-oauth-provider", () => ({
   default: class MockOAuthProvider {
+    constructor(options: Record<string, unknown>) {
+      downstream.oauthProviderOptions = options;
+    }
+
     fetch(...args: unknown[]) {
       return downstream.oauthProviderFetch(...args);
     }
@@ -28,6 +33,27 @@ import worker from "../src/index";
 import type { WorkerEnv } from "../src/auth-handler";
 
 describe("Worker entrypoint configuration boundary", () => {
+  it("publishes the required read scope through the hardened provider option", () => {
+    expect(downstream.oauthProviderOptions).toMatchObject({
+      scopesSupported: ["mcp:read"],
+      requiredScopes: ["mcp:read"],
+      resourceMetadata: {
+        resource: "https://mcp.example.com/mcp",
+        authorization_servers: ["https://mcp.example.com"],
+        resource_name: "ConnectWise MCP v2",
+      },
+    });
+    expect(downstream.oauthProviderOptions).not.toHaveProperty(
+      "allowPlainPKCE",
+    );
+    expect(downstream.oauthProviderOptions).not.toHaveProperty(
+      "allowImplicitFlow",
+    );
+    expect(downstream.oauthProviderOptions).not.toHaveProperty(
+      "resourceMetadata.scopes_supported",
+    );
+  });
+
   it.each(["", "{", "not-json", "null", "[]", '"metadata"', "7", "true"])(
     "rejects invalid registration metadata %# before OAuth provider handling",
     async (body) => {

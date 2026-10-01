@@ -632,7 +632,7 @@ export function createTokenExchangeCallback(
   env: WorkerEnv,
   dependencies: AuthHandlerDependencies = {},
 ): (
-  options: TokenExchangeCallbackOptions,
+  options: TokenExchangeCallbackOptions<WorkerEnv>,
 ) => Promise<TokenExchangeCallbackResult | void> {
   return async (options) => {
     if (
