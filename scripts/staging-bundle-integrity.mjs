@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -35,6 +35,7 @@ if (
 
 const DIST_PATH = "dist";
 const BUNDLE_PATH = "dist/index.js";
+const CONFIG_PATH = "wrangler.jsonc";
 const MANIFEST_PATH = "dist/staging-bundle-manifest.json";
 const gitEnvironment = {
   ...Object.fromEntries(
@@ -131,9 +132,32 @@ function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
 }
 
+function verifyPrivateCopy(path, expectedBytes, label) {
+  const before = lstatSync(path);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
+    throw new Error(`${label} type changed`);
+  }
+  const content = readFileSync(path);
+  const after = lstatSync(path);
+  if (
+    after.dev !== before.dev ||
+    after.ino !== before.ino ||
+    after.nlink !== 1 ||
+    after.size !== before.size ||
+    after.mtimeMs !== before.mtimeMs ||
+    sha256(content) !== sha256(expectedBytes)
+  ) {
+    throw new Error(`${label} changed`);
+  }
+}
+
 function createManifest() {
   validateDistDirectory();
   const bundle = readRegularFile(BUNDLE_PATH, "The staging bundle");
+  const config = readRegularFile(
+    CONFIG_PATH,
+    "The staging Wrangler configuration",
+  );
   if (existsSync(MANIFEST_PATH)) {
     const existing = lstatSync(MANIFEST_PATH);
     if (
@@ -147,11 +171,14 @@ function createManifest() {
     }
   }
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     releaseCommit: gitHead(),
     bundlePath: BUNDLE_PATH,
     sha256: sha256(bundle),
     size: bundle.length,
+    configPath: CONFIG_PATH,
+    configSha256: sha256(config),
+    configSize: config.length,
   };
   const temporaryManifest = `${MANIFEST_PATH}.tmp-${process.pid}`;
   let descriptor;
@@ -203,6 +230,9 @@ function verifyManifest() {
   }
   const expectedKeys = [
     "bundlePath",
+    "configPath",
+    "configSha256",
+    "configSize",
     "releaseCommit",
     "schemaVersion",
     "sha256",
@@ -214,12 +244,16 @@ function verifyManifest() {
     Array.isArray(manifest) ||
     JSON.stringify(Object.keys(manifest).sort()) !==
       JSON.stringify(expectedKeys) ||
-    manifest.schemaVersion !== 1 ||
+    manifest.schemaVersion !== 2 ||
     manifest.bundlePath !== BUNDLE_PATH ||
+    manifest.configPath !== CONFIG_PATH ||
     !/^[0-9a-f]{40}$/u.test(manifest.releaseCommit ?? "") ||
     !/^[0-9a-f]{64}$/u.test(manifest.sha256 ?? "") ||
+    !/^[0-9a-f]{64}$/u.test(manifest.configSha256 ?? "") ||
     !Number.isSafeInteger(manifest.size) ||
-    manifest.size < 0
+    manifest.size < 0 ||
+    !Number.isSafeInteger(manifest.configSize) ||
+    manifest.configSize < 0
   ) {
     fail("The staging bundle manifest has an invalid schema.");
   }
@@ -231,30 +265,67 @@ function verifyManifest() {
   if (bundle.length !== manifest.size || sha256(bundle) !== manifest.sha256) {
     fail("The staging bundle does not match its release manifest.");
   }
+  const config = readRegularFile(
+    CONFIG_PATH,
+    "The staging Wrangler configuration",
+  );
+  if (
+    config.length !== manifest.configSize ||
+    sha256(config) !== manifest.configSha256
+  ) {
+    fail(
+      "The staging Wrangler configuration does not match its release manifest.",
+    );
+  }
   process.stdout.write(
     `Verified staging bundle ${manifest.sha256} for ${approvedRelease}.\n`,
   );
-  return bundle;
+  return { bundle, config };
 }
 
-function deployVerifiedBundle(bundle, dryRun) {
+function deployVerifiedBundle(bundle, config, dryRun) {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "connectwise-staging-deploy-"),
   );
   const temporaryBundle = join(temporaryDirectory, "index.js");
-  let writeDescriptor;
+  // Keep the copied config beside the reviewed config so Wrangler preserves
+  // relative-path resolution while consuming only manifest-bound bytes.
+  const temporaryConfig = join(
+    process.cwd(),
+    `.wrangler.staging-deploy-${process.pid}-${randomBytes(16).toString("hex")}.jsonc`,
+  );
+  let bundleWriteDescriptor;
+  let configWriteDescriptor;
   let result;
   try {
-    writeDescriptor = openSync(
+    bundleWriteDescriptor = openSync(
       temporaryBundle,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
       0o600,
     );
-    writeFileSync(writeDescriptor, bundle);
-    fsyncSync(writeDescriptor);
-    closeSync(writeDescriptor);
-    writeDescriptor = undefined;
+    writeFileSync(bundleWriteDescriptor, bundle);
+    fsyncSync(bundleWriteDescriptor);
+    closeSync(bundleWriteDescriptor);
+    bundleWriteDescriptor = undefined;
+
+    configWriteDescriptor = openSync(
+      temporaryConfig,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    writeFileSync(configWriteDescriptor, config);
+    fsyncSync(configWriteDescriptor);
+    closeSync(configWriteDescriptor);
+    configWriteDescriptor = undefined;
+
     chmodSync(temporaryBundle, 0o400);
+    chmodSync(temporaryConfig, 0o400);
     chmodSync(temporaryDirectory, 0o500);
 
     const wrangler = join(process.cwd(), "node_modules", ".bin", "wrangler");
@@ -263,7 +334,7 @@ function deployVerifiedBundle(bundle, dryRun) {
       temporaryBundle,
       "--no-bundle",
       "--config",
-      resolve("wrangler.jsonc"),
+      temporaryConfig,
       "--env",
       "staging",
       "--keep-vars",
@@ -276,37 +347,35 @@ function deployVerifiedBundle(bundle, dryRun) {
     });
 
     try {
-      const privateStat = lstatSync(temporaryBundle);
-      if (
-        !privateStat.isFile() ||
-        privateStat.isSymbolicLink() ||
-        privateStat.nlink !== 1
-      ) {
-        throw new Error("private bundle type changed");
-      }
-      const deployedBytes = readFileSync(temporaryBundle);
-      const afterRead = lstatSync(temporaryBundle);
-      if (
-        afterRead.dev !== privateStat.dev ||
-        afterRead.ino !== privateStat.ino ||
-        afterRead.nlink !== 1 ||
-        afterRead.size !== privateStat.size ||
-        afterRead.mtimeMs !== privateStat.mtimeMs ||
-        sha256(deployedBytes) !== sha256(bundle)
-      ) {
-        throw new Error("private bundle changed");
-      }
+      verifyPrivateCopy(temporaryBundle, bundle, "private bundle");
+      verifyPrivateCopy(temporaryConfig, config, "private configuration");
     } catch (error) {
       result = { status: 1, error };
     }
   } finally {
-    if (writeDescriptor !== undefined) closeSync(writeDescriptor);
-    if (existsSync(temporaryDirectory)) chmodSync(temporaryDirectory, 0o700);
-    if (existsSync(temporaryBundle)) {
-      chmodSync(temporaryBundle, 0o600);
-      unlinkSync(temporaryBundle);
+    if (bundleWriteDescriptor !== undefined) closeSync(bundleWriteDescriptor);
+    if (configWriteDescriptor !== undefined) closeSync(configWriteDescriptor);
+    try {
+      const directoryStat = lstatSync(temporaryDirectory);
+      if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+        throw new Error("Private staging directory type changed");
+      }
+      chmodSync(temporaryDirectory, 0o700);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
     }
-    if (existsSync(temporaryDirectory)) rmdirSync(temporaryDirectory);
+    for (const path of [temporaryBundle, temporaryConfig]) {
+      try {
+        unlinkSync(path);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+    try {
+      rmdirSync(temporaryDirectory);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
   }
   if (result?.error || result?.status !== 0) {
     fail(
@@ -319,8 +388,12 @@ function deployVerifiedBundle(bundle, dryRun) {
 
 if (action === "create") createManifest();
 else {
-  const bundle = verifyManifest();
+  const verified = verifyManifest();
   if (action === "deploy" || action === "dry-run") {
-    deployVerifiedBundle(bundle, action === "dry-run");
+    deployVerifiedBundle(
+      verified.bundle,
+      verified.config,
+      action === "dry-run",
+    );
   }
 }

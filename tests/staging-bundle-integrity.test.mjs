@@ -35,6 +35,14 @@ async function createCheckout() {
   await mkdir(join(cwd, "dist"));
   await writeFile(join(cwd, "release.txt"), "reviewed\n");
   await writeFile(join(cwd, "dist", "index.js"), "export default {};\n");
+  await writeFile(
+    join(cwd, "wrangler.jsonc"),
+    JSON.stringify({
+      name: "connectwise-staging-bundle-test",
+      compatibility_date: "2026-09-01",
+      env: { staging: { name: "connectwise-staging-bundle-test-staging" } },
+    }),
+  );
   git(cwd, ["init", "--quiet"]);
   git(cwd, ["config", "user.name", "Staging Bundle Test"]);
   git(cwd, ["config", "user.email", "staging-bundle@example.invalid"]);
@@ -90,6 +98,38 @@ describe("staging bundle integrity", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(
         "The staging bundle does not match its release manifest.",
+      );
+    });
+  });
+
+  it("rejects a Wrangler configuration modified after its manifest was created", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      expect(run(cwd, "create").status).toBe(0);
+      await writeFile(join(cwd, "wrangler.jsonc"), '{"tampered":true}\n');
+
+      const result = run(cwd, "verify", head);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging Wrangler configuration does not match its release manifest.",
+      );
+    });
+  });
+
+  it("rejects a symlinked Wrangler configuration", async () => {
+    await withCheckout(async ({ cwd }) => {
+      await writeFile(join(cwd, "replacement.jsonc"), "{}\n");
+      await unlink(join(cwd, "wrangler.jsonc"));
+      await symlink(
+        join(cwd, "replacement.jsonc"),
+        join(cwd, "wrangler.jsonc"),
+      );
+
+      const result = run(cwd, "create");
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging Wrangler configuration must be a regular, non-symlink, single-link file.",
       );
     });
   });
@@ -168,6 +208,30 @@ describe("staging bundle integrity", () => {
       expect(result.stderr).toContain(
         "The staging bundle manifest must be a regular, non-symlink, single-link file.",
       );
+    });
+  });
+
+  it("keeps the verified config beside the reviewed config", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const bin = join(cwd, "node_modules", ".bin");
+      const wrangler = join(bin, "wrangler");
+      await mkdir(bin, { recursive: true });
+      await writeFile(
+        wrangler,
+        `#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+const configPath = process.argv[6];
+if (dirname(resolve(configPath)) !== process.cwd()) process.exit(2);
+if (!readFileSync(configPath, "utf8").includes("connectwise-staging-bundle-test")) process.exit(3);
+`,
+      );
+      await chmod(wrangler, 0o755);
+      expect(run(cwd, "create").status).toBe(0);
+
+      const result = run(cwd, "dry-run", head);
+
+      expect(result.status, result.stderr).toBe(0);
     });
   });
 
