@@ -829,7 +829,7 @@ describe("ConnectWiseClient", () => {
       },
     });
 
-    await client.getAgreement(7);
+    await expect(client.getAgreement(7)).resolves.toEqual({ id: 7 });
 
     const agreementUrl = new URL(capturedUrl);
     expect(agreementUrl.pathname).toBe(
@@ -840,6 +840,26 @@ describe("ConnectWiseClient", () => {
       fields: agreementCollectionFields,
     });
     expect(agreementUrl.searchParams.getAll("fields")).toHaveLength(1);
+  });
+
+  it("rejects malformed or mismatched agreement responses", async () => {
+    const invalidAgreements: unknown[] = [
+      null,
+      [],
+      {},
+      { id: "7" },
+      { id: 8, name: "Wrong agreement" },
+    ];
+
+    for (const invalidAgreement of invalidAgreements) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(invalidAgreement),
+      });
+
+      await expect(client.getAgreement(7)).rejects.toThrow(
+        "ConnectWise agreement does not match requested ID",
+      );
+    }
   });
 
   it("requests only projected fields for agreement additions", async () => {
