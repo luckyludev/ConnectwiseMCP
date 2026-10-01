@@ -32,11 +32,17 @@ RUN_ID_RE = re.compile(r"[1-9][0-9]*")
 def _regular_file(directory: Path, name: str) -> Path:
     path = directory / name
     try:
-        mode = path.lstat().st_mode
+        metadata = path.lstat()
     except FileNotFoundError as exc:
         raise ValueError(f"Missing required artifact file: {name}") from exc
-    if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
-        raise ValueError(f"Artifact file must be a regular non-symlink: {name}")
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+    ):
+        raise ValueError(
+            f"Artifact file must be a regular non-symlink single-link: {name}"
+        )
     return path
 
 
