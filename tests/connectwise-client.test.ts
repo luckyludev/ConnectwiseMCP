@@ -33,7 +33,8 @@ const scheduleEntryCollectionFields =
 const timeSheetCollectionFields =
   "id,member,year,period,dateStart,dateEnd,status,hours,deadline";
 const agreementAdditionSummaryFields = "extPrice,extCost";
-const agreementInvoiceCollectionFields = "id,invoiceNumber,total,date";
+const agreementInvoiceCollectionFields =
+  "id,invoiceNumber,total,date,agreement";
 const serviceTicketNoteCollectionFields =
   "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
 const projectTicketNoteCollectionFields =
@@ -839,16 +840,25 @@ describe("ConnectWiseClient", () => {
     });
   });
 
-  it("requests only projected fields for recent agreement invoices", async () => {
+  it("verifies and strips agreement relationships from recent invoices", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         urls.push(String(input));
-        return Response.json([]);
+        return Response.json([
+          {
+            id: 91,
+            invoiceNumber: "INV-91",
+            total: 125,
+            agreement: { id: 7 },
+          },
+        ]);
       },
     });
 
-    await client.getRecentAgreementInvoices(7, 5);
+    await expect(client.getRecentAgreementInvoices(7, 5)).resolves.toEqual([
+      { id: 91, invoiceNumber: "INV-91", total: 125 },
+    ]);
 
     const invoicesUrl = new URL(urls[0]!);
     expect(invoicesUrl.pathname).toBe(
@@ -862,6 +872,25 @@ describe("ConnectWiseClient", () => {
     });
     expect(invoicesUrl.searchParams.getAll("fields")).toHaveLength(1);
   });
+
+  it.each([
+    { id: 91, agreement: { id: 8 } },
+    { id: 91 },
+    { id: 91, agreement: null },
+    { id: 91, agreement: [] },
+    { id: 91, agreement: { id: "7" } },
+  ])(
+    "rejects an invoice without the exact requested agreement relationship: %j",
+    async (invoice) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([invoice]),
+      });
+
+      await expect(client.getRecentAgreementInvoices(7, 5)).rejects.toThrow(
+        "ConnectWise invoice is not associated with requested agreement",
+      );
+    },
+  );
 
   it("sends a fixed agreement-addition payload without caller-selected paths", async () => {
     let capturedUrl = "";
