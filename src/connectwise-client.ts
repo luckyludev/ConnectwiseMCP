@@ -485,7 +485,8 @@ const AGREEMENT_COLLECTION_FIELDS =
 const AGREEMENT_ADDITION_COLLECTION_FIELDS =
   "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description";
 const AGREEMENT_ADDITION_SUMMARY_FIELDS = "extPrice,extCost";
-const AGREEMENT_INVOICE_COLLECTION_FIELDS = "id,invoiceNumber,total,date";
+const AGREEMENT_INVOICE_COLLECTION_FIELDS =
+  "id,invoiceNumber,total,date,agreement";
 const TIME_ENTRY_COLLECTION_FIELDS =
   "id,actualHours,timeStart,member,notes,workType";
 const TICKET_TIME_ENTRY_RELATIONSHIP_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},chargeToType,chargeToId`;
@@ -1716,7 +1717,7 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(agreementId, "agreement ID");
       boundedPageSize(pageSize);
-      return requestBoundedList(
+      const invoices = (await requestBoundedList(
         "/finance/invoices",
         {
           conditions: `agreement/id=${agreementId}`,
@@ -1725,7 +1726,22 @@ export function createConnectWiseClient(
           orderBy: "date desc",
         },
         pageSize,
-      );
+      )) as Array<Record<string, unknown>>;
+      return invoices.map((invoice) => {
+        const agreement = invoice.agreement;
+        if (
+          !agreement ||
+          typeof agreement !== "object" ||
+          Array.isArray(agreement) ||
+          (agreement as Record<string, unknown>).id !== agreementId
+        ) {
+          throw new Error(
+            "ConnectWise invoice is not associated with requested agreement",
+          );
+        }
+        const { agreement: _agreement, ...item } = invoice;
+        return item;
+      });
     },
 
     async createServiceTicket(input): Promise<unknown> {
