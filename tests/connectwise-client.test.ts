@@ -632,6 +632,25 @@ describe("ConnectWiseClient", () => {
     expect(url.searchParams.getAll("fields")).toEqual([memberDetailFields]);
   });
 
+  it.each([
+    null,
+    [],
+    {},
+    { id: "149", name: "string-id" },
+    { id: 150, name: "different-member" },
+  ])(
+    "rejects a member detail response outside the mapped profile: %j",
+    async (member) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(member),
+      });
+
+      await expect(client.getMyMember()).rejects.toThrow(
+        "ConnectWise member response does not match mapped member",
+      );
+    },
+  );
+
   it("uses a Workers-supported redirect mode and refuses 3xx responses", async () => {
     let attempts = 0;
     let redirectMode: string | undefined;
@@ -932,8 +951,13 @@ describe("ConnectWiseClient", () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
-        urls.push(String(input));
-        return Response.json([]);
+        const url = String(input);
+        urls.push(url);
+        return Response.json(
+          new URL(url).pathname.endsWith("/system/members/149")
+            ? { id: 149 }
+            : [],
+        );
       },
     });
 

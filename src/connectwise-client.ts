@@ -1296,15 +1296,21 @@ export function createConnectWiseClient(
     },
 
     async getMyMember(): Promise<unknown> {
-      const memberId = credentials.memberId;
-      if (memberId === undefined) {
-        throw new Error(
-          "ConnectWise profile is missing memberId; add it to enable get_my_member",
-        );
-      }
-      return requestJson("GET", `/system/members/${memberId}`, {
+      const memberId = mappedMemberId("get_my_member");
+      const result = await requestJson("GET", `/system/members/${memberId}`, {
         fields: MEMBER_DETAIL_FIELDS,
       });
+      if (
+        !result ||
+        typeof result !== "object" ||
+        Array.isArray(result) ||
+        (result as Record<string, unknown>).id !== memberId
+      ) {
+        throw new Error(
+          "ConnectWise member response does not match mapped member",
+        );
+      }
+      return result;
     },
 
     async searchMembers(query: string, pageSize: number): Promise<unknown> {
