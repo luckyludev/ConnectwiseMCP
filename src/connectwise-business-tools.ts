@@ -748,7 +748,7 @@ export function registerConnectWiseBusinessTools(
     "get_ticket_notes_with_content",
     {
       description:
-        "Get bounded ticket-note content. ConnectWise API-member permissions determine access, including internal notes.",
+        "Get bounded service-ticket note content. ConnectWise API-member permissions determine access, including internal notes.",
       inputSchema: {
         ticketId: positiveId,
         includeInternal: z.boolean().default(true),

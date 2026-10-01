@@ -37,8 +37,6 @@ const agreementInvoiceCollectionFields =
   "id,invoiceNumber,total,date,agreement";
 const serviceTicketNoteCollectionFields =
   "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
-const projectTicketNoteCollectionFields =
-  "id,text,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
 const ticketAttachmentCollectionFields =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag,recordType,recordId";
 const ticketTaskCollectionFields = "id,summary,priority,notes";
@@ -234,12 +232,11 @@ describe("ConnectWiseClient", () => {
     );
   });
 
-  it("minimizes ticket notes and tasks at the upstream boundary", async () => {
+  it("minimizes service-ticket notes and tasks at the upstream boundary", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         urls.push(String(input));
-        if (urls.length === 1) return new Response(null, { status: 404 });
         return Response.json([]);
       },
     });
@@ -247,15 +244,11 @@ describe("ConnectWiseClient", () => {
     await expect(client.getTicketNotes(123, 20)).resolves.toEqual([]);
     await expect(client.getTicketTasks(123, 20)).resolves.toEqual([]);
 
-    expect(urls).toHaveLength(3);
+    expect(urls).toHaveLength(2);
     const serviceNotesUrl = new URL(urls[0]!);
-    const projectNotesUrl = new URL(urls[1]!);
-    const tasksUrl = new URL(urls[2]!);
+    const tasksUrl = new URL(urls[1]!);
     expect(
       serviceNotesUrl.pathname.endsWith("/service/tickets/123/notes"),
-    ).toBe(true);
-    expect(
-      projectNotesUrl.pathname.endsWith("/project/tickets/123/notes"),
     ).toBe(true);
     expect(Object.fromEntries(serviceNotesUrl.searchParams)).toEqual({
       fields: serviceTicketNoteCollectionFields,
@@ -265,14 +258,6 @@ describe("ConnectWiseClient", () => {
     expect(serviceNotesUrl.searchParams.getAll("fields")).toEqual([
       serviceTicketNoteCollectionFields,
     ]);
-    expect(Object.fromEntries(projectNotesUrl.searchParams)).toEqual({
-      fields: projectTicketNoteCollectionFields,
-      pageSize: "20",
-      orderBy: "id asc",
-    });
-    expect(projectNotesUrl.searchParams.getAll("fields")).toEqual([
-      projectTicketNoteCollectionFields,
-    ]);
     expect(tasksUrl.pathname.endsWith("/service/tickets/123/tasks")).toBe(true);
     expect(Object.fromEntries(tasksUrl.searchParams)).toEqual({
       fields: ticketTaskCollectionFields,
@@ -281,6 +266,24 @@ describe("ConnectWiseClient", () => {
     expect(tasksUrl.searchParams.getAll("fields")).toEqual([
       ticketTaskCollectionFields,
     ]);
+  });
+
+  it("does not probe project-ticket notes when a service ticket is absent", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return new Response(null, { status: 404 });
+      },
+    });
+
+    await expect(client.getTicketNotes(123, 20)).rejects.toThrow(
+      "ConnectWise request failed (404)",
+    );
+    expect(urls).toHaveLength(1);
+    expect(
+      new URL(urls[0]!).pathname.endsWith("/service/tickets/123/notes"),
+    ).toBe(true);
   });
 
   it("minimizes ticket time-entry reads, verifies their relationship, and strips verification fields", async () => {
