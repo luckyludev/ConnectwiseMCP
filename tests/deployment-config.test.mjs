@@ -352,6 +352,12 @@ describe("staging deployment configuration", () => {
       2,
     );
     expect(stagingHowto).toContain("(cutover-rollback-runbook.md)");
+    expect(checklist).toContain(
+      "staging release manifest binds both the generated regular, non-symlink, single-link `dist/index.js` bytes and the regular, non-symlink, single-link `wrangler.jsonc` bytes and SHA-256 digests",
+    );
+    expect(checklist).toContain(
+      "passes only private read-only copies of those verified bytes to Wrangler while preserving configuration-relative path resolution",
+    );
     for (const requiredSection of [
       "## 1. Required change record",
       "## 2. Measurable rollback triggers",
