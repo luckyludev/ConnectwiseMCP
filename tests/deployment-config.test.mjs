@@ -53,6 +53,7 @@ describe("dependency maintenance configuration", () => {
     expect(
       legacyWorkflow.match(/- "\.github\/dependabot\.yml"/gu),
     ).toHaveLength(1);
+    expect(legacyWorkflow).toContain("node-version: 24.11.0");
   });
 
   it("installs legacy CI tooling only from a reproducible hash lock", async () => {
