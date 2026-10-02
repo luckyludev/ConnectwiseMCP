@@ -1550,6 +1550,51 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow("Invalid startDate calendar date");
   });
 
+  it("verifies returned schedule entries stay within the requested date range", async () => {
+    const responses: unknown[][] = [
+      [
+        { id: 2, member: { id: 149 }, dateStart: "2026-08-15T23:59:59Z" },
+        { id: 1, member: { id: 149 }, dateStart: "2026-08-01T00:00:00Z" },
+      ],
+      [{ id: 3, member: { id: 149 }, dateStart: "2026-07-31T23:59:59Z" }],
+      [{ id: 4, member: { id: 149 }, dateStart: "2026-08-16T00:00:00Z" }],
+      [{ id: 5, member: { id: 149 } }],
+      [{ id: 6, member: { id: 149 }, dateStart: "2026-02-30T12:00:00Z" }],
+      [{ id: 7, member: { id: 149 }, dateStart: "2026-08-01Tgarbage" }],
+      [{ id: 8, member: { id: 149 }, dateStart: "2026-08-01T00:00:00+01:00" }],
+      [{ id: 9, member: { id: 149 }, dateStart: "2026-08-15T23:59:59-01:00" }],
+      [{ id: 10, member: { id: 149 }, dateStart: "not-a-date" }],
+    ];
+    let responseIndex = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json(responses[responseIndex++]!),
+    });
+    const range = {
+      memberId: 149,
+      startDate: "2026-08-01",
+      endDate: "2026-08-15",
+    };
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", range),
+    ).resolves.toEqual([
+      { id: 1, member: { id: 149 }, dateStart: "2026-08-01T00:00:00Z" },
+      { id: 2, member: { id: 149 }, dateStart: "2026-08-15T23:59:59Z" },
+    ]);
+    for (let index = 0; index < 7; index += 1) {
+      await expect(
+        client.catalogGet("schedule.entries.byMember", range),
+      ).rejects.toThrow(
+        "ConnectWise schedule entry is outside requested date range",
+      );
+    }
+    await expect(
+      client.catalogGet("schedule.entries.byMember", { memberId: 149 }),
+    ).resolves.toEqual([
+      { id: 10, member: { id: 149 }, dateStart: "not-a-date" },
+    ]);
+  });
+
   it("scopes dedicated schedule reads to the mapped profile member", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
