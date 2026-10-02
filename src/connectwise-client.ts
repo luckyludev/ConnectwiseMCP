@@ -1660,9 +1660,14 @@ export function createConnectWiseClient(
 
     async getAgreement(agreementId: number): Promise<unknown> {
       positiveId(agreementId, "agreement ID");
-      return requestJson("GET", `/finance/agreements/${agreementId}`, {
-        fields: AGREEMENT_COLLECTION_FIELDS,
-      });
+      const agreement = await requestJson(
+        "GET",
+        `/finance/agreements/${agreementId}`,
+        {
+          fields: AGREEMENT_COLLECTION_FIELDS,
+        },
+      );
+      return verifiedRecordIdentity(agreement, agreementId, "agreement");
     },
 
     async getAgreementAdditions(
