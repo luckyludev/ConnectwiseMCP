@@ -1055,8 +1055,15 @@ export function createConnectWiseClient(
     operation: string,
   ): Promise<void> {
     const memberId = mappedMemberId(operation);
-    const entry = await requestJson("GET", `/time/entries/${timeEntryId}`);
-    assertMappedMember(entry, memberId);
+    const entry = await requestJson("GET", `/time/entries/${timeEntryId}`, {
+      fields: "id,member",
+    });
+    const verifiedEntry = verifiedRecordIdentity(
+      entry,
+      timeEntryId,
+      "time entry",
+    );
+    assertMappedMember(verifiedEntry, memberId);
   }
 
   return {
