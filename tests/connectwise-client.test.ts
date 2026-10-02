@@ -2054,6 +2054,49 @@ describe("ConnectWiseClient", () => {
     expect(uploadMethods).toEqual(["GET"]);
   });
 
+  it("rejects malformed or mismatched time-entry attachment authorization responses", async () => {
+    const invalidEntries: unknown[] = [
+      null,
+      [],
+      {},
+      { id: "42", member: { id: 149 } },
+      { id: 43, member: { id: 149 } },
+    ];
+
+    for (const invalidEntry of invalidEntries) {
+      for (const writeForm of ["attachment", "document"] as const) {
+        const methods: string[] = [];
+        const client = createConnectWiseClient(credentials, {
+          fetcher: async (_input, init) => {
+            methods.push(
+              (init as { method?: string } | undefined)?.method ?? "GET",
+            );
+            return Response.json(invalidEntry);
+          },
+        });
+
+        const write =
+          writeForm === "attachment"
+            ? client.attachImageToTimeEntry(42, {
+                filename: "image.png",
+                base64: "AAAA",
+                mimeType: "image/png",
+              })
+            : client.uploadImageDocument("TimeEntry", 42, {
+                fileName: "image.png",
+                mimeType: "image/png",
+                base64: "iVBORw0KGgo=",
+                privateFlag: true,
+              });
+
+        await expect(write).rejects.toThrow(
+          "ConnectWise time entry does not match requested ID",
+        );
+        expect(methods).toEqual(["GET"]);
+      }
+    }
+  });
+
   it("checks time-entry ownership before both attachment write forms", async () => {
     const calls: string[] = [];
     const client = createConnectWiseClient(credentials, {
@@ -2086,8 +2129,14 @@ describe("ConnectWiseClient", () => {
       "GET",
       "POST",
     ]);
-    expect(calls[0]).toContain("/time/entries/42");
-    expect(calls[2]).toContain("/time/entries/42");
+    const lookupCalls = calls.filter((call) => call.startsWith("GET "));
+    expect(lookupCalls).toHaveLength(2);
+    for (const lookupCall of lookupCalls) {
+      const lookupUrl = new URL(lookupCall.slice("GET ".length));
+      expect(lookupUrl.pathname).toBe("/v4_6_release/apis/3.0/time/entries/42");
+      expect(lookupUrl.searchParams.getAll("fields")).toEqual(["id,member"]);
+      expect([...lookupUrl.searchParams.keys()]).toEqual(["fields"]);
+    }
   });
 
   it("minimizes object-scoped schedule reads at the upstream boundary", async () => {
@@ -2483,7 +2532,7 @@ describe("ConnectWiseClient", () => {
       client.attachImageToTimeEntry(42, imagePayload),
     ).resolves.toEqual({ id: 66 });
     expect(calls[0]).toBe(
-      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/time/entries/42",
+      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/time/entries/42?fields=id%2Cmember",
     );
     expect(capturedUrl).toBe(
       "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/timeentries/42/attachments",
