@@ -280,10 +280,10 @@ function verifyManifest() {
   process.stdout.write(
     `Verified staging bundle ${manifest.sha256} for ${approvedRelease}.\n`,
   );
-  return { bundle, config };
+  return { bundle, config, releaseCommit: approvedRelease };
 }
 
-function deployVerifiedBundle(bundle, config, dryRun) {
+function deployVerifiedBundle(bundle, config, releaseCommit, dryRun) {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "connectwise-staging-deploy-"),
   );
@@ -358,6 +358,10 @@ function deployVerifiedBundle(bundle, config, dryRun) {
       "--strict",
       "--env-file",
       temporaryEnvironment,
+      "--tag",
+      releaseCommit,
+      "--message",
+      `ConnectwiseMCP staging release ${releaseCommit}`,
     ];
     if (dryRun) arguments_.push("--dry-run");
     result = spawnSync(wrangler, arguments_, {
@@ -423,6 +427,7 @@ else {
     deployVerifiedBundle(
       verified.bundle,
       verified.config,
+      verified.releaseCommit,
       action === "dry-run",
     );
   }
