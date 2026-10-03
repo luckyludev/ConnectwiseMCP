@@ -769,7 +769,7 @@ const scheduleFields = new Set([
 ]);
 const isoOffset =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)$/;
-let previousStart = "";
+let previousStart = Number.NEGATIVE_INFINITY;
 const invalidSchedule =
   !schedule.ok ||
   !Array.isArray(scheduleList) ||
@@ -805,11 +805,11 @@ const invalidSchedule =
       start < SCHEDULE_START_TIMESTAMP ||
       start > SCHEDULE_END_TIMESTAMP ||
       end < start ||
-      (previousStart !== "" && entry.start.localeCompare(previousStart) < 0)
+      start < previousStart
     ) {
       return true;
     }
-    previousStart = entry.start;
+    previousStart = start;
     return false;
   });
 if (invalidSchedule) {

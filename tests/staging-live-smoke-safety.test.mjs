@@ -847,6 +847,22 @@ describe("staging smoke output safety", () => {
               },
               scheduleRows[0],
             ];
+          } else if (
+            authorization === "Bearer SCHEDULE_OFFSET_UNORDERED_CANARY"
+          ) {
+            data = [
+              {
+                ...scheduleRows[0],
+                id: 3,
+                start: "2026-09-01T10:00:00-05:00",
+                end: "2026-09-01T11:00:00-05:00",
+              },
+              {
+                ...scheduleRows[0],
+                start: "2026-09-01T11:00:00+05:00",
+                end: "2026-09-01T12:00:00+05:00",
+              },
+            ];
           } else if (authorization === "Bearer SCHEDULE_OVERSIZED_CANARY") {
             data = Array.from({ length: 21 }, (_, index) => ({
               ...scheduleRows[0],
@@ -979,6 +995,7 @@ describe("staging smoke output safety", () => {
         "SCHEDULE_WRONG_MEMBER",
         "SCHEDULE_OUT_OF_RANGE",
         "SCHEDULE_UNORDERED",
+        "SCHEDULE_OFFSET_UNORDERED",
         "SCHEDULE_EXTRA",
         "SCHEDULE_OVERSIZED",
       ].map(async (fault) => [fault, await runSmoke(`${fault}_CANARY`)]),

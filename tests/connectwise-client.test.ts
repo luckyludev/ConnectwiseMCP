@@ -1990,6 +1990,39 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
+  it("orders schedule entries by chronological instant across offsets", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          {
+            id: 1,
+            member: { id: 149 },
+            dateStart: "2026-08-01T10:00:00-05:00",
+          },
+          {
+            id: 2,
+            member: { id: 149 },
+            dateStart: "2026-08-01T11:00:00+05:00",
+          },
+        ]),
+    });
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", { memberId: 149 }),
+    ).resolves.toEqual([
+      {
+        id: 2,
+        member: { id: 149 },
+        dateStart: "2026-08-01T11:00:00+05:00",
+      },
+      {
+        id: 1,
+        member: { id: 149 },
+        dateStart: "2026-08-01T10:00:00-05:00",
+      },
+    ]);
+  });
+
   it("scopes dedicated schedule reads to the mapped profile member", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
