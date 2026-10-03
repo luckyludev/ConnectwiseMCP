@@ -1429,7 +1429,7 @@ export function createConnectWiseClient(
     async searchMembers(query: string, pageSize: number): Promise<unknown> {
       const escaped = targetedSearchString(query);
       targetedSearchPageSize(pageSize);
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/system/members",
         {
           conditions: `name like '%${escaped}%'`,
@@ -1439,12 +1439,14 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      assertTargetedNameList(result, query);
+      return result;
     },
 
     async searchCompanies(query: string, pageSize: number): Promise<unknown> {
       targetedSearchPageSize(pageSize);
       const escaped = targetedSearchString(query);
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/company/companies",
         {
           conditions: `name like '%${escaped}%'`,
@@ -1454,6 +1456,8 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      assertTargetedNameList(result, query);
+      return result;
     },
 
     async searchContacts(query: string, pageSize: number): Promise<unknown> {
