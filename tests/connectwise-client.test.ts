@@ -2316,6 +2316,53 @@ describe("ConnectWiseClient", () => {
     expect(logLine).not.toContain("api-na.myconnectwise.net");
   });
 
+  it.each([
+    [
+      "service ticket update",
+      "service ticket",
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.updateServiceTicket(9, { summary: "Updated" }),
+    ],
+    [
+      "schedule entry update",
+      "schedule entry",
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.updateScheduleEntry(9, { doneFlag: true }),
+    ],
+    [
+      "schedule entry delete",
+      "schedule entry",
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.deleteScheduleEntry(9),
+    ],
+  ] as const)(
+    "rejects malformed or mismatched source identity before %s",
+    async (_operation, recordType, mutate) => {
+      for (const response of [
+        null,
+        [],
+        {},
+        { id: "9", member: { id: 149 } },
+        { id: 10, member: { id: 149 } },
+      ]) {
+        const methods: string[] = [];
+        const client = createConnectWiseClient(credentials, {
+          fetcher: async (_input, init) => {
+            methods.push(
+              (init as { method?: string } | undefined)?.method ?? "GET",
+            );
+            return Response.json(response);
+          },
+        });
+
+        await expect(mutate(client)).rejects.toThrow(
+          `ConnectWise ${recordType} does not match requested ID`,
+        );
+        expect(methods).toEqual(["GET"]);
+      }
+    },
+  );
+
   it("updates a schedule entry via GET-then-merge PUT, preserving unpassed fields", async () => {
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
     const client = createConnectWiseClient(credentials, {
