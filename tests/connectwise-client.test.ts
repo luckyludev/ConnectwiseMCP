@@ -36,7 +36,7 @@ const agreementAdditionSummaryFields = "extPrice,extCost,agreementId";
 const agreementInvoiceCollectionFields =
   "id,invoiceNumber,total,date,agreement";
 const serviceTicketNoteCollectionFields =
-  "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
+  "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact,ticketId";
 const ticketAttachmentCollectionFields =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag,recordType,recordId";
 const ticketTaskCollectionFields = "id,summary,priority,notes,ticketId";
@@ -289,6 +289,57 @@ describe("ConnectWiseClient", () => {
     expect(tasksUrl.searchParams.getAll("fields")).toEqual([
       ticketTaskCollectionFields,
     ]);
+  });
+
+  it("verifies and strips ticket relationships from note results", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          {
+            id: 301,
+            text: "Customer update",
+            ticketId: 123,
+          },
+        ]),
+    });
+
+    await expect(client.getTicketNotes(123, 20)).resolves.toEqual([
+      {
+        id: 301,
+        text: "Customer update",
+      },
+    ]);
+  });
+
+  it.each([
+    { id: 301, ticketId: 124 },
+    { id: 301 },
+    { id: 301, ticketId: "123" },
+  ])(
+    "rejects a note without the exact requested ticket relationship: %j",
+    async (note) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([note]),
+      });
+
+      await expect(client.getTicketNotes(123, 20)).rejects.toThrow(
+        "ConnectWise note is not associated with requested ticket",
+      );
+    },
+  );
+
+  it("rejects a mismatched note later in the bounded result", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          { id: 301, ticketId: 123 },
+          { id: 302, ticketId: 124 },
+        ]),
+    });
+
+    await expect(client.getTicketNotes(123, 20)).rejects.toThrow(
+      "ConnectWise note is not associated with requested ticket",
+    );
   });
 
   it("verifies and strips ticket relationships from task results", async () => {
