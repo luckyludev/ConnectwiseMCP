@@ -288,6 +288,8 @@ function deployVerifiedBundle(bundle, config, dryRun) {
     join(tmpdir(), "connectwise-staging-deploy-"),
   );
   const temporaryBundle = join(temporaryDirectory, "index.js");
+  const temporaryEnvironment = join(temporaryDirectory, "empty.env");
+  const emptyEnvironment = Buffer.alloc(0);
   // Keep the copied config beside the reviewed config so Wrangler preserves
   // relative-path resolution while consuming only manifest-bound bytes.
   const temporaryConfig = join(
@@ -295,6 +297,7 @@ function deployVerifiedBundle(bundle, config, dryRun) {
     `.wrangler.staging-deploy-${process.pid}-${randomBytes(16).toString("hex")}.jsonc`,
   );
   let bundleWriteDescriptor;
+  let environmentWriteDescriptor;
   let configWriteDescriptor;
   let result;
   try {
@@ -311,6 +314,19 @@ function deployVerifiedBundle(bundle, config, dryRun) {
     closeSync(bundleWriteDescriptor);
     bundleWriteDescriptor = undefined;
 
+    environmentWriteDescriptor = openSync(
+      temporaryEnvironment,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    writeFileSync(environmentWriteDescriptor, emptyEnvironment);
+    fsyncSync(environmentWriteDescriptor);
+    closeSync(environmentWriteDescriptor);
+    environmentWriteDescriptor = undefined;
+
     configWriteDescriptor = openSync(
       temporaryConfig,
       constants.O_WRONLY |
@@ -325,6 +341,7 @@ function deployVerifiedBundle(bundle, config, dryRun) {
     configWriteDescriptor = undefined;
 
     chmodSync(temporaryBundle, 0o400);
+    chmodSync(temporaryEnvironment, 0o400);
     chmodSync(temporaryConfig, 0o400);
     chmodSync(temporaryDirectory, 0o500);
 
@@ -339,6 +356,8 @@ function deployVerifiedBundle(bundle, config, dryRun) {
       "staging",
       "--keep-vars",
       "--strict",
+      "--env-file",
+      temporaryEnvironment,
     ];
     if (dryRun) arguments_.push("--dry-run");
     result = spawnSync(wrangler, arguments_, {
@@ -348,12 +367,19 @@ function deployVerifiedBundle(bundle, config, dryRun) {
 
     try {
       verifyPrivateCopy(temporaryBundle, bundle, "private bundle");
+      verifyPrivateCopy(
+        temporaryEnvironment,
+        emptyEnvironment,
+        "private environment",
+      );
       verifyPrivateCopy(temporaryConfig, config, "private configuration");
     } catch (error) {
       result = { status: 1, error };
     }
   } finally {
     if (bundleWriteDescriptor !== undefined) closeSync(bundleWriteDescriptor);
+    if (environmentWriteDescriptor !== undefined)
+      closeSync(environmentWriteDescriptor);
     if (configWriteDescriptor !== undefined) closeSync(configWriteDescriptor);
     try {
       const directoryStat = lstatSync(temporaryDirectory);
@@ -364,7 +390,11 @@ function deployVerifiedBundle(bundle, config, dryRun) {
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
-    for (const path of [temporaryBundle, temporaryConfig]) {
+    for (const path of [
+      temporaryBundle,
+      temporaryEnvironment,
+      temporaryConfig,
+    ]) {
       try {
         unlinkSync(path);
       } catch (error) {

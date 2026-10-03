@@ -66,6 +66,19 @@ if (realpathSync(repositoryRoot) !== realpathSync(process.cwd())) {
   process.exit(1);
 }
 
+const implicitWranglerEnvironmentFiles = [
+  ".env",
+  ".env.local",
+  ".env.staging",
+  ".env.staging.local",
+];
+if (implicitWranglerEnvironmentFiles.some((path) => existsSync(path))) {
+  process.stderr.write(
+    "Implicit Wrangler environment files are not allowed in the staging release checkout.\n",
+  );
+  process.exit(1);
+}
+
 const urlRewriteRules = spawnSync(
   "git",
   [
