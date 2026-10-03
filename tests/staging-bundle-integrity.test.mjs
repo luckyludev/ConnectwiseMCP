@@ -227,6 +227,10 @@ if (!readFileSync(configPath, "utf8").includes("connectwise-staging-bundle-test"
 const environmentFlag = process.argv.indexOf("--env-file");
 if (environmentFlag < 0 || !process.argv[environmentFlag + 1]) process.exit(4);
 if (readFileSync(process.argv[environmentFlag + 1]).length !== 0) process.exit(5);
+const tagFlag = process.argv.indexOf("--tag");
+if (tagFlag < 0 || process.argv[tagFlag + 1] !== ${JSON.stringify(head)}) process.exit(6);
+const messageFlag = process.argv.indexOf("--message");
+if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`ConnectwiseMCP staging release ${head}`)}) process.exit(7);
 `,
       );
       await chmod(wrangler, 0o755);
