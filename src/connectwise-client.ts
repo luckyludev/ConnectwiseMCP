@@ -502,6 +502,7 @@ const TICKET_ATTACHMENT_COLLECTION_FIELDS =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
 const TICKET_ATTACHMENT_RELATIONSHIP_FIELDS = `${TICKET_ATTACHMENT_COLLECTION_FIELDS},recordType,recordId`;
 const TICKET_TASK_COLLECTION_FIELDS = "id,summary,priority,notes";
+const TICKET_TASK_RELATIONSHIP_FIELDS = `${TICKET_TASK_COLLECTION_FIELDS},ticketId`;
 const SERVICE_BOARD_COLLECTION_FIELDS = "id,name";
 const BOARD_STATUS_COLLECTION_FIELDS = "id,name";
 const BOARD_TYPE_COLLECTION_FIELDS = "id,name";
@@ -1257,11 +1258,20 @@ export function createConnectWiseClient(
     async getTicketTasks(ticketId: number, pageSize: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       boundedPageSize(pageSize);
-      return requestBoundedList(
+      const tasks = await requestBoundedList(
         `/service/tickets/${ticketId}/tasks`,
-        { fields: TICKET_TASK_COLLECTION_FIELDS, pageSize },
+        { fields: TICKET_TASK_RELATIONSHIP_FIELDS, pageSize },
         pageSize,
       );
+      return (tasks as Array<Record<string, unknown>>).map((task) => {
+        if (task.ticketId !== ticketId) {
+          throw new Error(
+            "ConnectWise task is not associated with requested ticket",
+          );
+        }
+        const { ticketId: _ticketId, ...item } = task;
+        return item;
+      });
     },
 
     async getTicketTimeEntries(

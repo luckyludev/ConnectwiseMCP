@@ -39,7 +39,7 @@ const serviceTicketNoteCollectionFields =
   "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
 const ticketAttachmentCollectionFields =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag,recordType,recordId";
-const ticketTaskCollectionFields = "id,summary,priority,notes";
+const ticketTaskCollectionFields = "id,summary,priority,notes,ticketId";
 const serviceBoardCollectionFields = "id,name";
 const boardStatusCollectionFields = "id,name";
 const boardTypeCollectionFields = "id,name";
@@ -289,6 +289,61 @@ describe("ConnectWiseClient", () => {
     expect(tasksUrl.searchParams.getAll("fields")).toEqual([
       ticketTaskCollectionFields,
     ]);
+  });
+
+  it("verifies and strips ticket relationships from task results", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          {
+            id: 401,
+            summary: "Call customer",
+            priority: 1,
+            notes: "Confirm maintenance window",
+            ticketId: 123,
+          },
+        ]),
+    });
+
+    await expect(client.getTicketTasks(123, 20)).resolves.toEqual([
+      {
+        id: 401,
+        summary: "Call customer",
+        priority: 1,
+        notes: "Confirm maintenance window",
+      },
+    ]);
+  });
+
+  it.each([
+    { id: 401, ticketId: 124 },
+    { id: 401 },
+    { id: 401, ticketId: "123" },
+  ])(
+    "rejects a task without the exact requested ticket relationship: %j",
+    async (task) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([task]),
+      });
+
+      await expect(client.getTicketTasks(123, 20)).rejects.toThrow(
+        "ConnectWise task is not associated with requested ticket",
+      );
+    },
+  );
+
+  it("rejects a mismatched task later in the bounded result", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          { id: 401, ticketId: 123 },
+          { id: 402, ticketId: 124 },
+        ]),
+    });
+
+    await expect(client.getTicketTasks(123, 20)).rejects.toThrow(
+      "ConnectWise task is not associated with requested ticket",
+    );
   });
 
   it("does not probe project-ticket notes when a service ticket is absent", async () => {
