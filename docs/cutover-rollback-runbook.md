@@ -35,7 +35,7 @@ The rollback authority may roll back before a threshold is crossed when evidence
 
 ### Verified rollback image artifact
 
-Every successful canonical `main` run of `legacy-oauth-ci` retains `legacy-rollback-image-<release-commit>` for 90 days. The artifact contains the exact image archive that CI reloaded and smoke-tested, its SHA-256 checksum, and a manifest binding the archive and image ID to the workflow commit and run. A pull-request merge commit, a failed run, an expired artifact, or a local rebuild is not rollback evidence.
+Every successful canonical `main` run of `legacy-oauth-ci` retains `legacy-rollback-image-<release-commit>` for 90 days. The artifact contains the exact image archive that CI reloaded and smoke-tested, its SHA-256 checksum, a CycloneDX SBOM generated from that image, and a manifest binding both the archive and SBOM digests plus the image ID to the workflow commit and run. A pull-request merge commit, a failed run, an expired artifact, or a local rebuild is not rollback evidence.
 
 Before the change window, select a successful `push`, `schedule`, or manually dispatched run on `refs/heads/main` whose full 40-character `headSha` is the reviewed release commit. Record its run URL/ID in the approved operations system. Download the artifact without renaming its files:
 
@@ -49,7 +49,7 @@ python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback
   . <FULL_RELEASE_COMMIT> <SUCCESSFUL_MAIN_RUN_ID>
 ```
 
-The verifier fails closed unless the artifact directory itself is a real directory, the manifest has the exact schema and expected release/run bindings, the three fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, and the downloaded archive matches its SHA-256. It opens the directory and files without following symlinks and keeps every validation/read bound to the same file descriptors, rejecting metadata changes observed during a read. Do not edit, rename, symlink, or hard-link the artifact directory or files to make verification pass.
+The verifier fails closed unless the artifact directory itself is a real directory, the manifest has the exact schema and expected release/run bindings, the four fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, the downloaded archive and bounded CycloneDX SBOM match their manifest SHA-256 digests, and the SBOM contains a component inventory. It opens the directory and files without following symlinks and keeps every validation/read bound to the same file descriptors, rejecting metadata changes observed during a read. Do not edit, rename, symlink, or hard-link the artifact directory or files to make verification pass.
 
 Load and verify the tested image before rehearsal and preflight:
 
