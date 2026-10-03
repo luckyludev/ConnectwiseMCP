@@ -510,6 +510,12 @@ const BOARD_TYPE_COLLECTION_FIELDS = "id,name";
 const SERVICE_STATUS_COLLECTION_FIELDS = "id,name";
 const SERVICE_PRIORITY_COLLECTION_FIELDS = "id,name";
 const SERVICE_SOURCE_COLLECTION_FIELDS = "id,name";
+const CATALOG_ID_PARAMS = new Set([
+  "boardId",
+  "memberId",
+  "recordId",
+  "statusId",
+]);
 
 const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "service.boards.statuses": {
@@ -1745,10 +1751,16 @@ export function createConnectWiseClient(
       }
       for (const key of definition.required) {
         const value = effectiveParams[key];
-        if (typeof value === "number") {
-          positiveId(value, `${key}`);
-        } else if (typeof value !== "string" || value.length < 1) {
+        if (value === undefined || value === "") {
           throw new Error(`Missing ${key}`);
+        }
+        if (CATALOG_ID_PARAMS.has(key)) {
+          if (typeof value !== "number") {
+            throw new Error(`Invalid ${key}`);
+          }
+          positiveId(value, key);
+        } else if (typeof value !== "string") {
+          throw new Error(`Invalid ${key}`);
         }
       }
       if (
