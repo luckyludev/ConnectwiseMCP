@@ -1255,6 +1255,63 @@ describe("ConnectWiseClient", () => {
     expect(urls).toHaveLength(2);
   });
 
+  it("verifies every targeted member and company result matches the requested name", async () => {
+    for (const { query, records, search } of [
+      {
+        query: "  O'Brien  ",
+        records: [
+          { id: 1, name: "Pat O'BRIEN" },
+          { id: 2, name: "O'Brien, Sam" },
+        ],
+        search: "members",
+      },
+      {
+        query: "éx",
+        records: [{ id: 1, name: "E\u0301xample Systems" }],
+        search: "companies",
+      },
+    ] as const) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(records),
+      });
+      const result =
+        search === "members"
+          ? client.searchMembers(query, 20)
+          : client.searchCompanies(query, 20);
+      await expect(result).resolves.toEqual(records);
+    }
+
+    for (const search of ["members", "companies"] as const) {
+      const mismatchClient = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json([
+            { id: 1, name: "Alice Example" },
+            { id: 2, name: "Unrelated" },
+          ]),
+      });
+      const mismatchResult =
+        search === "members"
+          ? mismatchClient.searchMembers("Alice", 20)
+          : mismatchClient.searchCompanies("Alice", 20);
+      await expect(mismatchResult).rejects.toThrow(
+        "ConnectWise record does not match targeted name search",
+      );
+
+      for (const name of [undefined, null, 7, {}, []]) {
+        const malformedClient = createConnectWiseClient(credentials, {
+          fetcher: async () => Response.json([{ id: 1, name }]),
+        });
+        const malformedResult =
+          search === "members"
+            ? malformedClient.searchMembers("valid", 20)
+            : malformedClient.searchCompanies("valid", 20);
+        await expect(malformedResult).rejects.toThrow(
+          "ConnectWise record does not match targeted name search",
+        );
+      }
+    }
+  });
+
   it("verifies every targeted contact result matches the requested name or email", async () => {
     for (const { query, records } of [
       {
