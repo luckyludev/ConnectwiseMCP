@@ -1255,6 +1255,56 @@ describe("ConnectWiseClient", () => {
     expect(urls).toHaveLength(2);
   });
 
+  it("verifies every targeted contact result matches the requested name or email", async () => {
+    for (const { query, records } of [
+      {
+        query: "  O'Brien  ",
+        records: [
+          { id: 1, name: "Pat O'BRIEN", email: "pat@example.com" },
+          { id: 2, name: "O'Brien, Sam", email: null },
+        ],
+      },
+      {
+        query: "éx",
+        records: [{ id: 1, name: "Other", email: "team@e\u0301xample.com" }],
+      },
+      {
+        query: "a@b.com",
+        records: [{ id: 1, email: "A@B.COM" }],
+      },
+    ] as const) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(records),
+      });
+      await expect(client.searchContacts(query, 20)).resolves.toEqual(records);
+    }
+
+    const mismatchClient = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          { id: 1, name: "Alice Example", email: "alice@example.com" },
+          { id: 2, name: "Unrelated", email: "other@example.net" },
+        ]),
+    });
+    await expect(mismatchClient.searchContacts("Alice", 20)).rejects.toThrow(
+      "ConnectWise record does not match targeted contact search",
+    );
+
+    for (const fields of [
+      {},
+      { name: null, email: null },
+      { name: 7, email: {} },
+      { name: [], email: false },
+    ]) {
+      const malformedClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([{ id: 1, ...fields }]),
+      });
+      await expect(malformedClient.searchContacts("valid", 20)).rejects.toThrow(
+        "ConnectWise record does not match targeted contact search",
+      );
+    }
+  });
+
   it("builds allowlisted catalog routes and rejects unknown ones", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {

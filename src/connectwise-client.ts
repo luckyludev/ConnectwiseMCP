@@ -1081,6 +1081,33 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertTargetedContactList(
+    records: unknown,
+    searchText: string,
+  ): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise targeted contact search response");
+    }
+    const expected = unicodeCaseFold(targetedSearchTerm(searchText));
+    for (const record of records) {
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        throw new Error("Invalid ConnectWise targeted contact search response");
+      }
+      const { name, email } = record as Record<string, unknown>;
+      if (
+        ![name, email].some(
+          (value) =>
+            typeof value === "string" &&
+            unicodeCaseFold(value).includes(expected),
+        )
+      ) {
+        throw new Error(
+          "ConnectWise record does not match targeted contact search",
+        );
+      }
+    }
+  }
+
   function verifiedDocumentList(
     records: unknown,
     expectedRecordType: string,
@@ -1432,7 +1459,7 @@ export function createConnectWiseClient(
     async searchContacts(query: string, pageSize: number): Promise<unknown> {
       targetedSearchPageSize(pageSize);
       const escaped = targetedSearchString(query);
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/company/contacts",
         {
           conditions: `(name like '%${escaped}%' OR email like '%${escaped}%')`,
@@ -1442,6 +1469,8 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      assertTargetedContactList(result, query);
+      return result;
     },
 
     async listTimeEntries(pageSize: number): Promise<unknown> {
