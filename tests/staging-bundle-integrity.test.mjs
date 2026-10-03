@@ -224,6 +224,9 @@ import { dirname, resolve } from "node:path";
 const configPath = process.argv[6];
 if (dirname(resolve(configPath)) !== process.cwd()) process.exit(2);
 if (!readFileSync(configPath, "utf8").includes("connectwise-staging-bundle-test")) process.exit(3);
+const environmentFlag = process.argv.indexOf("--env-file");
+if (environmentFlag < 0 || !process.argv[environmentFlag + 1]) process.exit(4);
+if (readFileSync(process.argv[environmentFlag + 1]).length !== 0) process.exit(5);
 `,
       );
       await chmod(wrangler, 0o755);

@@ -414,6 +414,25 @@ describe("staging release guard", () => {
     }
   });
 
+  it.each([".env", ".env.local", ".env.staging", ".env.staging.local"])(
+    "rejects implicit Wrangler environment file %s",
+    async (filename) => {
+      await withRepository(async ({ cwd, head }) => {
+        await writeFile(
+          join(cwd, filename),
+          "CLOUDFLARE_ACCOUNT_ID=unreviewed-account\n",
+        );
+
+        const result = runGuard(cwd, head);
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          "Implicit Wrangler environment files are not allowed in the staging release checkout.",
+        );
+      });
+    },
+  );
+
   it("rejects untracked files", async () => {
     await withRepository(async ({ cwd, head }) => {
       await writeFile(join(cwd, "untracked.txt"), "not reviewed\n");
