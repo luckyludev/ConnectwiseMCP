@@ -130,7 +130,45 @@ function parseScheduleRange() {
   if (end.timestamp - start.timestamp > 6 * dayMs) {
     fail("smoke schedule range must not exceed 7 days inclusive");
   }
-  return { startDate: start.input, endDate: end.input };
+  return {
+    startDate: start.input,
+    endDate: end.input,
+    startTimestamp: start.timestamp,
+    endTimestamp: end.timestamp + dayMs - 1,
+  };
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value, allowed) {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isPositiveSafeInteger(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+function isOptionalString(value, maximum) {
+  return (
+    value === undefined ||
+    (typeof value === "string" && value.length <= maximum)
+  );
+}
+
+function isOptionalReference(value) {
+  if (value === undefined) return true;
+  if (!isRecord(value) || !hasOnlyKeys(value, new Set(["id", "name"]))) {
+    return false;
+  }
+  const hasId = value.id !== undefined;
+  const hasName = value.name !== undefined;
+  return (
+    (hasId || hasName) &&
+    (!hasId || isPositiveSafeInteger(value.id)) &&
+    (!hasName || (typeof value.name === "string" && value.name.length <= 200))
+  );
 }
 
 function parseTarget() {
@@ -207,8 +245,12 @@ const LOGIN_TIMEOUT_MS = parsePositiveInteger(
 if (LOGIN_TIMEOUT_MS < 1_000) {
   fail("SMOKE_LOGIN_TIMEOUT_MS is outside the allowed range");
 }
-const { startDate: SCHEDULE_START_DATE, endDate: SCHEDULE_END_DATE } =
-  parseScheduleRange();
+const {
+  startDate: SCHEDULE_START_DATE,
+  endDate: SCHEDULE_END_DATE,
+  startTimestamp: SCHEDULE_START_TIMESTAMP,
+  endTimestamp: SCHEDULE_END_TIMESTAMP,
+} = parseScheduleRange();
 
 const smokeFetch = (input, init = {}) =>
   globalThis.fetch(input, {
@@ -641,17 +683,35 @@ if (
 }
 log("get_service_ticket ok (minimal projection matched)");
 
-// 12. Gate 3: get_my_member.
+// 12. Gate 3: get_my_member with the deployed allowlisted projection.
 log("calling get_my_member ...");
 const member = await callTool("get_my_member", {});
 if (!member.ok) {
   fail(`get_my_member failed (${member.reason})`);
 }
-const memberId = member.data?.member?.id ?? member.data?.id;
-if (memberId !== EXPECT_MEMBER_ID) {
-  fail("get_my_member identity mismatch");
+const memberFields = new Set([
+  "id",
+  "name",
+  "firstName",
+  "lastName",
+  "email",
+  "phone",
+  "status",
+]);
+if (
+  !isRecord(member.data) ||
+  !hasOnlyKeys(member.data, memberFields) ||
+  member.data.id !== EXPECT_MEMBER_ID ||
+  !isOptionalString(member.data.name, 200) ||
+  !isOptionalString(member.data.firstName, 100) ||
+  !isOptionalString(member.data.lastName, 100) ||
+  !isOptionalString(member.data.email, 200) ||
+  !isOptionalString(member.data.phone, 100) ||
+  !isOptionalReference(member.data.status)
+) {
+  fail("get_my_member returned an invalid projection or identity");
 }
-log("get_my_member ok (expected identity matched)");
+log("get_my_member ok (expected identity and projection matched)");
 
 // 13. Gate 4: board statuses via the catalog tool.
 log("calling call_connectwise service.boards.statuses ...");
@@ -662,13 +722,28 @@ const statuses = await callTool("call_connectwise", {
 if (!statuses.ok) {
   fail(`call_connectwise service.boards.statuses failed (${statuses.reason})`);
 }
-const statusList = Array.isArray(statuses.data)
-  ? statuses.data
-  : statuses.data?.items;
-if (!Array.isArray(statusList) || statusList.length === 0) {
-  fail("board statuses came back empty");
+const statusList = statuses.data;
+const statusFields = new Set(["id", "name", "description", "rank"]);
+if (
+  !Array.isArray(statusList) ||
+  statusList.length === 0 ||
+  statusList.length > 50 ||
+  statusList.some(
+    (status) =>
+      !isRecord(status) ||
+      !hasOnlyKeys(status, statusFields) ||
+      !isPositiveSafeInteger(status.id) ||
+      typeof status.name !== "string" ||
+      status.name.length === 0 ||
+      status.name.length > 200 ||
+      !isOptionalString(status.description, 500) ||
+      (status.rank !== undefined &&
+        (typeof status.rank !== "number" || !Number.isFinite(status.rank))),
+  )
+) {
+  fail("board statuses returned an invalid bounded projection");
 }
-log("board statuses ok");
+log("board statuses ok (bounded projections matched)");
 
 // 14. Gate 5: fixed-route schedule catalog date range.
 log("calling call_connectwise schedule.entries.byMember (date range) ...");
@@ -677,11 +752,70 @@ const schedule = await callTool("call_connectwise", {
   startDate: SCHEDULE_START_DATE,
   endDate: SCHEDULE_END_DATE,
 });
-const scheduleList = Array.isArray(schedule.data) ? schedule.data : [];
-if (!schedule.ok || scheduleList.length === 0) {
-  fail(`schedule.entries.byMember failed (${schedule.reason ?? "empty"})`);
+const scheduleList = schedule.data;
+if (!schedule.ok) {
+  fail(`schedule.entries.byMember failed (${schedule.reason})`);
 }
-log("schedule.entries.byMember ok");
+const scheduleFields = new Set([
+  "id",
+  "member",
+  "start",
+  "end",
+  "name",
+  "hours",
+  "done",
+  "type",
+  "status",
+]);
+const isoOffset =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)$/;
+let previousStart = "";
+const invalidSchedule =
+  !schedule.ok ||
+  !Array.isArray(scheduleList) ||
+  scheduleList.length === 0 ||
+  scheduleList.length > 20 ||
+  scheduleList.some((entry) => {
+    if (
+      !isRecord(entry) ||
+      !hasOnlyKeys(entry, scheduleFields) ||
+      !isPositiveSafeInteger(entry.id) ||
+      !isRecord(entry.member) ||
+      !hasOnlyKeys(entry.member, new Set(["id", "name"])) ||
+      entry.member.id !== EXPECT_MEMBER_ID ||
+      !isOptionalString(entry.member.name, 200) ||
+      typeof entry.start !== "string" ||
+      !isoOffset.test(entry.start) ||
+      typeof entry.end !== "string" ||
+      !isoOffset.test(entry.end) ||
+      !isOptionalString(entry.name, 300) ||
+      (entry.hours !== undefined &&
+        (typeof entry.hours !== "number" || !Number.isFinite(entry.hours))) ||
+      (entry.done !== undefined && typeof entry.done !== "boolean") ||
+      !isOptionalReference(entry.type) ||
+      !isOptionalReference(entry.status)
+    ) {
+      return true;
+    }
+    const start = Date.parse(entry.start);
+    const end = Date.parse(entry.end);
+    if (
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < SCHEDULE_START_TIMESTAMP ||
+      start > SCHEDULE_END_TIMESTAMP ||
+      end < start ||
+      (previousStart !== "" && entry.start.localeCompare(previousStart) < 0)
+    ) {
+      return true;
+    }
+    previousStart = entry.start;
+    return false;
+  });
+if (invalidSchedule) {
+  fail(`schedule.entries.byMember returned an invalid bounded projection`);
+}
+log("schedule.entries.byMember ok (ownership, range, and order matched)");
 
 // 15. Done. This smoke remains read-only and does not satisfy the remaining
 // manual staging acceptance gates.
