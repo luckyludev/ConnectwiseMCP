@@ -498,6 +498,7 @@ const TIME_SHEET_COLLECTION_FIELDS =
 const TIME_SHEET_STATUS_FIELDS = "status";
 const SERVICE_TICKET_NOTE_COLLECTION_FIELDS =
   "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
+const SERVICE_TICKET_NOTE_RELATIONSHIP_FIELDS = `${SERVICE_TICKET_NOTE_COLLECTION_FIELDS},ticketId`;
 const TICKET_ATTACHMENT_COLLECTION_FIELDS =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
 const TICKET_ATTACHMENT_RELATIONSHIP_FIELDS = `${TICKET_ATTACHMENT_COLLECTION_FIELDS},recordType,recordId`;
@@ -1225,15 +1226,24 @@ export function createConnectWiseClient(
     async getTicketNotes(ticketId: number, pageSize: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       boundedPageSize(pageSize);
-      return requestBoundedList(
+      const notes = await requestBoundedList(
         `/service/tickets/${ticketId}/notes`,
         {
-          fields: SERVICE_TICKET_NOTE_COLLECTION_FIELDS,
+          fields: SERVICE_TICKET_NOTE_RELATIONSHIP_FIELDS,
           pageSize,
           orderBy: "dateCreated asc",
         },
         pageSize,
       );
+      return (notes as Array<Record<string, unknown>>).map((note) => {
+        if (note.ticketId !== ticketId) {
+          throw new Error(
+            "ConnectWise note is not associated with requested ticket",
+          );
+        }
+        const { ticketId: _ticketId, ...item } = note;
+        return item;
+      });
     },
 
     async getTicketAttachments(
