@@ -15,6 +15,8 @@ from typing import Any, BinaryIO, Iterator
 ARCHIVE_NAME = "connectwise-legacy-rollback-image.tar.gz"
 CHECKSUM_NAME = "connectwise-legacy-rollback-image.sha256"
 MANIFEST_NAME = "connectwise-legacy-rollback-image.json"
+SBOM_NAME = "connectwise-legacy-rollback-image.cdx.json"
+MAX_SBOM_BYTES = 16 * 1024 * 1024
 IMAGE_REPOSITORY = "connectwise-legacy-rollback-ci"
 MANIFEST_KEYS = {
     "schemaVersion",
@@ -24,6 +26,8 @@ MANIFEST_KEYS = {
     "imageId",
     "archive",
     "archiveSha256",
+    "sbom",
+    "sbomSha256",
 }
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
@@ -122,9 +126,9 @@ def verify_rollback_artifact(
             raise ValueError("Manifest must contain exactly the required fields")
         if (
             type(manifest["schemaVersion"]) is not int
-            or manifest["schemaVersion"] != 1
+            or manifest["schemaVersion"] != 2
         ):
-            raise ValueError("Manifest schemaVersion must be 1")
+            raise ValueError("Manifest schemaVersion must be 2")
 
         _require_exact_string(
             manifest["releaseCommit"], expected_release_commit, "releaseCommit"
@@ -136,6 +140,7 @@ def verify_rollback_artifact(
             manifest["imageRepository"], IMAGE_REPOSITORY, "imageRepository"
         )
         _require_exact_string(manifest["archive"], ARCHIVE_NAME, "archive")
+        _require_exact_string(manifest["sbom"], SBOM_NAME, "sbom")
 
         image_id = manifest["imageId"]
         if type(image_id) is not str or not IMAGE_ID_RE.fullmatch(image_id):
@@ -143,6 +148,9 @@ def verify_rollback_artifact(
         archive_sha256 = manifest["archiveSha256"]
         if type(archive_sha256) is not str or not SHA256_RE.fullmatch(archive_sha256):
             raise ValueError("Manifest archiveSha256 must be a lowercase SHA-256 digest")
+        sbom_sha256 = manifest["sbomSha256"]
+        if type(sbom_sha256) is not str or not SHA256_RE.fullmatch(sbom_sha256):
+            raise ValueError("Manifest sbomSha256 must be a lowercase SHA-256 digest")
 
         try:
             with _regular_file(directory_descriptor, CHECKSUM_NAME) as checksum_file:
@@ -161,6 +169,36 @@ def verify_rollback_artifact(
                 digest.update(chunk)
         if digest.hexdigest() != archive_sha256:
             raise ValueError("Rollback image archive SHA-256 mismatch")
+
+        try:
+            with _regular_file(directory_descriptor, SBOM_NAME) as sbom_file:
+                sbom_bytes = sbom_file.read(MAX_SBOM_BYTES + 1)
+            if len(sbom_bytes) > MAX_SBOM_BYTES:
+                raise ValueError("SBOM exceeds the maximum allowed size")
+            sbom = json.loads(sbom_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("SBOM must be valid UTF-8 JSON") from exc
+        if hashlib.sha256(sbom_bytes).hexdigest() != sbom_sha256:
+            raise ValueError("Rollback image SBOM SHA-256 mismatch")
+        components = sbom.get("components") if isinstance(sbom, dict) else None
+        if (
+            not isinstance(sbom, dict)
+            or sbom.get("bomFormat") != "CycloneDX"
+            or sbom.get("specVersion") not in {"1.4", "1.5", "1.6"}
+            or type(sbom.get("version")) is not int
+            or sbom["version"] < 1
+            or not isinstance(components, list)
+            or not components
+            or any(
+                not isinstance(component, dict)
+                or type(component.get("type")) is not str
+                or not component["type"].strip()
+                or type(component.get("name")) is not str
+                or not component["name"].strip()
+                for component in components
+            )
+        ):
+            raise ValueError("SBOM must be a valid CycloneDX component inventory")
         return manifest
 
 

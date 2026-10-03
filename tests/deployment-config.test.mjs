@@ -191,6 +191,9 @@ describe("legacy rollback image security", () => {
     const scanOffset = workflow.indexOf(
       "- name: Scan rollback image for fixable severe vulnerabilities",
     );
+    const sbomOffset = workflow.indexOf(
+      "- name: Generate rollback image CycloneDX SBOM",
+    );
     const contentValidationOffset = workflow.indexOf(
       "- name: Verify allowlisted rollback image contents",
     );
@@ -212,7 +215,8 @@ describe("legacy rollback image security", () => {
 
     expect(buildOffset).toBeGreaterThan(-1);
     expect(scanOffset).toBeGreaterThan(buildOffset);
-    expect(contentValidationOffset).toBeGreaterThan(scanOffset);
+    expect(sbomOffset).toBeGreaterThan(scanOffset);
+    expect(contentValidationOffset).toBeGreaterThan(sbomOffset);
     expect(packageOffset).toBeGreaterThan(contentValidationOffset);
     expect(verifyArtifactOffset).toBeGreaterThan(packageOffset);
     expect(reloadOffset).toBeGreaterThan(verifyArtifactOffset);
@@ -227,6 +231,13 @@ describe("legacy rollback image security", () => {
     expect(workflow).toContain("severity: HIGH,CRITICAL");
     expect(workflow).toContain("ignore-unfixed: true");
     expect(workflow).toContain('exit-code: "1"');
+    expect(workflow).toContain("format: cyclonedx");
+    expect(workflow).toContain(
+      "output: connectwise-legacy-rollback-image.cdx.json",
+    );
+    expect(workflow).toContain(
+      "sbom_sha256=$(sha256sum \"$sbom\" | cut -d ' ' -f 1)",
+    );
     expect(workflow).toContain(
       "docker save connectwise-legacy-rollback-ci | gzip -n -9",
     );
@@ -240,13 +251,16 @@ describe("legacy rollback image security", () => {
       'printf \'%s  %s\\n\' "$archive_sha256" "$archive" > "$checksum"',
     );
     for (const manifestBinding of [
+      '"schemaVersion":2',
       '"releaseCommit":"%s"',
       '"workflowRunId":"%s"',
       '"imageRepository":"connectwise-legacy-rollback-ci"',
       '"imageId":"%s"',
       '"archive":"%s"',
       '"archiveSha256":"%s"',
-      '"$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256"',
+      '"sbom":"%s"',
+      '"sbomSha256":"%s"',
+      '"$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" "$sbom" "$sbom_sha256"',
     ]) {
       expect(workflow).toContain(manifestBinding);
     }
@@ -274,6 +288,7 @@ describe("legacy rollback image security", () => {
       "connectwise-legacy-rollback-image.tar.gz",
       "connectwise-legacy-rollback-image.sha256",
       "connectwise-legacy-rollback-image.json",
+      "connectwise-legacy-rollback-image.cdx.json",
     ]) {
       expect(workflow).toContain(artifactFile);
     }

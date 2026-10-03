@@ -11,6 +11,7 @@ from verify_rollback_artifact import (
     CHECKSUM_NAME,
     IMAGE_REPOSITORY,
     MANIFEST_NAME,
+    SBOM_NAME,
     verify_rollback_artifact,
 )
 
@@ -23,14 +24,31 @@ def artifact_bundle(tmp_path):
     archive = tmp_path / ARCHIVE_NAME
     archive.write_bytes(b"verified rollback image archive")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    sbom = tmp_path / SBOM_NAME
+    sbom.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "version": 1,
+                "components": [{"type": "library", "name": "example"}],
+            },
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    sbom_digest = hashlib.sha256(sbom.read_bytes()).hexdigest()
     manifest = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "releaseCommit": RELEASE_COMMIT,
         "workflowRunId": WORKFLOW_RUN_ID,
         "imageRepository": IMAGE_REPOSITORY,
         "imageId": IMAGE_ID,
         "archive": ARCHIVE_NAME,
         "archiveSha256": digest,
+        "sbom": SBOM_NAME,
+        "sbomSha256": sbom_digest,
     }
     (tmp_path / MANIFEST_NAME).write_text(
         json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8"
@@ -166,13 +184,15 @@ def test_rejects_invalid_or_stale_expected_bindings(
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("schemaVersion", 2, "schemaVersion"),
+        ("schemaVersion", 1, "schemaVersion"),
         ("releaseCommit", "c" * 40, "releaseCommit"),
         ("workflowRunId", "987654321", "workflowRunId"),
         ("imageRepository", "other/image", "imageRepository"),
         ("imageId", "b" * 64, "imageId"),
         ("archive", "renamed.tar.gz", "archive"),
         ("archiveSha256", "A" * 64, "archiveSha256"),
+        ("sbom", "renamed.cdx.json", "sbom"),
+        ("sbomSha256", "A" * 64, "sbomSha256"),
     ],
 )
 def test_rejects_invalid_manifest_values(tmp_path, field, value, message):
@@ -216,7 +236,67 @@ def test_rejects_archive_digest_mismatch(tmp_path):
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
 
 
-@pytest.mark.parametrize("name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME])
+def test_rejects_sbom_digest_mismatch(tmp_path):
+    artifact_bundle(tmp_path)
+    (tmp_path / SBOM_NAME).write_text(
+        '{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="SBOM SHA-256 mismatch"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+@pytest.mark.parametrize(
+    "invalid_sbom",
+    [
+        {"bomFormat": "other", "specVersion": "1.6", "version": 1, "components": []},
+        {
+            "bomFormat": "CycloneDX",
+            "specVersion": "garbage",
+            "version": 1,
+            "components": [{"type": "library", "name": "example"}],
+        },
+        {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "version": 1,
+            "components": [None],
+        },
+        {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "version": 1,
+            "components": [{"type": "library", "name": ""}],
+        },
+    ],
+)
+def test_rejects_invalid_cyclonedx_inventory(tmp_path, invalid_sbom):
+    manifest = artifact_bundle(tmp_path)
+    sbom = tmp_path / SBOM_NAME
+    sbom.write_text(json.dumps(invalid_sbom) + "\n", encoding="utf-8")
+    manifest["sbomSha256"] = hashlib.sha256(sbom.read_bytes()).hexdigest()
+    write_manifest(tmp_path, manifest)
+
+    with pytest.raises(ValueError, match="CycloneDX component inventory"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+def test_rejects_oversized_sbom(tmp_path, monkeypatch):
+    manifest = artifact_bundle(tmp_path)
+    sbom = tmp_path / SBOM_NAME
+    sbom.write_bytes(b"{" + b" " * 8 + b"}")
+    manifest["sbomSha256"] = hashlib.sha256(sbom.read_bytes()).hexdigest()
+    write_manifest(tmp_path, manifest)
+    monkeypatch.setattr(verifier, "MAX_SBOM_BYTES", 8)
+
+    with pytest.raises(ValueError, match="maximum allowed size"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+@pytest.mark.parametrize(
+    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME]
+)
 def test_rejects_missing_required_file(tmp_path, name):
     artifact_bundle(tmp_path)
     (tmp_path / name).unlink()
@@ -225,7 +305,9 @@ def test_rejects_missing_required_file(tmp_path, name):
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
 
 
-@pytest.mark.parametrize("name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME])
+@pytest.mark.parametrize(
+    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME]
+)
 def test_rejects_symlinked_artifact_file(tmp_path, name):
     artifact_bundle(tmp_path)
     path = tmp_path / name
@@ -237,7 +319,9 @@ def test_rejects_symlinked_artifact_file(tmp_path, name):
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
 
 
-@pytest.mark.parametrize("name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME])
+@pytest.mark.parametrize(
+    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME]
+)
 def test_rejects_hardlinked_artifact_file(tmp_path, name):
     artifact_bundle(tmp_path)
     path = tmp_path / name
