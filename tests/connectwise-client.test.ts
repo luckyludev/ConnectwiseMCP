@@ -2626,25 +2626,70 @@ describe("ConnectWiseClient", () => {
     }
   });
 
-  it("minimizes object-scoped schedule reads at the upstream boundary", async () => {
+  it("scopes and verifies object schedule reads at the upstream boundary", async () => {
     let capturedUrl = "";
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         capturedUrl = String(input);
-        return Response.json([{ id: 81 }]);
+        return Response.json([{ id: 81, member: { id: 149 }, objectId: 123 }]);
       },
     });
 
     await expect(client.openScheduleEntriesForObject(123)).resolves.toEqual([
-      { id: 81 },
+      { id: 81, member: { id: 149 } },
     ]);
     const url = new URL(capturedUrl);
     expect(url.pathname).toBe("/v4_6_release/apis/3.0/schedule/entries");
-    expect(url.searchParams.get("conditions")).toBe("objectId=123");
+    expect(url.searchParams.get("conditions")).toBe(
+      "objectId=123 and member/id=149",
+    );
     expect(url.searchParams.getAll("fields")).toEqual([
-      scheduleEntryCollectionFields,
+      `${scheduleEntryCollectionFields},objectId`,
     ]);
     expect(url.searchParams.get("pageSize")).toBe("50");
+  });
+
+  it("rejects object schedule reads without a mapped member before fetch", async () => {
+    let requests = 0;
+    const client = createConnectWiseClient(
+      { ...credentials, memberId: undefined },
+      {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json([]);
+        },
+      },
+    );
+
+    await expect(client.openScheduleEntriesForObject(123)).rejects.toThrow(
+      "ConnectWise profile is missing memberId; add it to enable open_schedule_entries_for_object",
+    );
+    expect(requests).toBe(0);
+  });
+
+  it("rejects object schedule results for another object or member", async () => {
+    const responses = [
+      [{ id: 81, member: { id: 149 }, objectId: 124 }],
+      [{ id: 82, member: { id: 150 }, objectId: 123 }],
+      [{ id: 83, member: { id: 149 } }],
+      [{ id: 84, objectId: 123 }],
+    ];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json(responses.shift()),
+    });
+
+    await expect(client.openScheduleEntriesForObject(123)).rejects.toThrow(
+      "ConnectWise schedule entry is not associated with requested object",
+    );
+    await expect(client.openScheduleEntriesForObject(123)).rejects.toThrow(
+      "ConnectWise record is not assigned to mapped member",
+    );
+    await expect(client.openScheduleEntriesForObject(123)).rejects.toThrow(
+      "ConnectWise schedule entry is not associated with requested object",
+    );
+    await expect(client.openScheduleEntriesForObject(123)).rejects.toThrow(
+      "ConnectWise record is not assigned to mapped member",
+    );
   });
 
   it("rejects createTimeEntry when a timesheet is pending approval", async () => {

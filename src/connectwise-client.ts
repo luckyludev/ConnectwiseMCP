@@ -493,6 +493,7 @@ const TICKET_TIME_ENTRY_RELATIONSHIP_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},c
 const TIME_ENTRY_READ_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},dateEntered,chargeToType`;
 const SCHEDULE_ENTRY_COLLECTION_FIELDS =
   "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
+const SCHEDULE_ENTRY_OBJECT_RELATIONSHIP_FIELDS = `${SCHEDULE_ENTRY_COLLECTION_FIELDS},objectId`;
 const TIME_SHEET_COLLECTION_FIELDS =
   "id,member,year,period,dateStart,dateEnd,status,hours,deadline";
 const TIME_SHEET_STATUS_FIELDS = "status";
@@ -1066,6 +1067,34 @@ export function createConnectWiseClient(
     for (const record of records) {
       assertMappedMember(record, memberId, referenceField);
     }
+  }
+
+  function verifiedObjectScheduleEntryList(
+    records: unknown,
+    objectId: number,
+    memberId: number,
+  ): Array<Record<string, unknown>> {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise schedule entry response");
+    }
+    return records.map((record) => {
+      assertMappedMember(record, memberId);
+      if (
+        !record ||
+        typeof record !== "object" ||
+        Array.isArray(record) ||
+        (record as Record<string, unknown>).objectId !== objectId
+      ) {
+        throw new Error(
+          "ConnectWise schedule entry is not associated with requested object",
+        );
+      }
+      const { objectId: _objectId, ...item } = record as Record<
+        string,
+        unknown
+      >;
+      return item;
+    });
   }
 
   function assertRequestedReferenceList(
@@ -2177,16 +2206,17 @@ export function createConnectWiseClient(
 
     async openScheduleEntriesForObject(objectId): Promise<unknown[]> {
       positiveId(objectId, "object ID");
+      const memberId = mappedMemberId("open_schedule_entries_for_object");
       const found = await requestBoundedList(
         "/schedule/entries",
         {
-          conditions: `objectId=${objectId}`,
-          fields: SCHEDULE_ENTRY_COLLECTION_FIELDS,
+          conditions: `objectId=${objectId} and member/id=${memberId}`,
+          fields: SCHEDULE_ENTRY_OBJECT_RELATIONSHIP_FIELDS,
           pageSize: 50,
         },
         50,
       );
-      return Array.isArray(found) ? found : [];
+      return verifiedObjectScheduleEntryList(found, objectId, memberId);
     },
 
     async createTimeEntry(input): Promise<unknown> {
