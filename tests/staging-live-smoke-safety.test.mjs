@@ -763,17 +763,98 @@ describe("staging smoke output safety", () => {
           };
         } else if (payload.params.name === "get_my_member") {
           gate = "MEMBER";
-          data = { member: { id: 2468, firstName: canary, lastName: canary } };
+          if (authorization === "Bearer MEMBER_NESTED_CANARY") {
+            data = { member: { id: 2468, firstName: canary } };
+          } else {
+            data = {
+              id: 2468,
+              name: "Test Member",
+              firstName: "Test",
+              lastName: "Member",
+              email: "test@example.invalid",
+              phone: "555-0100",
+              status: { id: 1, name: "Active" },
+              ...(authorization === "Bearer MEMBER_EXTRA_CANARY"
+                ? { securityRole: canary }
+                : {}),
+            };
+          }
         } else if (
           payload.params.arguments.route === "service.boards.statuses"
         ) {
           gate = "STATUSES";
           capturedStatusArguments.push(payload.params.arguments);
-          data = [{ id: 1, name: canary }];
+          const statusRows = [
+            {
+              id: 1,
+              name: "New",
+              description: "New ticket",
+              rank: 1,
+              ...(authorization === "Bearer STATUSES_EXTRA_CANARY"
+                ? { escalationStatus: canary }
+                : {}),
+            },
+          ];
+          if (authorization === "Bearer STATUSES_OVERSIZED_CANARY") {
+            data = Array.from({ length: 51 }, (_, index) => ({
+              id: index + 1,
+              name: `Status ${index + 1}`,
+            }));
+          } else {
+            data =
+              authorization === "Bearer STATUSES_WRAPPED_CANARY"
+                ? { items: statusRows }
+                : statusRows;
+          }
         } else {
           gate = "SCHEDULE";
           capturedScheduleArguments = payload.params.arguments;
-          data = [{ id: 2, name: canary }];
+          const scheduleRows = [
+            {
+              id: 2,
+              member: {
+                id:
+                  authorization === "Bearer SCHEDULE_WRONG_MEMBER_CANARY"
+                    ? 2469
+                    : 2468,
+                name: "Test Member",
+              },
+              start:
+                authorization === "Bearer SCHEDULE_OUT_OF_RANGE_CANARY"
+                  ? "2026-09-08T09:00:00Z"
+                  : "2026-09-01T09:00+0100",
+              end:
+                authorization === "Bearer SCHEDULE_OUT_OF_RANGE_CANARY"
+                  ? "2026-09-08T10:00:00Z"
+                  : "2026-09-01T10:00+0100",
+              name: "Approved smoke entry",
+              hours: 1,
+              done: false,
+              type: { name: "Appointment" },
+              status: { id: 1 },
+              ...(authorization === "Bearer SCHEDULE_EXTRA_CANARY"
+                ? { notes: canary }
+                : {}),
+            },
+          ];
+          if (authorization === "Bearer SCHEDULE_UNORDERED_CANARY") {
+            data = [
+              {
+                ...scheduleRows[0],
+                id: 3,
+                start: "2026-09-02T09:00:00Z",
+                end: "2026-09-02T10:00:00Z",
+              },
+              scheduleRows[0],
+            ];
+          } else if (authorization === "Bearer SCHEDULE_OVERSIZED_CANARY") {
+            data = Array.from({ length: 21 }, (_, index) => ({
+              ...scheduleRows[0],
+              id: index + 1,
+            }));
+          } else {
+            data = scheduleRows;
+          }
         }
         const malformed = authorization === `Bearer ${gate}_MALFORMED_CANARY`;
         const wrongId = authorization === `Bearer ${gate}_WRONG_ID_CANARY`;
@@ -888,6 +969,20 @@ describe("staging smoke output safety", () => {
       runSmoke("TICKET_EXTRA_CONTENT_CANARY"),
       runSmoke("TICKET_STRUCTURED_CANARY"),
     ]);
+    const projectionFailures = await Promise.all(
+      [
+        "MEMBER_NESTED",
+        "MEMBER_EXTRA",
+        "STATUSES_WRAPPED",
+        "STATUSES_EXTRA",
+        "STATUSES_OVERSIZED",
+        "SCHEDULE_WRONG_MEMBER",
+        "SCHEDULE_OUT_OF_RANGE",
+        "SCHEDULE_UNORDERED",
+        "SCHEDULE_EXTRA",
+        "SCHEDULE_OVERSIZED",
+      ].map(async (fault) => [fault, await runSmoke(`${fault}_CANARY`)]),
+    );
     await new Promise((resolve) => mock.close(resolve));
 
     for (const rejected of [
@@ -967,6 +1062,20 @@ describe("staging smoke output safety", () => {
         "FAIL get_service_ticket failed (invalid_tool_content)",
       );
       expect(rejected.output).not.toContain(canary);
+      expect(rejected.output).not.toContain(baseUrl);
+    }
+
+    for (const [fault, rejected] of projectionFailures) {
+      expect(rejected.exitCode).toBe(1);
+      expect(rejected.output).toContain(
+        fault.startsWith("MEMBER")
+          ? "FAIL get_my_member returned an invalid projection or identity"
+          : fault.startsWith("STATUSES")
+            ? "FAIL board statuses returned an invalid bounded projection"
+            : "FAIL schedule.entries.byMember returned an invalid bounded projection",
+      );
+      expect(rejected.output).not.toContain(canary);
+      expect(rejected.output).not.toContain(fault);
       expect(rejected.output).not.toContain(baseUrl);
     }
 
@@ -1098,9 +1207,25 @@ describe("staging smoke output safety", () => {
         } else if (payload.params.name === "get_service_ticket") {
           data = { id: 1234, status: "New" };
         } else if (payload.params.name === "get_my_member") {
-          data = { member: { id: 149, firstName: canaries.business } };
-        } else {
+          data = {
+            id: 149,
+            firstName: canaries.business,
+            status: { id: 1, name: "Active" },
+          };
+        } else if (
+          payload.params.arguments.route === "service.boards.statuses"
+        ) {
           data = [{ id: 1, name: canaries.business }];
+        } else {
+          data = [
+            {
+              id: 2,
+              member: { id: 149, name: canaries.business },
+              start: "2026-09-01T09:00:00Z",
+              end: "2026-09-01T10:00:00Z",
+              name: canaries.business,
+            },
+          ];
         }
         response.end(
           JSON.stringify({
@@ -1198,17 +1323,17 @@ await fetch(callback);
     expect(source).not.toContain('log("detail:"');
     expect(source).not.toMatch(/log\([^\n]*authorizeUrl/);
     expect(source).not.toContain(".raw");
-    expect(source).not.toContain("firstName");
-    expect(source).not.toContain("lastName");
+    expect(source).not.toMatch(
+      /log\([^\n]*(?:member\.data|statusList|scheduleList)/,
+    );
     expect(source).not.toContain("registration);");
     expect(source).not.toContain("payload.error");
     expect(source).not.toContain("statuses.text");
     expect(source).not.toContain("schedule.text");
     expect(source).not.toMatch(/statuses ok \(\$\{/);
     expect(source).not.toMatch(/entries ok \(\$\{/);
-    expect(source).toContain(
-      "const scheduleList = Array.isArray(schedule.data) ? schedule.data : [];",
-    );
+    expect(source).toContain("const scheduleList = schedule.data;");
+    expect(source).not.toContain("schedule.data?.items");
     expect(source).toContain("readBoundedText(response)");
   });
 });
