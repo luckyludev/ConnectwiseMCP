@@ -730,6 +730,53 @@ describe("ConnectWiseClient", () => {
     expect(fetchCount).toBe(1);
   });
 
+  it("verifies every ticket search result matches the requested summary", async () => {
+    for (const { query, records } of [
+      {
+        query: "  Luis's laptop  ",
+        records: [
+          { id: 1, summary: "Repair LUIS'S LAPTOP" },
+          { id: 2, summary: "Luis's laptop replacement" },
+        ],
+      },
+      {
+        query: "éx",
+        records: [{ id: 1, summary: "E\u0301xample printer" }],
+      },
+    ] as const) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(records),
+      });
+      await expect(client.searchServiceTickets(query, 20)).resolves.toEqual(
+        records,
+      );
+    }
+
+    const mismatchClient = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          { id: 1, summary: "Printer outage" },
+          { id: 2, summary: "Unrelated request" },
+        ]),
+    });
+    await expect(
+      mismatchClient.searchServiceTickets("printer", 20),
+    ).rejects.toThrow(
+      "ConnectWise record does not match targeted ticket search",
+    );
+
+    for (const summary of [undefined, null, 7, {}, []]) {
+      const malformedClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([{ id: 1, summary }]),
+      });
+      await expect(
+        malformedClient.searchServiceTickets("printer", 20),
+      ).rejects.toThrow(
+        "ConnectWise record does not match targeted ticket search",
+      );
+    }
+  });
+
   it("rejects list responses that exceed dedicated and targeted bounds", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {

@@ -1081,6 +1081,30 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertTargetedTicketSummaryList(
+    records: unknown,
+    searchText: string,
+  ): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise targeted ticket search response");
+    }
+    const expected = unicodeCaseFold(searchText.trim());
+    for (const record of records) {
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        throw new Error("Invalid ConnectWise targeted ticket search response");
+      }
+      const summary = (record as Record<string, unknown>).summary;
+      if (
+        typeof summary !== "string" ||
+        !unicodeCaseFold(summary).includes(expected)
+      ) {
+        throw new Error(
+          "ConnectWise record does not match targeted ticket search",
+        );
+      }
+    }
+  }
+
   function assertTargetedContactList(
     records: unknown,
     searchText: string,
@@ -1764,7 +1788,7 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       targetedSearchPageSize(pageSize);
       const escaped = ticketSearchString(searchText);
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/service/tickets",
         {
           conditions: `summary contains '${escaped}'`,
@@ -1774,6 +1798,8 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      assertTargetedTicketSummaryList(result, searchText);
+      return result;
     },
 
     async getAgreement(agreementId: number): Promise<unknown> {
