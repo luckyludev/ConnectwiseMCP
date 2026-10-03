@@ -2007,13 +2007,11 @@ export function createConnectWiseClient(
       positiveId(ticketId, "service ticket ID");
       // GET first, then merge and PUT: a blind PUT blanks every unpassed
       // field on established tickets. These are live client tickets.
-      const existing = (await requestJson(
-        "GET",
-        `/service/tickets/${ticketId}`,
-      )) as Record<string, unknown>;
-      if (!existing || typeof existing !== "object") {
-        throw new Error(`Service ticket ${ticketId} not found`);
-      }
+      const existing = verifiedRecordIdentity(
+        await requestJson("GET", `/service/tickets/${ticketId}`),
+        ticketId,
+        "service ticket",
+      );
       const merged: Record<string, unknown> = { ...existing };
       // Drop read-only/system fields a PUT would reject.
       for (const field of [
@@ -2116,13 +2114,11 @@ export function createConnectWiseClient(
       const memberId = mappedMemberId("update_schedule_entry");
       // GET first, then verify ownership, merge and PUT: a blind PUT blanks every
       // field that is not passed on established records (Luis has hit this).
-      const existing = (await requestJson(
-        "GET",
-        `/schedule/entries/${entryId}`,
-      )) as Record<string, unknown>;
-      if (!existing || typeof existing !== "object") {
-        throw new Error(`Schedule entry ${entryId} not found`);
-      }
+      const existing = verifiedRecordIdentity(
+        await requestJson("GET", `/schedule/entries/${entryId}`),
+        entryId,
+        "schedule entry",
+      );
       assertMappedMember(existing, memberId);
       const merged: Record<string, unknown> = { ...existing };
       if (input.dateStart !== undefined) {
@@ -2158,7 +2154,11 @@ export function createConnectWiseClient(
     async deleteScheduleEntry(entryId): Promise<void> {
       positiveId(entryId, "schedule entry ID");
       const memberId = mappedMemberId("delete_schedule_entry");
-      const existing = await requestJson("GET", `/schedule/entries/${entryId}`);
+      const existing = verifiedRecordIdentity(
+        await requestJson("GET", `/schedule/entries/${entryId}`),
+        entryId,
+        "schedule entry",
+      );
       assertMappedMember(existing, memberId);
       await requestJson("DELETE", `/schedule/entries/${entryId}`);
     },
