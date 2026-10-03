@@ -28,7 +28,7 @@ The Worker exposes these bounded business tools:
 
 Ticket-note text and commercial fields are returned only when the mapped ConnectWise API member can retrieve them. All list sections are capped at 50 items. Document downloads return bounded base64 without download URLs or GUIDs. The registered catalog contains 39 tools (38 model-visible and one app-only); 11 are dormant write-capable tools that require the currently unissued `mcp:write` scope. All writes are non-idempotent and are never retried.
 
-Recent agreement invoice rows must carry the requested agreement relationship. V2 verifies that relationship and strips it before returning the invoice projection.
+Agreement-addition and summary rows must carry the requested numeric `agreementId`; V2 verifies that relationship and strips the internal relationship field before returning either projection. Recent agreement invoice rows must likewise carry the requested agreement relationship, which V2 verifies and strips before returning the invoice projection.
 
 ## Active legacy tool decisions
 
