@@ -1399,6 +1399,67 @@ describe("ConnectWiseClient", () => {
     expect(urls).toHaveLength(2);
   });
 
+  it("verifies every targeted catalog result matches the requested name", async () => {
+    for (const { route, key, value, matchingNames } of [
+      {
+        route: "company.configurations",
+        key: "query",
+        value: "  O'Brien  ",
+        matchingNames: ["O'Brien Laptop", "Retired O'BRIEN Desktop"],
+      },
+      {
+        route: "company.configurations",
+        key: "query",
+        value: "ΟΣ",
+        matchingNames: ["ΟΣΑ"],
+      },
+      {
+        route: "company.configurations",
+        key: "query",
+        value: "éx",
+        matchingNames: ["E\u0301x Plan"],
+      },
+      {
+        route: "finance.agreements.byName",
+        key: "name",
+        value: "Managed Services",
+        matchingNames: ["Premium MANAGED SERVICES Agreement"],
+      },
+    ] as const) {
+      const matchingRecords = matchingNames.map((name, index) => ({
+        id: index + 1,
+        name,
+      }));
+      const matchingClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(matchingRecords),
+      });
+      await expect(
+        matchingClient.catalogGet(route, { [key]: value, pageSize: 20 }),
+      ).resolves.toEqual(matchingRecords);
+
+      const laterMismatchClient = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json([...matchingRecords, { id: 99, name: "Unrelated" }]),
+      });
+      await expect(
+        laterMismatchClient.catalogGet(route, { [key]: value, pageSize: 20 }),
+      ).rejects.toThrow(
+        "ConnectWise record does not match targeted name search",
+      );
+
+      for (const name of [undefined, null, 7, {}, []]) {
+        const malformedClient = createConnectWiseClient(credentials, {
+          fetcher: async () => Response.json([{ id: 1, name }]),
+        });
+        await expect(
+          malformedClient.catalogGet(route, { [key]: value, pageSize: 20 }),
+        ).rejects.toThrow(
+          "ConnectWise record does not match targeted name search",
+        );
+      }
+    }
+  });
+
   it("binds member-scoped catalog routes to the mapped profile", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
