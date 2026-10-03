@@ -430,8 +430,10 @@ function sortByDateStart(value: unknown): unknown {
   if (!items.every((entry) => entry && typeof entry.dateStart === "string")) {
     return value;
   }
-  return [...items].sort((a, b) =>
-    String(a.dateStart).localeCompare(String(b.dateStart)),
+  const timestamps = items.map((entry) => Date.parse(String(entry.dateStart)));
+  if (timestamps.some((timestamp) => !Number.isFinite(timestamp))) return value;
+  return [...items].sort(
+    (a, b) => Date.parse(String(a.dateStart)) - Date.parse(String(b.dateStart)),
   );
 }
 
