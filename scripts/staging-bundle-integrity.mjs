@@ -71,6 +71,37 @@ function gitHead() {
   return head;
 }
 
+function readCommittedConfig(commit) {
+  const result = spawnSync(
+    "git",
+    [
+      "-c",
+      "core.useReplaceRefs=false",
+      "-c",
+      "core.fsmonitor=false",
+      "cat-file",
+      "blob",
+      `${commit}:${CONFIG_PATH}`,
+    ],
+    { encoding: null, env: gitEnvironment, maxBuffer: 1024 * 1024 },
+  );
+  if (result.status !== 0 || !Buffer.isBuffer(result.stdout)) {
+    fail(
+      "Unable to read the staging Wrangler configuration from the release commit.",
+    );
+  }
+  return result.stdout;
+}
+
+function requireReleaseConfig(config, releaseCommit) {
+  const committedConfig = readCommittedConfig(releaseCommit);
+  if (!config.equals(committedConfig)) {
+    fail(
+      "The staging Wrangler configuration does not match the release commit.",
+    );
+  }
+}
+
 function validateDistDirectory() {
   let stat;
   try {
@@ -153,11 +184,13 @@ function verifyPrivateCopy(path, expectedBytes, label) {
 
 function createManifest() {
   validateDistDirectory();
+  const releaseCommit = gitHead();
   const bundle = readRegularFile(BUNDLE_PATH, "The staging bundle");
   const config = readRegularFile(
     CONFIG_PATH,
     "The staging Wrangler configuration",
   );
+  requireReleaseConfig(config, releaseCommit);
   if (existsSync(MANIFEST_PATH)) {
     const existing = lstatSync(MANIFEST_PATH);
     if (
@@ -172,7 +205,7 @@ function createManifest() {
   }
   const manifest = {
     schemaVersion: 2,
-    releaseCommit: gitHead(),
+    releaseCommit,
     bundlePath: BUNDLE_PATH,
     sha256: sha256(bundle),
     size: bundle.length,
@@ -277,6 +310,7 @@ function verifyManifest() {
       "The staging Wrangler configuration does not match its release manifest.",
     );
   }
+  requireReleaseConfig(config, approvedRelease);
   process.stdout.write(
     `Verified staging bundle ${manifest.sha256} for ${approvedRelease}.\n`,
   );
