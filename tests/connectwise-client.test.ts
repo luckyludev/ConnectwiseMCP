@@ -1597,6 +1597,51 @@ describe("ConnectWiseClient", () => {
     );
   });
 
+  it.each([
+    ["service.boards.statuses", "boardId", "32"],
+    ["service.boards.types", "boardId", "32/statuses"],
+    ["service.tickets.byStatus", "statusId", "1 OR closedFlag=false"],
+    ["system.documents", "recordId", "77&recordType=Company"],
+    ["time.entries.byMember", "memberId", "149"],
+  ] as const)(
+    "rejects non-numeric catalog identifier %s.%s before requesting upstream",
+    async (route, key, value) => {
+      let requests = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json([]);
+        },
+      });
+
+      await expect(
+        client.catalogGet(route, { [key]: value, pageSize: 20 }),
+      ).rejects.toThrow(/Invalid (boardId|statusId|recordId)|Catalog memberId/);
+      expect(requests).toBe(0);
+    },
+  );
+
+  it.each([
+    ["company.configurations", "query"],
+    ["finance.agreements.byName", "name"],
+  ] as const)(
+    "rejects non-string catalog search parameter %s.%s before requesting upstream",
+    async (route, key) => {
+      let requests = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json([]);
+        },
+      });
+
+      await expect(
+        client.catalogGet(route, { [key]: 7, pageSize: 20 }),
+      ).rejects.toThrow(`Invalid ${key}`);
+      expect(requests).toBe(0);
+    },
+  );
+
   it("verifies every status-filtered ticket matches the requested status", async () => {
     const matchingClient = createConnectWiseClient(credentials, {
       fetcher: async () => Response.json([{ id: 1, status: { id: 547 } }]),
