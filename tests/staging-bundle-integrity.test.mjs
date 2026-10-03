@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmod,
   link,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rename,
   rm,
@@ -46,7 +48,7 @@ async function createCheckout() {
   git(cwd, ["init", "--quiet"]);
   git(cwd, ["config", "user.name", "Staging Bundle Test"]);
   git(cwd, ["config", "user.email", "staging-bundle@example.invalid"]);
-  git(cwd, ["add", "release.txt"]);
+  git(cwd, ["add", "release.txt", "wrangler.jsonc"]);
   git(cwd, ["commit", "--quiet", "-m", "reviewed release"]);
   return { cwd, head: git(cwd, ["rev-parse", "HEAD"]) };
 }
@@ -84,6 +86,39 @@ describe("staging bundle integrity", () => {
       expect(verified.status, verified.stderr).toBe(0);
       expect(verified.stdout).toMatch(
         new RegExp(`^Verified staging bundle [0-9a-f]{64} for ${head}\\.\\n$`),
+      );
+    });
+  });
+
+  it("rejects a Wrangler configuration modified before manifest creation", async () => {
+    await withCheckout(async ({ cwd }) => {
+      await writeFile(join(cwd, "wrangler.jsonc"), '{"unreviewed":true}\n');
+
+      const result = run(cwd, "create");
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging Wrangler configuration does not match the release commit.",
+      );
+    });
+  });
+
+  it("rejects a self-consistent manifest for an uncommitted Wrangler configuration", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      expect(run(cwd, "create").status).toBe(0);
+      const config = Buffer.from('{"unreviewed":true}\n');
+      await writeFile(join(cwd, "wrangler.jsonc"), config);
+      const manifestPath = join(cwd, "dist", "staging-bundle-manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      manifest.configSha256 = createHash("sha256").update(config).digest("hex");
+      manifest.configSize = config.length;
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+      const result = run(cwd, "verify", head);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging Wrangler configuration does not match the release commit.",
       );
     });
   });
