@@ -779,7 +779,7 @@ function ticketSearchString(value: string): string {
   return conditionString(normalized);
 }
 
-function targetedSearchString(value: string): string {
+function targetedSearchTerm(value: string): string {
   const normalized = value.trim();
   if (
     normalized.length < 2 ||
@@ -788,7 +788,17 @@ function targetedSearchString(value: string): string {
   ) {
     throw new Error("Invalid targeted search text");
   }
-  return conditionString(normalized);
+  return normalized;
+}
+
+function targetedSearchString(value: string): string {
+  return conditionString(targetedSearchTerm(value));
+}
+
+function unicodeCaseFold(value: string): string {
+  // Uppercasing avoids context-sensitive lowercase mappings (for example,
+  // Greek final sigma). NFC makes canonically equivalent names comparable.
+  return value.normalize("NFC").toUpperCase().normalize("NFC");
 }
 
 // CW stores schedule and time entries as UTC ISO strings. Accept ISO 8601
@@ -1045,6 +1055,27 @@ export function createConnectWiseClient(
       ) {
         throw new Error(
           `ConnectWise record does not match requested ${referenceField}`,
+        );
+      }
+    }
+  }
+
+  function assertTargetedNameList(records: unknown, searchText: string): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise targeted search response");
+    }
+    const expected = unicodeCaseFold(targetedSearchTerm(searchText));
+    for (const record of records) {
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        throw new Error("Invalid ConnectWise targeted search response");
+      }
+      const name = (record as Record<string, unknown>).name;
+      if (
+        typeof name !== "string" ||
+        !unicodeCaseFold(name).includes(expected)
+      ) {
+        throw new Error(
+          "ConnectWise record does not match targeted name search",
         );
       }
     }
@@ -1673,6 +1704,12 @@ export function createConnectWiseClient(
           "status",
           Number(effectiveParams.statusId),
         );
+      }
+      if (route === "company.configurations") {
+        assertTargetedNameList(result, String(effectiveParams.query));
+      }
+      if (route === "finance.agreements.byName") {
+        assertTargetedNameList(result, String(effectiveParams.name));
       }
       if (
         route === "schedule.entries.byMember" &&
