@@ -23,7 +23,7 @@ const configurationCollectionFields =
 const agreementCollectionFields =
   "id,name,type,company,agreementStatus,billingCycle,billAmount,nextInvoiceDate";
 const agreementAdditionCollectionFields =
-  "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description";
+  "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description,agreementId";
 const timeEntryCollectionFields =
   "id,actualHours,timeStart,member,notes,workType";
 const ticketTimeEntryRelationshipFields = `${timeEntryCollectionFields},chargeToType,chargeToId`;
@@ -32,7 +32,7 @@ const scheduleEntryCollectionFields =
   "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
 const timeSheetCollectionFields =
   "id,member,year,period,dateStart,dateEnd,status,hours,deadline";
-const agreementAdditionSummaryFields = "extPrice,extCost";
+const agreementAdditionSummaryFields = "extPrice,extCost,agreementId";
 const agreementInvoiceCollectionFields =
   "id,invoiceNumber,total,date,agreement";
 const serviceTicketNoteCollectionFields =
@@ -909,16 +909,20 @@ describe("ConnectWiseClient", () => {
     }
   });
 
-  it("requests only projected fields for agreement additions", async () => {
+  it("verifies agreement relationships and returns projected additions", async () => {
     let capturedUrl = "";
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         capturedUrl = String(input);
-        return Response.json([]);
+        return Response.json([
+          { id: 44, description: "Managed service", agreementId: 7 },
+        ]);
       },
     });
 
-    await client.getAgreementAdditions(7, 5);
+    await expect(client.getAgreementAdditions(7, 5)).resolves.toEqual([
+      { id: 44, description: "Managed service" },
+    ]);
 
     const additionsUrl = new URL(capturedUrl);
     expect(additionsUrl.pathname).toBe(
@@ -931,16 +935,18 @@ describe("ConnectWiseClient", () => {
     expect(additionsUrl.searchParams.getAll("fields")).toHaveLength(1);
   });
 
-  it("requests only aggregate fields for agreement addition summaries", async () => {
+  it("verifies agreement relationships and returns aggregate addition fields", async () => {
     let capturedUrl = "";
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         capturedUrl = String(input);
-        return Response.json([]);
+        return Response.json([{ extPrice: 25, extCost: 10, agreementId: 7 }]);
       },
     });
 
-    await client.getAgreementAdditionSummary(7, 5);
+    await expect(client.getAgreementAdditionSummary(7, 5)).resolves.toEqual([
+      { extPrice: 25, extCost: 10 },
+    ]);
 
     const summaryUrl = new URL(capturedUrl);
     expect(summaryUrl.pathname).toBe(
@@ -951,6 +957,29 @@ describe("ConnectWiseClient", () => {
       pageSize: "5",
     });
   });
+
+  it.each([
+    {},
+    { agreementId: null },
+    { agreementId: "7" },
+    { agreementId: 8 },
+  ])(
+    "rejects additions outside the exact requested agreement: %j",
+    async (addition) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([addition]),
+      });
+
+      for (const read of [
+        () => client.getAgreementAdditions(7, 5),
+        () => client.getAgreementAdditionSummary(7, 5),
+      ]) {
+        await expect(read()).rejects.toThrow(
+          "ConnectWise addition is not associated with requested agreement",
+        );
+      }
+    },
+  );
 
   it("verifies and strips agreement relationships from recent invoices", async () => {
     const urls: string[] = [];

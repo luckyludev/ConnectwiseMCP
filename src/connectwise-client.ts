@@ -483,8 +483,8 @@ const CONFIGURATION_COLLECTION_FIELDS =
 const AGREEMENT_COLLECTION_FIELDS =
   "id,name,type,company,agreementStatus,billingCycle,billAmount,nextInvoiceDate";
 const AGREEMENT_ADDITION_COLLECTION_FIELDS =
-  "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description";
-const AGREEMENT_ADDITION_SUMMARY_FIELDS = "extPrice,extCost";
+  "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description,agreementId";
+const AGREEMENT_ADDITION_SUMMARY_FIELDS = "extPrice,extCost,agreementId";
 const AGREEMENT_INVOICE_COLLECTION_FIELDS =
   "id,invoiceNumber,total,date,agreement";
 const TIME_ENTRY_COLLECTION_FIELDS =
@@ -1001,6 +1001,32 @@ export function createConnectWiseClient(
       throw new Error(`ConnectWise ${recordType} does not match requested ID`);
     }
     return record as Record<string, unknown>;
+  }
+
+  function verifiedAgreementAdditionList(
+    records: unknown,
+    agreementId: number,
+  ): Array<Record<string, unknown>> {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise agreement addition response");
+    }
+    return records.map((record) => {
+      if (
+        !record ||
+        typeof record !== "object" ||
+        Array.isArray(record) ||
+        (record as Record<string, unknown>).agreementId !== agreementId
+      ) {
+        throw new Error(
+          "ConnectWise addition is not associated with requested agreement",
+        );
+      }
+      const { agreementId: _agreementId, ...item } = record as Record<
+        string,
+        unknown
+      >;
+      return item;
+    });
   }
 
   function assertMappedMember(
@@ -1820,7 +1846,7 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(agreementId, "agreement ID");
       boundedPageSize(pageSize);
-      return requestBoundedList(
+      const additions = await requestBoundedList(
         `/finance/agreements/${agreementId}/additions`,
         {
           fields: AGREEMENT_ADDITION_COLLECTION_FIELDS,
@@ -1828,6 +1854,7 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      return verifiedAgreementAdditionList(additions, agreementId);
     },
 
     async getAgreementAdditionSummary(
@@ -1836,7 +1863,7 @@ export function createConnectWiseClient(
     ): Promise<unknown> {
       positiveId(agreementId, "agreement ID");
       boundedPageSize(pageSize);
-      return requestBoundedList(
+      const additions = await requestBoundedList(
         `/finance/agreements/${agreementId}/additions`,
         {
           fields: AGREEMENT_ADDITION_SUMMARY_FIELDS,
@@ -1844,6 +1871,7 @@ export function createConnectWiseClient(
         },
         pageSize,
       );
+      return verifiedAgreementAdditionList(additions, agreementId);
     },
 
     async createAgreementAddition(agreementId, input): Promise<unknown> {
