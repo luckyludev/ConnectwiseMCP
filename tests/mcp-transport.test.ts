@@ -2579,6 +2579,7 @@ describe("authenticated MCP transport", () => {
       }
       return Response.json({
         id: 9,
+        member: { id: 149 },
         dateEnd: "2026-08-31T22:00:00Z",
         privateKey: "UPSTREAM_PRIVATE_VALUE",
       });
