@@ -66,7 +66,17 @@ const MIGRATED_TOOL_ACCESS = Object.freeze({
   },
 });
 
+const NARROW_ADDITION_ACCESS = Object.freeze({
+  "Image attachment from chat": {
+    open_attachment_uploader: "read",
+    upload_connectwise_image: "write",
+    attach_image_to_ticket: "write",
+    attach_image_to_time_entry: "write",
+  },
+});
+
 const ACTIVE_DECISIONS = new Set([
+  "Added narrowly",
   "Excluded",
   "Migrated",
   "Migrated as metadata",
@@ -95,17 +105,25 @@ function activeDecisionRows(markdown) {
 
   return table
     .split("\n")
-    .filter((line) => /^\|.*`[a-z][a-z0-9_]*`/.test(line))
+    .filter((line) => line.startsWith("|"))
     .map((line) => {
       const columns = line.split("|").slice(1, -1);
       if (columns.length !== 3) {
         throw new Error("active legacy tool decision row is malformed");
       }
+      return columns;
+    })
+    .filter((columns) => {
+      const decision = columns[1].trim().replaceAll("**", "");
+      return decision !== "V2 decision" && !/^-+$/.test(decision);
+    })
+    .map((columns) => {
       const legacyTools = [...columns[0].matchAll(/`([a-z][a-z0-9_]*)`/g)].map(
         ([, name]) => name,
       );
+      const legacySurface = columns[0].trim().replaceAll("`", "");
       const decision = columns[1].trim().replaceAll("**", "");
-      return { legacyTools, decision };
+      return { legacyTools, legacySurface, decision };
     });
 }
 
@@ -145,6 +163,27 @@ describe("legacy read-surface classification", () => {
       for (const v2Tool of v2Tools) {
         expect(TOOL_ACCESS[v2Tool]).toBe(access);
       }
+    }
+
+    const excludedTools = rows
+      .filter(({ decision }) => decision === "Excluded")
+      .flatMap(({ legacyTools }) => legacyTools);
+    expect(excludedTools).toHaveLength(15);
+    for (const excludedTool of excludedTools) {
+      expect(TOOL_ACCESS).not.toHaveProperty(excludedTool);
+    }
+
+    const additions = rows.filter(({ decision }) =>
+      decision.startsWith("Added"),
+    );
+    expect(additions).toHaveLength(1);
+    expect(additions[0].legacyTools).toEqual([]);
+    expect(additions[0].legacySurface).toBe("Image attachment from chat");
+    expect(additions[0].decision).toBe("Added narrowly");
+    for (const [tool, access] of Object.entries(
+      NARROW_ADDITION_ACCESS[additions[0].legacySurface],
+    )) {
+      expect(TOOL_ACCESS[tool]).toBe(access);
     }
   });
 });
