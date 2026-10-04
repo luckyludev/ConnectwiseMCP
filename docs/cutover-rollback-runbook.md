@@ -35,21 +35,34 @@ The rollback authority may roll back before a threshold is crossed when evidence
 
 ### Verified rollback image artifact
 
-Every successful canonical `main` run of `legacy-oauth-ci` retains `legacy-rollback-image-<release-commit>` for 90 days. The artifact contains the exact image archive that CI reloaded and smoke-tested, its SHA-256 checksum, a CycloneDX SBOM generated from that image, and a manifest binding both the archive and SBOM digests plus the image ID to the workflow commit and run. A pull-request merge commit, a failed run, an expired artifact, or a local rebuild is not rollback evidence.
+Every successful canonical `main` run of `legacy-oauth-ci` retains `legacy-rollback-image-<release-commit>` for 90 days. The artifact contains the exact image archive that CI reloaded and smoke-tested, its SHA-256 checksum, a CycloneDX SBOM generated from that image, and a manifest binding both the archive and SBOM digests plus the image ID to the workflow commit and run. GitHub artifact attestations cryptographically bind all four files to the canonical repository and workflow identity. A pull-request merge commit, a failed run, an expired artifact, an unattested file, or a local rebuild is not rollback evidence.
 
 Before the change window, select a successful `push`, `schedule`, or manually dispatched run on `refs/heads/main` whose full 40-character `headSha` is the reviewed release commit. Record its run URL/ID in the approved operations system. Download the artifact without renaming its files:
 
 ```bash
+set -euo pipefail
 gh run download <SUCCESSFUL_MAIN_RUN_ID> \
   --repo luckyludev/ConnectwiseMCP \
   --name legacy-rollback-image-<FULL_RELEASE_COMMIT> \
   --dir rollback-image-<FULL_RELEASE_COMMIT>
 cd rollback-image-<FULL_RELEASE_COMMIT>
+for artifact_file in \
+  connectwise-legacy-rollback-image.tar.gz \
+  connectwise-legacy-rollback-image.sha256 \
+  connectwise-legacy-rollback-image.json \
+  connectwise-legacy-rollback-image.cdx.json
+do
+  gh attestation verify "$artifact_file" \
+    --repo luckyludev/ConnectwiseMCP \
+    --signer-workflow luckyludev/ConnectwiseMCP/.github/workflows/legacy-oauth-ci.yml \
+    --source-digest <FULL_RELEASE_COMMIT> \
+    --source-ref refs/heads/main
+done
 python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py \
   . <FULL_RELEASE_COMMIT> <SUCCESSFUL_MAIN_RUN_ID>
 ```
 
-The verifier fails closed unless the artifact directory itself is a real directory, the manifest has the exact schema and expected release/run bindings, the four fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, the downloaded archive and bounded CycloneDX SBOM match their manifest SHA-256 digests, and the SBOM contains a component inventory. It opens the directory and files without following symlinks and keeps every validation/read bound to the same file descriptors, rejecting metadata changes observed during a read. Do not edit, rename, symlink, or hard-link the artifact directory or files to make verification pass.
+Each `gh attestation verify` command must pass against the canonical repository, signer workflow, release commit, and `refs/heads/main`; this rejects substituted or locally rebuilt files even when their filenames match. The local verifier then fails closed unless the artifact directory itself is a real directory, the manifest has the exact schema and expected release/run bindings, the four fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, the downloaded archive and bounded CycloneDX SBOM match their manifest SHA-256 digests, and the SBOM contains a component inventory. It opens the directory and files without following symlinks and keeps every validation/read bound to the same file descriptors, rejecting metadata changes observed during a read. Do not edit, rename, symlink, or hard-link the artifact directory or files to make verification pass, and do not continue when any provenance or local verification check fails.
 
 Load and verify the tested image before rehearsal and preflight:
 

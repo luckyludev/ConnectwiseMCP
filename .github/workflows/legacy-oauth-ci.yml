@@ -203,3 +203,27 @@ jobs:
           overwrite: false
           include-hidden-files: false
           retention-days: 90
+
+  attest:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the verified rollback artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: legacy-rollback-image-${{ github.sha }}
+          path: .
+      - name: Attest the verified rollback artifact
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            connectwise-legacy-rollback-image.tar.gz
+            connectwise-legacy-rollback-image.sha256
+            connectwise-legacy-rollback-image.json
+            connectwise-legacy-rollback-image.cdx.json
