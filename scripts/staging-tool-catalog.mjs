@@ -69,11 +69,11 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   create_service_ticket:
     "65753c79701ae624f3a6f66736b2e4a60f237ed4b18caf23c89dc592349e1089",
   update_service_ticket:
-    "9e3be678d90c8b9b8f7d899ff600c7e0899e675b0976b92c4a0f7013a35c5a65",
+    "d8244216ed2a169b41bf75ef1214081b26345e8ad06f2185925666c546ba28d8",
   create_schedule_entry:
     "40edb501d81a87eb27b27f8408f9dc83f78c0e9e4dd5edda23b0e012142b0b8d",
   update_schedule_entry:
-    "51978daf293532fd6aa55c8de829dc82fe6bcfa3604d51d7c80d44ac55d01b83",
+    "e649b32476f8fd95485fb802516f5e69931e935dfacb228e65a868550fb50d55",
   delete_schedule_entry:
     "c9ae58624f4e9f329da7c4f514760b4020d8ea67556320063246d7a4b07cfb29",
   create_time_entry:

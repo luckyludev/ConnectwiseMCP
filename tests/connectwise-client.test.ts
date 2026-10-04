@@ -2441,7 +2441,81 @@ describe("ConnectWiseClient", () => {
     },
   );
 
-  it("updates a schedule entry via GET-then-merge PUT, preserving unpassed fields", async () => {
+  it.each([
+    [
+      "service ticket",
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.updateServiceTicket(9, {}),
+      "at least one service ticket update field is required",
+    ],
+    [
+      "schedule entry",
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.updateScheduleEntry(9, {}),
+      "at least one schedule update field is required",
+    ],
+  ] as const)(
+    "rejects an empty %s update without issuing a write",
+    async (_recordType, update, message) => {
+      const methods: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          methods.push(
+            (init as { method?: string } | undefined)?.method ?? "GET",
+          );
+          return Response.json({ id: 9, member: { id: 149 } });
+        },
+      });
+
+      await expect(update(client)).rejects.toThrow(message);
+      expect(methods).toEqual(["GET"]);
+    },
+  );
+
+  it("uses an identity-only source read and explicit service ticket patch", async () => {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        const rawBody = (init as { body?: string } | undefined)?.body;
+        calls.push({
+          method,
+          url: String(input),
+          ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
+        });
+        return Response.json({
+          id: 9,
+          summary: "Original",
+          company: { id: 1 },
+          board: { id: 2 },
+          status: { id: 3 },
+          priority: { id: 4 },
+          type: { id: 5 },
+          owner: { id: 6 },
+          contact: { id: 7 },
+          privateKey: "must-not-be-replayed",
+          unexpectedWritableField: true,
+          _info: { lastUpdated: "secret" },
+        });
+      },
+    });
+
+    await client.updateServiceTicket(9, {
+      summary: "Updated",
+      ownerId: 12,
+    });
+
+    const get = calls.find((call) => call.method === "GET")!;
+    expect(new URL(get.url).searchParams.get("fields")).toBe("id");
+    const body = calls.find((call) => call.method === "PATCH")!.body;
+    expect(body).toEqual([
+      { op: "replace", path: "owner", value: { id: 12 } },
+      { op: "replace", path: "summary", value: "Updated" },
+    ]);
+  });
+
+  it("updates a schedule entry via an ownership read and explicit patch", async () => {
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input, init) => {
@@ -2463,6 +2537,9 @@ describe("ConnectWiseClient", () => {
             name: "Keep me",
             doneFlag: false,
             allowScheduleConflictsFlag: true,
+            privateKey: "must-not-be-replayed",
+            unexpectedWritableField: true,
+            _info: { lastUpdated: "secret" },
           });
         }
         return Response.json({
@@ -2478,14 +2555,22 @@ describe("ConnectWiseClient", () => {
       dateStart: "2026-09-01T12:00:00-04:00",
       allowConflicts: false,
     });
-    const put = calls.find((c) => c.method === "PUT")!;
-    expect(put).toBeDefined();
-    const body = put.body as Record<string, unknown>;
-    expect(body.dateStart).toBe("2026-09-01T16:00:00Z");
-    expect(body.name).toBe("Keep me");
-    expect(body.doneFlag).toBe(false);
-    expect(body.allowScheduleConflictsFlag).toBe(false);
-    expect(body.status).toEqual({ id: 1 });
+    const get = calls.find((c) => c.method === "GET")!;
+    expect(new URL(get.url).searchParams.get("fields")).toBe("id,member");
+    const patch = calls.find((c) => c.method === "PATCH")!;
+    expect(patch).toBeDefined();
+    expect(patch.body).toEqual([
+      {
+        op: "replace",
+        path: "dateStart",
+        value: "2026-09-01T16:00:00Z",
+      },
+      {
+        op: "replace",
+        path: "allowScheduleConflictsFlag",
+        value: false,
+      },
+    ]);
   });
 
   it.each([
@@ -2504,7 +2589,7 @@ describe("ConnectWiseClient", () => {
         const method =
           (init as { method?: string } | undefined)?.method ?? "GET";
         methods.push(method);
-        if (method === "PUT") return Response.json(updated);
+        if (method === "PATCH") return Response.json(updated);
         getCount += 1;
         return Response.json({
           id: 9,
@@ -2523,7 +2608,7 @@ describe("ConnectWiseClient", () => {
       name: "Reconciled",
       doneFlag: true,
     });
-    expect(methods).toEqual(["GET", "PUT", "GET"]);
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
   it("reconciles a malformed successful schedule update response", async () => {
@@ -2534,7 +2619,7 @@ describe("ConnectWiseClient", () => {
         const method =
           (init as { method?: string } | undefined)?.method ?? "GET";
         methods.push(method);
-        if (method === "PUT") {
+        if (method === "PATCH") {
           return new Response("{", {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -2552,7 +2637,7 @@ describe("ConnectWiseClient", () => {
     await expect(
       client.updateScheduleEntry(9, { doneFlag: true }),
     ).resolves.toMatchObject({ id: 9, member: { id: 149 }, doneFlag: true });
-    expect(methods).toEqual(["GET", "PUT", "GET"]);
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
   it("rejects an unconfirmed schedule update after reconciliation", async () => {
@@ -2563,7 +2648,7 @@ describe("ConnectWiseClient", () => {
         const method =
           (init as { method?: string } | undefined)?.method ?? "GET";
         methods.push(method);
-        if (method === "PUT") return Response.json(null);
+        if (method === "PATCH") return Response.json(null);
         getCount += 1;
         return Response.json({
           id: 9,
@@ -2577,7 +2662,7 @@ describe("ConnectWiseClient", () => {
       client.updateScheduleEntry(9, { doneFlag: true }),
     ).rejects.toThrow("ConnectWise schedule entry does not match requested ID");
     expect(getCount).toBe(2);
-    expect(methods).toEqual(["GET", "PUT", "GET"]);
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
   it("rejects an invalid schedule update response when reconciliation is invalid", async () => {
@@ -2588,7 +2673,7 @@ describe("ConnectWiseClient", () => {
         const method =
           (init as { method?: string } | undefined)?.method ?? "GET";
         methods.push(method);
-        if (method === "PUT") {
+        if (method === "PATCH") {
           return Response.json({ id: 9, member: { id: 150 } });
         }
         getCount += 1;
@@ -2603,7 +2688,7 @@ describe("ConnectWiseClient", () => {
     await expect(
       client.updateScheduleEntry(9, { doneFlag: true }),
     ).rejects.toThrow("ConnectWise record is not assigned to mapped member");
-    expect(methods).toEqual(["GET", "PUT", "GET"]);
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
   it("refuses to update schedule entries outside the mapped member", async () => {
@@ -2637,7 +2722,7 @@ describe("ConnectWiseClient", () => {
     });
     await client.deleteScheduleEntry(247134);
     expect(calls).toEqual([
-      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
+      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134?fields=id%2Cmember",
       "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
     ]);
   });
