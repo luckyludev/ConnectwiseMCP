@@ -926,7 +926,7 @@ export function registerConnectWiseBusinessTools(
     "create_ticket_note",
     {
       description:
-        "Create a service or project ticket note using the authenticated user's ConnectWise API member permissions. Pass image (base64 data URI) to attach it to the ticket first and inline it in the note.",
+        "Create a service ticket note using the authenticated user's ConnectWise API member permissions. Pass image (base64 data URI) to attach it to the service ticket first and inline it in the note.",
       inputSchema: {
         ticketId: positiveId,
         text: z.string().trim().min(1).max(8_000),
@@ -998,7 +998,7 @@ export function registerConnectWiseBusinessTools(
     "attach_image_to_ticket",
     {
       description:
-        "Attach an image from the chat (base64 data URI, 10 MB maximum) to a ConnectWise ticket using the authenticated user's ConnectWise API member permissions.",
+        "Attach an image from the chat (base64 data URI, 10 MB maximum) to a ConnectWise service ticket using the authenticated user's ConnectWise API member permissions.",
       inputSchema: {
         ticketId: positiveId,
         image,

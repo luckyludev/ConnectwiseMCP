@@ -3465,22 +3465,40 @@ describe("ConnectWiseClient", () => {
     expect(requests).toBe(0);
   });
 
-  it("falls back to the project-ticket attachment path when the service path is missing", async () => {
-    const urls: string[] = [];
-    const client = createConnectWiseClient(credentials, {
+  it("does not switch ticket write namespaces when a service route is missing", async () => {
+    const attachmentUrls: string[] = [];
+    const attachmentClient = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
-        urls.push(String(input));
-        if (urls.length === 1) return new Response(null, { status: 404 });
-        return Response.json({ id: 56 });
+        attachmentUrls.push(String(input));
+        return new Response(null, { status: 404 });
       },
     });
 
-    await expect(client.attachImageToTicket(77, imagePayload)).resolves.toEqual(
-      { id: 56 },
-    );
-    expect(urls).toEqual([
+    await expect(
+      attachmentClient.attachImageToTicket(77, imagePayload),
+    ).rejects.toThrow("ConnectWise request failed (404)");
+    expect(attachmentUrls).toEqual([
       "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/77/attachments",
-      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/project/tickets/77/attachments",
+    ]);
+
+    const noteUrls: string[] = [];
+    const noteClient = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        noteUrls.push(String(input));
+        return new Response(null, { status: 404 });
+      },
+    });
+
+    await expect(
+      noteClient.createTicketNote(77, {
+        text: "Customer called",
+        internalOnly: true,
+        resolutionNote: false,
+        issueNote: false,
+      }),
+    ).rejects.toThrow("ConnectWise request failed (404)");
+    expect(noteUrls).toEqual([
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/service/tickets/77/notes",
     ]);
   });
 });
