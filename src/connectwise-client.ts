@@ -2179,19 +2179,76 @@ export function createConnectWiseClient(
         if (input.name.length > 500) throw new Error("name is too long");
         merged.name = input.name;
       }
-      if (input.allowConflicts === true) {
-        merged.allowScheduleConflictsFlag = true;
+      if (input.allowConflicts !== undefined) {
+        merged.allowScheduleConflictsFlag = input.allowConflicts;
       }
       if (input.whereId !== undefined) {
         positiveId(input.whereId, "where ID");
         merged.where = { id: input.whereId };
       }
-      return requestJson(
-        "PUT",
-        `/schedule/entries/${entryId}`,
-        undefined,
-        merged,
-      );
+      const confirmUpdate = (record: unknown): Record<string, unknown> => {
+        const verified = verifiedRecordIdentity(
+          record,
+          entryId,
+          "schedule entry",
+        );
+        assertMappedMember(verified, memberId);
+        const referenceId = (field: string): unknown => {
+          const value = verified[field];
+          return value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, unknown>).id
+            : undefined;
+        };
+        const confirmed =
+          (input.dateStart === undefined ||
+            verified.dateStart === merged.dateStart) &&
+          (input.dateEnd === undefined ||
+            verified.dateEnd === merged.dateEnd) &&
+          (input.statusId === undefined ||
+            referenceId("status") === input.statusId) &&
+          (input.doneFlag === undefined ||
+            verified.doneFlag === input.doneFlag) &&
+          (input.name === undefined || verified.name === input.name) &&
+          (input.allowConflicts === undefined ||
+            verified.allowScheduleConflictsFlag === input.allowConflicts) &&
+          (input.whereId === undefined ||
+            referenceId("where") === input.whereId);
+        if (!confirmed) {
+          throw new Error("ConnectWise schedule update could not be confirmed");
+        }
+        return verified;
+      };
+      const reconcile = async (originalError: unknown) => {
+        try {
+          return confirmUpdate(
+            await requestJson("GET", `/schedule/entries/${entryId}`),
+          );
+        } catch {
+          throw originalError;
+        }
+      };
+
+      let response: unknown;
+      try {
+        response = await requestJson(
+          "PUT",
+          `/schedule/entries/${entryId}`,
+          undefined,
+          merged,
+        );
+      } catch (error) {
+        // The request may have reached ConnectWise even if the response could
+        // not be read. Confirm the stored state before reporting a failure that
+        // could induce an unsafe retry.
+        return reconcile(error);
+      }
+      try {
+        return confirmUpdate(response);
+      } catch (error) {
+        // A 2xx PUT can still carry an empty, malformed, stale, or misrouted
+        // body. Re-read the requested record and verify the requested changes.
+        return reconcile(error);
+      }
     },
 
     async deleteScheduleEntry(entryId): Promise<void> {

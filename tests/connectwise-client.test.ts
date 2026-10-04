@@ -2462,14 +2462,21 @@ describe("ConnectWiseClient", () => {
             status: { id: 1 },
             name: "Keep me",
             doneFlag: false,
+            allowScheduleConflictsFlag: true,
           });
         }
-        return Response.json({ id: 9 });
+        return Response.json({
+          id: 9,
+          member: { id: 149 },
+          dateStart: "2026-09-01T16:00:00Z",
+          allowScheduleConflictsFlag: false,
+        });
       },
     });
 
     await client.updateScheduleEntry(9, {
       dateStart: "2026-09-01T12:00:00-04:00",
+      allowConflicts: false,
     });
     const put = calls.find((c) => c.method === "PUT")!;
     expect(put).toBeDefined();
@@ -2477,7 +2484,126 @@ describe("ConnectWiseClient", () => {
     expect(body.dateStart).toBe("2026-09-01T16:00:00Z");
     expect(body.name).toBe("Keep me");
     expect(body.doneFlag).toBe(false);
+    expect(body.allowScheduleConflictsFlag).toBe(false);
     expect(body.status).toEqual({ id: 1 });
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { id: "9", member: { id: 149 } },
+    { id: 10, member: { id: 149 } },
+    { id: 9 },
+    { id: 9, member: { id: 150 } },
+  ])("reconciles an invalid schedule update response %#", async (updated) => {
+    const methods: string[] = [];
+    let getCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PUT") return Response.json(updated);
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          member: { id: 149 },
+          name: getCount === 1 ? "Existing" : "Reconciled",
+          doneFlag: getCount === 1 ? false : true,
+        });
+      },
+    });
+
+    await expect(
+      client.updateScheduleEntry(9, { doneFlag: true }),
+    ).resolves.toMatchObject({
+      id: 9,
+      member: { id: 149 },
+      name: "Reconciled",
+      doneFlag: true,
+    });
+    expect(methods).toEqual(["GET", "PUT", "GET"]);
+  });
+
+  it("reconciles a malformed successful schedule update response", async () => {
+    let getCount = 0;
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PUT") {
+          return new Response("{", {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          member: { id: 149 },
+          doneFlag: getCount > 1,
+        });
+      },
+    });
+
+    await expect(
+      client.updateScheduleEntry(9, { doneFlag: true }),
+    ).resolves.toMatchObject({ id: 9, member: { id: 149 }, doneFlag: true });
+    expect(methods).toEqual(["GET", "PUT", "GET"]);
+  });
+
+  it("rejects an unconfirmed schedule update after reconciliation", async () => {
+    let getCount = 0;
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PUT") return Response.json(null);
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          member: { id: 149 },
+          doneFlag: false,
+        });
+      },
+    });
+
+    await expect(
+      client.updateScheduleEntry(9, { doneFlag: true }),
+    ).rejects.toThrow("ConnectWise schedule entry does not match requested ID");
+    expect(getCount).toBe(2);
+    expect(methods).toEqual(["GET", "PUT", "GET"]);
+  });
+
+  it("rejects an invalid schedule update response when reconciliation is invalid", async () => {
+    let getCount = 0;
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PUT") {
+          return Response.json({ id: 9, member: { id: 150 } });
+        }
+        getCount += 1;
+        return Response.json(
+          getCount === 1
+            ? { id: 9, member: { id: 149 }, name: "Existing" }
+            : { id: 9, member: { id: 150 }, name: "Foreign" },
+        );
+      },
+    });
+
+    await expect(
+      client.updateScheduleEntry(9, { doneFlag: true }),
+    ).rejects.toThrow("ConnectWise record is not assigned to mapped member");
+    expect(methods).toEqual(["GET", "PUT", "GET"]);
   });
 
   it("refuses to update schedule entries outside the mapped member", async () => {
