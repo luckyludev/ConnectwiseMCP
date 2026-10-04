@@ -18,7 +18,35 @@ const profile = (companyId: string) =>
     memberId: 149,
   });
 
+const tenantId = "11111111-1111-4111-8111-111111111111";
+const groupId = "33333333-3333-4333-8333-333333333333";
+const objectIds = {
+  LUIS: "22222222-2222-4222-8222-222222222222",
+  MAYA: "44444444-4444-4444-8444-444444444444",
+} as const;
+
+function authProps(
+  profileAlias: keyof typeof objectIds,
+  scopes: string[] = ["mcp:read"],
+) {
+  return {
+    tenantId,
+    objectId: objectIds[profileAlias],
+    profileAlias,
+    groups: [groupId],
+    roles: [],
+    scopes,
+  };
+}
+
 const env = {
+  ENTRA_TENANT_ID: tenantId,
+  IDENTITY_PROFILE_MAP: JSON.stringify({
+    [`${tenantId}:${objectIds.LUIS}`]: "LUIS",
+    [`${tenantId}:${objectIds.MAYA}`]: "MAYA",
+  }),
+  ALLOWED_GROUP_IDS: JSON.stringify([groupId]),
+  ALLOWED_APP_ROLES: "[]",
   CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
     "https://api-na.myconnectwise.net",
   ]),
@@ -114,7 +142,7 @@ describe("authenticated MCP transport", () => {
       route: "/mcp",
       corsOptions: false,
       authContext: {
-        props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+        props: authProps("LUIS"),
       },
     });
     const response = await handler.fetch(
@@ -300,7 +328,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );
@@ -421,7 +449,7 @@ describe("authenticated MCP transport", () => {
           route: "/mcp",
           corsOptions: false,
           authContext: {
-            props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+            props: authProps("LUIS"),
           },
         },
       );
@@ -524,7 +552,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );
@@ -629,7 +657,7 @@ describe("authenticated MCP transport", () => {
           route: "/mcp",
           corsOptions: false,
           authContext: {
-            props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+            props: authProps("LUIS"),
           },
         },
       );
@@ -731,7 +759,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );
@@ -799,7 +827,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );
@@ -858,7 +886,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );
@@ -924,7 +952,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );
@@ -1011,7 +1039,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );
@@ -1087,7 +1115,7 @@ describe("authenticated MCP transport", () => {
           corsOptions: false,
           authContext: {
             props: {
-              profileAlias: "LUIS",
+              ...authProps("LUIS"),
               scopes: scopes as string[],
             },
           },
@@ -1228,7 +1256,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:write"] },
+          props: authProps("LUIS", ["mcp:write"]),
         },
       },
     );
@@ -1365,7 +1393,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -1463,7 +1491,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -1522,7 +1550,7 @@ describe("authenticated MCP transport", () => {
       route: "/mcp",
       corsOptions: false,
       authContext: {
-        props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+        props: authProps("LUIS", ["mcp:read", "mcp:write"]),
       },
     });
     const response = await handler.fetch(
@@ -1575,7 +1603,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:write"] },
+          props: authProps("LUIS", ["mcp:write"]),
         },
       },
     );
@@ -1635,7 +1663,7 @@ describe("authenticated MCP transport", () => {
           route: "/mcp",
           corsOptions: false,
           authContext: {
-            props: { profileAlias, scopes: ["mcp:read"] },
+            props: authProps(profileAlias),
           },
         },
       );
@@ -1703,9 +1731,11 @@ describe("authenticated MCP transport", () => {
           "correlationId",
           "durationMs",
           "event",
+          "objectId",
           "outcome",
           "profileAlias",
           "reason",
+          "tenantId",
           "timestamp",
           "tool",
           "version",
@@ -1744,7 +1774,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -1797,7 +1827,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -1875,7 +1905,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2039,7 +2069,7 @@ describe("authenticated MCP transport", () => {
           route: "/mcp",
           corsOptions: false,
           authContext: {
-            props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+            props: authProps("LUIS"),
           },
         },
       );
@@ -2100,7 +2130,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );
@@ -2184,7 +2214,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2280,7 +2310,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );
@@ -2398,7 +2428,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2465,7 +2495,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2526,7 +2556,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2600,7 +2630,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2661,7 +2691,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2716,7 +2746,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2776,7 +2806,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2847,7 +2877,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -2936,7 +2966,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -3007,7 +3037,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -3074,7 +3104,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -3144,7 +3174,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -3213,7 +3243,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -3304,7 +3334,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -3372,7 +3402,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "MAYA", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("MAYA", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -3438,7 +3468,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -3492,7 +3522,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read", "mcp:write"] },
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
         },
       },
     );
@@ -3548,7 +3578,7 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: { profileAlias: "LUIS", scopes: ["mcp:read"] },
+          props: authProps("LUIS"),
         },
       },
     );

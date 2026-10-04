@@ -6,7 +6,7 @@ import {
   type ConnectWiseClient,
 } from "./connectwise-client";
 import {
-  resolveConnectWiseCredentials,
+  resolveIdentityBoundConnectWiseCredentials,
   type ConnectWiseCredentials,
 } from "./connectwise-profile";
 import type { EntraAccessTokenProps } from "./auth-handler";
@@ -137,7 +137,7 @@ export async function getServiceTicketResult(
 
   try {
     const requestLog = dependencies.requestLog ?? ((message: string) => {});
-    const credentials = resolveConnectWiseCredentials(env, props.profileAlias);
+    const credentials = resolveIdentityBoundConnectWiseCredentials(env, props);
     const clientFactory =
       dependencies.createClient ??
       ((c: ConnectWiseCredentials) =>

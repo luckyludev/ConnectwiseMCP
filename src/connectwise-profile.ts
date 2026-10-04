@@ -1,4 +1,13 @@
 import { z } from "zod";
+import { resolveCredentialProfile } from "./auth-policy";
+
+export type IdentityBoundProfileProps = {
+  tenantId?: unknown;
+  objectId?: unknown;
+  profileAlias?: unknown;
+  groups?: unknown;
+  roles?: unknown;
+};
 
 function isApprovedConnectWiseOrigin(value: string): boolean {
   try {
@@ -70,6 +79,51 @@ const credentialsSchema = z
   .strict();
 
 export type ConnectWiseCredentials = z.infer<typeof credentialsSchema>;
+
+export function resolveIdentityBoundConnectWiseCredentials(
+  env: object,
+  props: IdentityBoundProfileProps,
+): ConnectWiseCredentials {
+  if (
+    typeof props.tenantId !== "string" ||
+    !props.tenantId ||
+    typeof props.objectId !== "string" ||
+    !props.objectId ||
+    typeof props.profileAlias !== "string" ||
+    !props.profileAlias
+  ) {
+    throw new Error("Authenticated ConnectWise profile binding unavailable");
+  }
+
+  const bindings = env as Record<string, unknown>;
+  const tenantId = bindings.ENTRA_TENANT_ID;
+  const identityProfileMap = bindings.IDENTITY_PROFILE_MAP;
+  const allowedGroupIds = bindings.ALLOWED_GROUP_IDS;
+  const allowedAppRoles = bindings.ALLOWED_APP_ROLES;
+  if (
+    typeof tenantId !== "string" ||
+    typeof identityProfileMap !== "string" ||
+    typeof allowedGroupIds !== "string" ||
+    typeof allowedAppRoles !== "string"
+  ) {
+    throw new Error("ConnectWise authorization policy unavailable");
+  }
+
+  const resolved = resolveCredentialProfile(
+    {
+      tid: props.tenantId,
+      oid: props.objectId,
+      groups: props.groups,
+      roles: props.roles,
+    },
+    { tenantId, identityProfileMap, allowedGroupIds, allowedAppRoles },
+  );
+  if (resolved.profileAlias !== props.profileAlias) {
+    throw new Error("Authenticated ConnectWise profile binding changed");
+  }
+
+  return resolveConnectWiseCredentials(env, resolved.profileAlias);
+}
 
 export function resolveConnectWiseCredentials(
   env: object,
