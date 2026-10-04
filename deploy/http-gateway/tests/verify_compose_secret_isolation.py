@@ -45,6 +45,15 @@ def _environment_keys(service: Any, name: str) -> set[str]:
     return set(environment)
 
 
+def _validate_runtime_restrictions(service: Any, name: str) -> None:
+    if not isinstance(service, dict):
+        raise ValueError(f"Missing {name} service")
+    if service.get("cap_drop") != ["ALL"]:
+        raise ValueError(f"{name} must drop all Linux capabilities")
+    if service.get("security_opt") != ["no-new-privileges:true"]:
+        raise ValueError(f"{name} must forbid privilege acquisition")
+
+
 def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> None:
     if not isinstance(config, dict) or not isinstance(config.get("services"), dict):
         raise ValueError("Compose config must contain services")
@@ -53,6 +62,8 @@ def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> No
     tunnel = services.get("cloudflared")
     gateway_keys = _environment_keys(gateway, "mcp-gateway")
     tunnel_keys = _environment_keys(tunnel, "cloudflared")
+    _validate_runtime_restrictions(gateway, "mcp-gateway")
+    _validate_runtime_restrictions(tunnel, "cloudflared")
 
     tunnel_image = tunnel.get("image")
     if not isinstance(tunnel_image, str) or not CLOUDFLARED_IMAGE_PATTERN.fullmatch(

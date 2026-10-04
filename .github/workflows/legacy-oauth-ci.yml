@@ -124,7 +124,7 @@ jobs:
           python deploy/http-gateway/tests/verify_compose_secret_isolation.py /tmp/rollback-compose.json --verify-canaries
           cloudflared_image="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["services"]["cloudflared"]["image"])' /tmp/rollback-compose.json)"
           docker pull "$cloudflared_image"
-          docker run --rm "$cloudflared_image" --version
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges:true "$cloudflared_image" --version
       - name: Build rollback image
         run: >-
           docker build --tag connectwise-legacy-rollback-ci

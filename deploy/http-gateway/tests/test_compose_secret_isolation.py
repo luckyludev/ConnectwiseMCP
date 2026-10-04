@@ -12,12 +12,16 @@ def compose_config() -> dict:
     return {
         "services": {
             "mcp-gateway": {
-                "environment": {name: f"gateway-{name}" for name in GATEWAY_ENVIRONMENT}
+                "environment": {name: f"gateway-{name}" for name in GATEWAY_ENVIRONMENT},
+                "cap_drop": ["ALL"],
+                "security_opt": ["no-new-privileges:true"],
             },
             "cloudflared": {
                 "image": "cloudflare/cloudflared:latest@sha256:"
                 + "a" * 64,
                 "environment": {name: f"tunnel-{name}" for name in TUNNEL_ENVIRONMENT},
+                "cap_drop": ["ALL"],
+                "security_opt": ["no-new-privileges:true"],
                 "depends_on": {
                     "mcp-gateway": {
                         "condition": "service_healthy",
@@ -31,6 +35,34 @@ def compose_config() -> dict:
 
 def test_accepts_exact_service_environment_allowlists():
     validate_compose_config(compose_config())
+
+
+@pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("cap_drop", None, "drop all Linux capabilities"),
+        ("cap_drop", [], "drop all Linux capabilities"),
+        ("cap_drop", ["NET_RAW"], "drop all Linux capabilities"),
+        ("cap_drop", ["ALL", "NET_RAW"], "drop all Linux capabilities"),
+        ("security_opt", None, "forbid privilege acquisition"),
+        ("security_opt", [], "forbid privilege acquisition"),
+        ("security_opt", ["no-new-privileges:false"], "forbid privilege acquisition"),
+        (
+            "security_opt",
+            ["no-new-privileges:true", "label=disable"],
+            "forbid privilege acquisition",
+        ),
+    ],
+)
+def test_rejects_permissive_or_non_allowlisted_runtime_settings(
+    service, field, value, error
+):
+    config = compose_config()
+    config["services"][service][field] = value
+
+    with pytest.raises(ValueError, match=error):
+        validate_compose_config(config)
 
 
 @pytest.mark.parametrize(
