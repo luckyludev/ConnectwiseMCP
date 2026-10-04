@@ -3012,6 +3012,75 @@ describe("ConnectWiseClient", () => {
     expect(sheetUrl.searchParams.get("pageSize")).toBe("5");
   });
 
+  it("verifies the created time entry identity and mapped member", async () => {
+    const created = {
+      id: 123,
+      member: { id: 149, name: "mapped-member" },
+      notes: "completed work",
+    };
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) =>
+        String(input).includes("/time/sheets")
+          ? Response.json([])
+          : Response.json(created, { status: 201 }),
+    });
+
+    await expect(
+      client.createTimeEntry({
+        timeStart: "2026-09-01T12:00:00-04:00",
+        timeEnd: "2026-09-01T13:00:00-04:00",
+      }),
+    ).resolves.toEqual(created);
+  });
+
+  it.each([
+    null,
+    [],
+    "unexpected",
+    {},
+    { id: 0, member: { id: 149 } },
+    { id: -1, member: { id: 149 } },
+    { id: 1.5, member: { id: 149 } },
+    { id: Number.MAX_SAFE_INTEGER + 1, member: { id: 149 } },
+  ])("rejects malformed created time entry responses: %j", async (created) => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) =>
+        String(input).includes("/time/sheets")
+          ? Response.json([])
+          : Response.json(created, { status: 201 }),
+    });
+
+    await expect(
+      client.createTimeEntry({
+        timeStart: "2026-09-01T12:00:00-04:00",
+        timeEnd: "2026-09-01T13:00:00-04:00",
+      }),
+    ).rejects.toThrow("Invalid ConnectWise time entry response");
+  });
+
+  it.each([
+    { id: 123 },
+    { id: 123, member: { id: "149" } },
+    { id: 123, member: { id: 150 } },
+  ])(
+    "rejects created time entries outside the mapped member: %j",
+    async (created) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input) =>
+          String(input).includes("/time/sheets")
+            ? Response.json([])
+            : Response.json(created, { status: 201 }),
+      });
+
+      await expect(
+        client.createTimeEntry({
+          timeStart: "2026-09-01T12:00:00-04:00",
+          timeEnd: "2026-09-01T13:00:00-04:00",
+        }),
+      ).rejects.toThrow("ConnectWise record is not assigned to mapped member");
+    },
+  );
+
   it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
