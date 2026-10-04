@@ -1133,7 +1133,10 @@ describe("authenticated MCP transport", () => {
           name: "create_service_ticket",
           arguments: { companyId: 1, summary: "must not be sent" },
         },
-        { name: "update_service_ticket", arguments: { ticketId: 1 } },
+        {
+          name: "update_service_ticket",
+          arguments: { ticketId: 1, summary: "must not be sent" },
+        },
         {
           name: "create_schedule_entry",
           arguments: {
@@ -1142,7 +1145,10 @@ describe("authenticated MCP transport", () => {
             dateEnd: "2026-09-02T11:00:00Z",
           },
         },
-        { name: "update_schedule_entry", arguments: { entryId: 1 } },
+        {
+          name: "update_schedule_entry",
+          arguments: { entryId: 1, doneFlag: true },
+        },
         { name: "delete_schedule_entry", arguments: { entryId: 1 } },
         {
           name: "create_time_entry",
@@ -2622,14 +2628,15 @@ describe("authenticated MCP transport", () => {
       }),
     );
     const text = await response.text();
-    const put = bodies.find((b) => b.method === "PUT")!;
-    expect(put).toBeDefined();
-    const wire = put.body as Record<string, unknown>;
-    expect(wire.dateEnd).toBe("2026-08-31T22:00:00Z");
-    expect(wire.dateStart).toBe("2026-08-31T12:30:00Z");
-    expect(wire.name).toBe("Keep me");
-    expect((wire.member as { id: number }).id).toBe(149);
-    expect((wire.type as { id: number }).id).toBe(4);
+    const patch = bodies.find((b) => b.method === "PATCH")!;
+    expect(patch).toBeDefined();
+    expect(patch.body).toEqual([
+      {
+        op: "replace",
+        path: "dateEnd",
+        value: "2026-08-31T22:00:00Z",
+      },
+    ]);
     expect(text).toContain('\\"end\\":\\"2026-08-31T22:00:00Z\\"');
     expect(text).not.toContain("UPSTREAM_PRIVATE_VALUE");
     expect(text).not.toContain("privateKey");
@@ -2680,7 +2687,7 @@ describe("authenticated MCP transport", () => {
     );
     await response.text();
     expect(calls).toEqual([
-      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
+      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134?fields=id%2Cmember",
       "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
     ]);
   });
@@ -2954,20 +2961,13 @@ describe("authenticated MCP transport", () => {
       }),
     );
     const text = await response.text();
-    const put = bodies.find(
-      (b) => b.method === "PUT" && b.url.includes("/service/tickets/1927659"),
+    const patch = bodies.find(
+      (b) => b.method === "PATCH" && b.url.includes("/service/tickets/1927659"),
     )!;
-    expect(put).toBeDefined();
-    const wire = put.body as Record<string, unknown>;
-    expect((wire.owner as { id: number }).id).toBe(212);
-    // unpassed fields preserved
-    expect((wire.board as { id: number }).id).toBe(64);
-    expect((wire.summary as string).trim()).toBe("Daily Server Backup Audit");
-    expect((wire.company as { id: number }).id).toBe(250);
-    // read-only/system fields stripped
-    expect(wire.id).toBeUndefined();
-    expect(wire._info).toBeUndefined();
-    expect(wire.recordType).toBeUndefined();
+    expect(patch).toBeDefined();
+    expect(patch.body).toEqual([
+      { op: "replace", path: "owner", value: { id: 212 } },
+    ]);
     expect(text).toContain('\\"id\\":1927659');
     expect(text).not.toContain("UPSTREAM_PRIVATE_VALUE");
     expect(text).not.toContain("customFields");
@@ -2994,7 +2994,7 @@ describe("authenticated MCP transport", () => {
       ) {
         return Response.json({ id: 1927659, board: { id: 64 } });
       }
-      if (method === "PUT") puts += 1;
+      if (method === "PATCH") puts += 1;
       return Response.json({ id: 1927659 });
     };
     const handler = createMcpHandler(
@@ -3058,7 +3058,7 @@ describe("authenticated MCP transport", () => {
       ) {
         return Response.json({ id: 1927659, board: { id: 64 } });
       }
-      if (method === "PUT") {
+      if (method === "PATCH") {
         puts += 1;
         return Response.json({ id: 1927659, owner: { id: 212 } });
       }
@@ -3129,7 +3129,7 @@ describe("authenticated MCP transport", () => {
           { id: 921, name: "In Progress~" },
         ]);
       }
-      if (method === "PUT") {
+      if (method === "PATCH") {
         return Response.json({ id: 1927963, board: { id: 64 } });
       }
       return Response.json([]);
@@ -3169,7 +3169,7 @@ describe("authenticated MCP transport", () => {
       }),
     );
     const text = await response.text();
-    expect(bodies.filter((b) => b.method === "PUT").length).toBe(1);
+    expect(bodies.filter((b) => b.method === "PATCH").length).toBe(1);
     expect(
       bodies.some(
         (b) => b.method === "GET" && b.url.includes("/schedule/entries"),
@@ -3272,8 +3272,10 @@ describe("authenticated MCP transport", () => {
       }),
     );
     await update.text();
-    const put = bodies.find((b) => b.method === "PUT")!;
-    expect((put.body as Record<string, unknown>).where).toEqual({ id: 2 });
+    const patch = bodies.find((b) => b.method === "PATCH")!;
+    expect(patch.body).toEqual([
+      { op: "replace", path: "where", value: { id: 2 } },
+    ]);
   });
 
   it("attaches a chat image to a ticket with only the authenticated user's profile", async () => {

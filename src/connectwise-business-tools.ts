@@ -574,6 +574,42 @@ const catalogToolInput = catalogToolInputBase.superRefine((value, context) => {
   }
 });
 
+const serviceTicketUpdateInput = z
+  .object({
+    ticketId: positiveId,
+    ownerId: positiveId.optional(),
+    statusId: positiveId.optional(),
+    boardId: positiveId.optional(),
+    priorityId: positiveId.optional(),
+    typeId: positiveId.optional(),
+    summary: z.string().trim().min(1).max(100).optional(),
+    contactId: positiveId.optional(),
+  })
+  .strict()
+  .refine(
+    ({ ticketId: _ticketId, ...updates }) =>
+      Object.values(updates).some((value) => value !== undefined),
+    { message: "at least one service ticket update field is required" },
+  );
+
+const scheduleEntryUpdateInput = z
+  .object({
+    entryId: positiveId,
+    dateStart: z.string().optional(),
+    dateEnd: z.string().optional(),
+    statusId: positiveId.optional(),
+    doneFlag: z.boolean().optional(),
+    name: z.string().trim().min(1).max(500).optional(),
+    allowConflicts: z.boolean().optional(),
+    whereId: positiveId.optional(),
+  })
+  .strict()
+  .refine(
+    ({ entryId: _entryId, ...updates }) =>
+      Object.values(updates).some((value) => value !== undefined),
+    { message: "at least one schedule update field is required" },
+  );
+
 export function registerConnectWiseBusinessTools(
   server: McpServer,
   env: object,
@@ -1753,17 +1789,8 @@ export function registerConnectWiseBusinessTools(
     "update_service_ticket",
     {
       description:
-        "Update an existing ConnectWise service ticket. Only the fields you pass change: the client GETs the ticket first, merges, then PUTs — unpassed fields (company, contact, dates, costs) survive. Board moves do not automatically delete schedule entries; remove a confirmed unwanted entry separately with delete_schedule_entry. Status is board-scoped: a status that is not valid on the target board is rejected with the valid statuses listed.",
-      inputSchema: {
-        ticketId: positiveId,
-        ownerId: positiveId.optional(),
-        statusId: positiveId.optional(),
-        boardId: positiveId.optional(),
-        priorityId: positiveId.optional(),
-        typeId: positiveId.optional(),
-        summary: z.string().trim().min(1).max(100).optional(),
-        contactId: positiveId.optional(),
-      },
+        "Update an existing ConnectWise service ticket. Only the fields you pass change: the client verifies the ticket identity, then sends explicit PATCH operations for those fields, so unpassed fields survive. At least one update field is required. Board moves do not automatically delete schedule entries; remove a confirmed unwanted entry separately with delete_schedule_entry. Status is board-scoped: a status that is not valid on the target board is rejected with the valid statuses listed.",
+      inputSchema: serviceTicketUpdateInput,
       annotations: destructiveWriteAnnotations,
     },
     ({
@@ -1864,17 +1891,8 @@ export function registerConnectWiseBusinessTools(
     "update_schedule_entry",
     {
       description:
-        "Update an existing schedule entry. Only the fields you pass change: the client GETs the entry first, merges, then PUTs the merged record — unpassed fields (member, objectId, type, notes) survive unchanged instead of being blanked. dateStart/dateEnd require an explicit timezone offset like create_schedule_entry. Returns the updated entry.",
-      inputSchema: {
-        entryId: positiveId,
-        dateStart: z.string().optional(),
-        dateEnd: z.string().optional(),
-        statusId: positiveId.optional(),
-        doneFlag: z.boolean().optional(),
-        name: z.string().trim().min(1).max(500).optional(),
-        allowConflicts: z.boolean().optional(),
-        whereId: positiveId.optional(),
-      },
+        "Update an existing schedule entry. The client verifies that the entry belongs to the mapped profile member, then sends explicit PATCH operations only for fields you pass, so unpassed fields survive. At least one update field is required. dateStart/dateEnd require an explicit timezone offset like create_schedule_entry. Returns the updated entry.",
+      inputSchema: scheduleEntryUpdateInput,
       annotations: destructiveWriteAnnotations,
     },
     ({

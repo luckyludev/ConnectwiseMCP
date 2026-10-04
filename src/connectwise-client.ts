@@ -472,6 +472,10 @@ const TARGETED_SEARCH_CATALOG_ROUTES = new Set<CatalogRouteId>([
 ]);
 
 const SERVICE_TICKET_LOOKUP_FIELDS = "id,status";
+const SERVICE_TICKET_UPDATE_SOURCE_FIELDS = "id";
+const SCHEDULE_ENTRY_UPDATE_RESULT_FIELDS =
+  "id,member,status,dateStart,dateEnd,doneFlag,name,where,allowScheduleConflictsFlag";
+const SCHEDULE_ENTRY_OWNERSHIP_FIELDS = "id,member";
 // `_info` preserves the created/updated metadata exposed by the ticket projector.
 const SERVICE_TICKET_READ_FIELDS =
   "id,summary,company,board,status,priority,type,owner,contact,closedFlag,closedDate,dateResolved,_info";
@@ -854,7 +858,7 @@ export function createConnectWiseClient(
   );
 
   function emitRequestLog(
-    method: "GET" | "POST" | "PUT" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     status: number | null,
     startedAtMs: number,
     outcome: "success" | "unavailable" | "redirect_refused" | "upstream_error",
@@ -878,7 +882,7 @@ export function createConnectWiseClient(
   }
 
   async function requestJson(
-    method: "GET" | "POST" | "PUT" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     path: string,
     query?: Readonly<Record<string, string | number>>,
     body?: unknown,
@@ -2048,64 +2052,61 @@ export function createConnectWiseClient(
 
     async updateServiceTicket(ticketId, input): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
-      // GET first, then merge and PUT: a blind PUT blanks every unpassed
-      // field on established tickets. These are live client tickets.
-      const existing = verifiedRecordIdentity(
-        await requestJson("GET", `/service/tickets/${ticketId}`),
+      // Verify the exact source identity, then PATCH only caller-authorized fields.
+      // A replacement PUT can blank every unpassed field on established tickets.
+      verifiedRecordIdentity(
+        await requestJson("GET", `/service/tickets/${ticketId}`, {
+          fields: SERVICE_TICKET_UPDATE_SOURCE_FIELDS,
+        }),
         ticketId,
         "service ticket",
       );
-      const merged: Record<string, unknown> = { ...existing };
-      // Drop read-only/system fields a PUT would reject.
-      for (const field of [
-        "id",
-        "recordType",
-        "_info",
-        "dateEntered",
-        "lastUpdated",
-        "closedFlag",
-        "closedDate",
-        "dateResolved",
-        "resolvedBy",
-      ]) {
-        delete merged[field];
-      }
+      const operations: Array<{
+        op: "replace";
+        path: string;
+        value: unknown;
+      }> = [];
+      const replace = (path: string, value: unknown) =>
+        operations.push({ op: "replace", path, value });
       if (input.ownerId !== undefined) {
         positiveId(input.ownerId, "owner ID");
-        merged.owner = { id: input.ownerId };
+        replace("owner", { id: input.ownerId });
       }
       if (input.statusId !== undefined) {
         positiveId(input.statusId, "status ID");
-        merged.status = { id: input.statusId };
+        replace("status", { id: input.statusId });
       }
       if (input.boardId !== undefined) {
         positiveId(input.boardId, "board ID");
-        merged.board = { id: input.boardId };
+        replace("board", { id: input.boardId });
       }
       if (input.priorityId !== undefined) {
         positiveId(input.priorityId, "priority ID");
-        merged.priority = { id: input.priorityId };
+        replace("priority", { id: input.priorityId });
       }
       if (input.typeId !== undefined) {
         positiveId(input.typeId, "type ID");
-        merged.type = { id: input.typeId };
+        replace("type", { id: input.typeId });
       }
       if (input.summary !== undefined) {
         const summary = input.summary.trim();
         if (summary.length < 1 || summary.length > 100) {
           throw new Error("summary must be 1-100 chars");
         }
-        merged.summary = summary;
+        replace("summary", summary);
       }
       if (input.contactId !== undefined) {
         positiveId(input.contactId, "contact ID");
-        merged.contact = { id: input.contactId };
+        replace("contact", { id: input.contactId });
+      }
+      if (operations.length === 0) {
+        throw new Error("at least one service ticket update field is required");
       }
       return requestJson(
-        "PUT",
+        "PATCH",
         `/service/tickets/${ticketId}`,
         undefined,
-        merged,
+        operations,
       );
     },
 
@@ -2155,36 +2156,50 @@ export function createConnectWiseClient(
     async updateScheduleEntry(entryId, input): Promise<unknown> {
       positiveId(entryId, "schedule entry ID");
       const memberId = mappedMemberId("update_schedule_entry");
-      // GET first, then verify ownership, merge and PUT: a blind PUT blanks every
-      // field that is not passed on established records (Luis has hit this).
+      // Verify ownership with a minimal read, then PATCH only requested fields.
+      // A replacement PUT can blank every unpassed field on established records.
       const existing = verifiedRecordIdentity(
-        await requestJson("GET", `/schedule/entries/${entryId}`),
+        await requestJson("GET", `/schedule/entries/${entryId}`, {
+          fields: SCHEDULE_ENTRY_OWNERSHIP_FIELDS,
+        }),
         entryId,
         "schedule entry",
       );
       assertMappedMember(existing, memberId);
-      const merged: Record<string, unknown> = { ...existing };
+      const operations: Array<{
+        op: "replace";
+        path: string;
+        value: unknown;
+      }> = [];
+      const desired: Record<string, unknown> = {};
+      const replace = (path: string, value: unknown) => {
+        operations.push({ op: "replace", path, value });
+        desired[path] = value;
+      };
       if (input.dateStart !== undefined) {
-        merged.dateStart = toUtcIso(input.dateStart, "dateStart");
+        replace("dateStart", toUtcIso(input.dateStart, "dateStart"));
       }
       if (input.dateEnd !== undefined) {
-        merged.dateEnd = toUtcIso(input.dateEnd, "dateEnd");
+        replace("dateEnd", toUtcIso(input.dateEnd, "dateEnd"));
       }
       if (input.statusId !== undefined) {
         positiveId(input.statusId, "status ID");
-        merged.status = { id: input.statusId };
+        replace("status", { id: input.statusId });
       }
-      if (input.doneFlag !== undefined) merged.doneFlag = input.doneFlag;
+      if (input.doneFlag !== undefined) replace("doneFlag", input.doneFlag);
       if (input.name !== undefined) {
         if (input.name.length > 500) throw new Error("name is too long");
-        merged.name = input.name;
+        replace("name", input.name);
       }
       if (input.allowConflicts !== undefined) {
-        merged.allowScheduleConflictsFlag = input.allowConflicts;
+        replace("allowScheduleConflictsFlag", input.allowConflicts);
       }
       if (input.whereId !== undefined) {
         positiveId(input.whereId, "where ID");
-        merged.where = { id: input.whereId };
+        replace("where", { id: input.whereId });
+      }
+      if (operations.length === 0) {
+        throw new Error("at least one schedule update field is required");
       }
       const confirmUpdate = (record: unknown): Record<string, unknown> => {
         const verified = verifiedRecordIdentity(
@@ -2201,9 +2216,9 @@ export function createConnectWiseClient(
         };
         const confirmed =
           (input.dateStart === undefined ||
-            verified.dateStart === merged.dateStart) &&
+            verified.dateStart === desired.dateStart) &&
           (input.dateEnd === undefined ||
-            verified.dateEnd === merged.dateEnd) &&
+            verified.dateEnd === desired.dateEnd) &&
           (input.statusId === undefined ||
             referenceId("status") === input.statusId) &&
           (input.doneFlag === undefined ||
@@ -2221,7 +2236,9 @@ export function createConnectWiseClient(
       const reconcile = async (originalError: unknown) => {
         try {
           return confirmUpdate(
-            await requestJson("GET", `/schedule/entries/${entryId}`),
+            await requestJson("GET", `/schedule/entries/${entryId}`, {
+              fields: SCHEDULE_ENTRY_UPDATE_RESULT_FIELDS,
+            }),
           );
         } catch {
           throw originalError;
@@ -2231,10 +2248,10 @@ export function createConnectWiseClient(
       let response: unknown;
       try {
         response = await requestJson(
-          "PUT",
+          "PATCH",
           `/schedule/entries/${entryId}`,
           undefined,
-          merged,
+          operations,
         );
       } catch (error) {
         // The request may have reached ConnectWise even if the response could
@@ -2255,7 +2272,9 @@ export function createConnectWiseClient(
       positiveId(entryId, "schedule entry ID");
       const memberId = mappedMemberId("delete_schedule_entry");
       const existing = verifiedRecordIdentity(
-        await requestJson("GET", `/schedule/entries/${entryId}`),
+        await requestJson("GET", `/schedule/entries/${entryId}`, {
+          fields: SCHEDULE_ENTRY_OWNERSHIP_FIELDS,
+        }),
         entryId,
         "schedule entry",
       );
