@@ -1388,53 +1388,23 @@ export function createConnectWiseClient(
         issueFlag: input.issueNote,
         detailDescriptionFlag: false,
       };
-      try {
-        return await requestJson(
-          "POST",
-          `/service/tickets/${ticketId}/notes`,
-          undefined,
-          payload,
-        );
-      } catch (error) {
-        if (
-          !(error instanceof ConnectWiseRequestError) ||
-          error.status !== 404
-        ) {
-          throw error;
-        }
-        return requestJson(
-          "POST",
-          `/project/tickets/${ticketId}/notes`,
-          undefined,
-          payload,
-        );
-      }
+      return requestJson(
+        "POST",
+        `/service/tickets/${ticketId}/notes`,
+        undefined,
+        payload,
+      );
     },
 
     async attachImageToTicket(ticketId, input): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       const payload = attachmentPayload(input);
-      try {
-        return await requestJson(
-          "POST",
-          `/service/tickets/${ticketId}/attachments`,
-          undefined,
-          payload,
-        );
-      } catch (error) {
-        if (
-          !(error instanceof ConnectWiseRequestError) ||
-          error.status !== 404
-        ) {
-          throw error;
-        }
-        return requestJson(
-          "POST",
-          `/project/tickets/${ticketId}/attachments`,
-          undefined,
-          payload,
-        );
-      }
+      return requestJson(
+        "POST",
+        `/service/tickets/${ticketId}/attachments`,
+        undefined,
+        payload,
+      );
     },
 
     async attachImageToTimeEntry(timeEntryId, input): Promise<unknown> {
