@@ -75,6 +75,31 @@ const NARROW_ADDITION_ACCESS = Object.freeze({
   },
 });
 
+const V2_ADDITION_ACCESS = Object.freeze({
+  whoami: "read",
+  get_service_ticket: "read",
+  get_service_boards: "read",
+  get_board_options: "read",
+  list_board_tickets: "read",
+  get_service_statuses: "read",
+  get_service_priorities: "read",
+  get_service_sources: "read",
+  get_my_member: "read",
+  search_members: "read",
+  search_companies: "read",
+  search_contacts: "read",
+  list_time_entries: "read",
+  list_schedule_entries: "read",
+  get_time_sheets: "read",
+  call_connectwise: "read",
+  create_schedule_entry: "write",
+  update_schedule_entry: "write",
+  delete_schedule_entry: "write",
+  create_time_entry: "write",
+  create_service_ticket: "write",
+  update_service_ticket: "write",
+});
+
 const ACTIVE_DECISIONS = new Set([
   "Added narrowly",
   "Excluded",
@@ -133,6 +158,57 @@ function classifiedLegacyTools(markdown) {
     .sort();
 }
 
+function v2AdditionRows(markdown) {
+  const table = markdown
+    .split("## V2 bounded additions", 2)[1]
+    ?.split("## Remaining boundary", 1)[0];
+
+  if (!table) {
+    throw new Error("V2 bounded additions table is missing");
+  }
+
+  const lines = table.split("\n").filter((line) => line.startsWith("|"));
+  if (lines.length < 3) {
+    throw new Error("V2 bounded additions table is incomplete");
+  }
+
+  const columns = lines.map((line) => {
+    const row = line.split("|").slice(1, -1);
+    if (row.length !== 3) {
+      throw new Error("V2 bounded addition row is malformed");
+    }
+    return row;
+  });
+
+  const [header, separator, ...dataRows] = columns;
+  if (
+    header[0].trim() !== "V2 tool(s)" ||
+    header[1].trim() !== "Access" ||
+    header[2].trim() !== "Bounded purpose" ||
+    !separator.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell))
+  ) {
+    throw new Error("V2 bounded additions table header is malformed");
+  }
+
+  return dataRows.map((row) => {
+    const toolCell = row[0].trim();
+    const tools = [...toolCell.matchAll(/`([a-z][a-z0-9_]*)`/g)].map(
+      ([, name]) => name,
+    );
+    const access = row[1].trim().replaceAll("**", "").toLowerCase();
+    if (
+      !/^`[a-z][a-z0-9_]*`(?:,\s*`[a-z][a-z0-9_]*`)*$/.test(toolCell) ||
+      (access !== "read" && access !== "write") ||
+      row[2].trim().length === 0
+    ) {
+      throw new Error(
+        "V2 bounded addition requires tools, read/write access, and purpose",
+      );
+    }
+    return { tools, access };
+  });
+}
+
 describe("legacy read-surface classification", () => {
   it("classifies every active rollback tool exactly once", () => {
     const activeTools = activeLegacyTools(legacyServer);
@@ -183,6 +259,36 @@ describe("legacy read-surface classification", () => {
     for (const [tool, access] of Object.entries(
       NARROW_ADDITION_ACCESS[additions[0].legacySurface],
     )) {
+      expect(TOOL_ACCESS[tool]).toBe(access);
+    }
+  });
+
+  it("gives every registered V2 tool exactly one migration or addition decision", () => {
+    const rows = v2AdditionRows(classification);
+    const documentedAdditions = rows.flatMap(({ tools, access }) =>
+      tools.map((tool) => [tool, access]),
+    );
+
+    expect(documentedAdditions).toHaveLength(
+      Object.keys(V2_ADDITION_ACCESS).length,
+    );
+    expect(Object.fromEntries(documentedAdditions)).toEqual(V2_ADDITION_ACCESS);
+
+    const migratedV2Tools = Object.values(MIGRATED_TOOL_ACCESS).flatMap(
+      ({ v2Tools }) => v2Tools,
+    );
+    const narrowAdditionTools = Object.values(NARROW_ADDITION_ACCESS).flatMap(
+      (tools) => Object.keys(tools),
+    );
+    const allDecidedTools = [
+      ...migratedV2Tools,
+      ...narrowAdditionTools,
+      ...Object.keys(V2_ADDITION_ACCESS),
+    ];
+
+    expect(new Set(allDecidedTools).size).toBe(allDecidedTools.length);
+    expect(allDecidedTools.sort()).toEqual(Object.keys(TOOL_ACCESS).sort());
+    for (const [tool, access] of Object.entries(V2_ADDITION_ACCESS)) {
       expect(TOOL_ACCESS[tool]).toBe(access);
     }
   });
