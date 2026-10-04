@@ -213,6 +213,41 @@ describe("exchangeEntraAuthorizationCode", () => {
     ).rejects.toThrow("invalid_entra_token_response");
   });
 
+  it("rejects a token response with excessive stream fragmentation and cancels the body", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        new ReadableStream(
+          {
+            pull(controller) {
+              pulls += 1;
+              controller.enqueue(new Uint8Array([0x20]));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+      );
+
+    await expect(
+      exchangeEntraAuthorizationCode(
+        {
+          tenantId: "tenant-a",
+          clientId: "entra-client",
+          clientSecret: "entra-secret",
+          callbackUrl: "https://mcp.example.com/callback",
+        },
+        { code: "authorization-code", codeVerifier: "required-verifier" },
+        fetcher,
+      ),
+    ).rejects.toThrow("invalid_entra_token_response");
+    expect(pulls).toBe(1_025);
+    expect(cancelled).toBe(true);
+  });
+
   it("preserves an HTTP error while bounding its response body", async () => {
     const fetcher: typeof fetch = async () =>
       new Response(new Uint8Array(65_537), { status: 400 });

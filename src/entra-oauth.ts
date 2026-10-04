@@ -22,6 +22,7 @@ export type EntraTokenSet = {
 type Fetcher = typeof fetch;
 
 const MAX_TOKEN_RESPONSE_BYTES = 65_536;
+const MAX_TOKEN_RESPONSE_CHUNKS = 1_024;
 const TOKEN_REQUEST_TIMEOUT_MS = 15_000;
 
 export class EntraOAuthError extends Error {
@@ -65,12 +66,17 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   if (!response.body) throw new Error("invalid_entra_token_response");
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
+  let chunkCount = 0;
   let total = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (total + value.byteLength > MAX_TOKEN_RESPONSE_BYTES) {
+      chunkCount += 1;
+      if (
+        chunkCount > MAX_TOKEN_RESPONSE_CHUNKS ||
+        total + value.byteLength > MAX_TOKEN_RESPONSE_BYTES
+      ) {
         throw new Error("invalid_entra_token_response");
       }
       chunks.push(value);
