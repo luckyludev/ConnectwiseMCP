@@ -11,7 +11,29 @@ afterEach(() => {
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
 const objectId = "22222222-2222-4222-8222-222222222222";
+const mayaObjectId = "44444444-4444-4444-8444-444444444444";
+const groupId = "55555555-5555-4555-8555-555555555555";
 const correlationId = "33333333-3333-4333-8333-333333333333";
+const authorizationEnv = {
+  ENTRA_TENANT_ID: tenantId,
+  IDENTITY_PROFILE_MAP: JSON.stringify({
+    [`${tenantId}:${objectId}`]: "LUIS",
+    [`${tenantId}:${mayaObjectId}`]: "MAYA",
+  }),
+  ALLOWED_GROUP_IDS: JSON.stringify([groupId]),
+  ALLOWED_APP_ROLES: "[]",
+};
+
+function authProps(profileAlias: "LUIS" | "MAYA" = "LUIS") {
+  return {
+    tenantId,
+    objectId: profileAlias === "LUIS" ? objectId : mayaObjectId,
+    profileAlias,
+    groups: [groupId],
+    roles: [],
+    scopes: ["mcp:read"],
+  };
+}
 
 describe("whoami", () => {
   it("returns the profile only with the request-scoped mcp:read scope", () => {
@@ -143,6 +165,7 @@ describe("get_service_ticket", () => {
     const times = [900, 1_000];
     const env = new Proxy(
       {
+        ...authorizationEnv,
         CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
           "https://api-na.myconnectwise.net",
         ]),
@@ -163,35 +186,25 @@ describe("get_service_ticket", () => {
       },
     );
 
-    const result = await getServiceTicketResult(
-      {
-        tenantId,
-        objectId,
-        profileAlias: "LUIS",
-        scopes: ["mcp:read"],
+    const result = await getServiceTicketResult(authProps(), env, 123, {
+      audit: {
+        logger: (message) => auditMessages.push(message),
+        now: () => times.shift()!,
+        createCorrelationId: () => correlationId,
       },
-      env,
-      123,
-      {
-        audit: {
-          logger: (message) => auditMessages.push(message),
-          now: () => times.shift()!,
-          createCorrelationId: () => correlationId,
+      createClient: (selectedCredentials) => ({
+        async getServiceTicketStatus(ticketId) {
+          expect(selectedCredentials.companyId).toBe("acme");
+          expect(ticketId).toBe(123);
+          return {
+            id: 123,
+            summary: "Printer offline",
+            status: { name: "New" },
+            privateUpstreamField: "must not escape",
+          };
         },
-        createClient: (selectedCredentials) => ({
-          async getServiceTicketStatus(ticketId) {
-            expect(selectedCredentials.companyId).toBe("acme");
-            expect(ticketId).toBe(123);
-            return {
-              id: 123,
-              summary: "Printer offline",
-              status: { name: "New" },
-              privateUpstreamField: "must not escape",
-            };
-          },
-        }),
-      },
-    );
+      }),
+    });
 
     expect(result).toMatchObject({
       content: [
@@ -204,7 +217,14 @@ describe("get_service_ticket", () => {
         },
       ],
     });
-    expect(reads).toEqual(["CONNECTWISE_ALLOWED_ORIGINS", "CW_PROFILE_LUIS"]);
+    expect(reads).toEqual([
+      "ENTRA_TENANT_ID",
+      "IDENTITY_PROFILE_MAP",
+      "ALLOWED_GROUP_IDS",
+      "ALLOWED_APP_ROLES",
+      "CONNECTWISE_ALLOWED_ORIGINS",
+      "CW_PROFILE_LUIS",
+    ]);
     expect(JSON.stringify(result)).not.toContain("Printer offline");
     expect(JSON.stringify(result)).not.toContain("privateUpstreamField");
     expect(auditMessages).toHaveLength(1);
@@ -229,6 +249,7 @@ describe("get_service_ticket", () => {
     const auditMessages: string[] = [];
     const times = [2_000, 2_050];
     const env = {
+      ...authorizationEnv,
       CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
         "https://api-na.myconnectwise.net",
       ]),
@@ -241,28 +262,18 @@ describe("get_service_ticket", () => {
       }),
     };
 
-    const result = await getServiceTicketResult(
-      {
-        tenantId,
-        objectId,
-        profileAlias: "LUIS",
-        scopes: ["mcp:read"],
+    const result = await getServiceTicketResult(authProps(), env, 123, {
+      audit: {
+        logger: (message) => auditMessages.push(message),
+        now: () => times.shift()!,
+        createCorrelationId: () => correlationId,
       },
-      env,
-      123,
-      {
-        audit: {
-          logger: (message) => auditMessages.push(message),
-          now: () => times.shift()!,
-          createCorrelationId: () => correlationId,
+      createClient: () => ({
+        async getServiceTicketStatus() {
+          throw new Error("upstream included credential=[REDACTED]");
         },
-        createClient: () => ({
-          async getServiceTicketStatus() {
-            throw new Error("upstream included credential=[REDACTED]");
-          },
-        }),
-      },
-    );
+      }),
+    });
 
     expect(result).toMatchObject({
       isError: true,
@@ -286,6 +297,7 @@ describe("get_service_ticket", () => {
 
   it("drops oversized upstream ticket text instead of returning it", async () => {
     const env = {
+      ...authorizationEnv,
       CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
         "https://api-na.myconnectwise.net",
       ]),
@@ -298,22 +310,17 @@ describe("get_service_ticket", () => {
       }),
     };
 
-    const result = await getServiceTicketResult(
-      { profileAlias: "LUIS", scopes: ["mcp:read"] },
-      env,
-      123,
-      {
-        createClient: () => ({
-          async getServiceTicketStatus() {
-            return {
-              id: 123,
-              summary: "x".repeat(1_001),
-              status: { name: "New" },
-            };
-          },
-        }),
-      },
-    );
+    const result = await getServiceTicketResult(authProps(), env, 123, {
+      createClient: () => ({
+        async getServiceTicketStatus() {
+          return {
+            id: 123,
+            summary: "x".repeat(1_001),
+            status: { name: "New" },
+          };
+        },
+      }),
+    });
 
     expect(result).toMatchObject({
       content: [
@@ -325,6 +332,7 @@ describe("get_service_ticket", () => {
 
   it("accepts the exact status-name boundary", async () => {
     const env = {
+      ...authorizationEnv,
       CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
         "https://api-na.myconnectwise.net",
       ]),
@@ -336,27 +344,23 @@ describe("get_service_ticket", () => {
         clientId: "partner-client-id",
       }),
     };
-    const result = await getServiceTicketResult(
-      { profileAlias: "LUIS", scopes: ["mcp:read"] },
-      env,
-      123,
-      {
-        createClient: () => ({
-          async getServiceTicketStatus() {
-            return {
-              id: 123,
-              status: { name: "n".repeat(100) },
-            };
-          },
-        }),
-      },
-    );
+    const result = await getServiceTicketResult(authProps(), env, 123, {
+      createClient: () => ({
+        async getServiceTicketStatus() {
+          return {
+            id: 123,
+            status: { name: "n".repeat(100) },
+          };
+        },
+      }),
+    });
 
     expect(result.isError).not.toBe(true);
   });
 
   it("rejects a status name above its exact boundary", async () => {
     const env = {
+      ...authorizationEnv,
       CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
         "https://api-na.myconnectwise.net",
       ]),
@@ -368,22 +372,17 @@ describe("get_service_ticket", () => {
         clientId: "partner-client-id",
       }),
     };
-    const result = await getServiceTicketResult(
-      { profileAlias: "LUIS", scopes: ["mcp:read"] },
-      env,
-      123,
-      {
-        createClient: () => ({
-          async getServiceTicketStatus() {
-            return {
-              id: 123,
-              summary: "ok",
-              status: { name: "n".repeat(101) },
-            };
-          },
-        }),
-      },
-    );
+    const result = await getServiceTicketResult(authProps(), env, 123, {
+      createClient: () => ({
+        async getServiceTicketStatus() {
+          return {
+            id: 123,
+            summary: "ok",
+            status: { name: "n".repeat(101) },
+          };
+        },
+      }),
+    });
 
     expect(result).toMatchObject({
       isError: true,
@@ -491,6 +490,52 @@ describe("get_service_ticket", () => {
     },
   );
 
+  it("rejects a stale token after its identity is remapped before reading a profile secret", async () => {
+    const reads: string[] = [];
+    let clientCreations = 0;
+    const env = new Proxy(
+      {
+        ...authorizationEnv,
+        IDENTITY_PROFILE_MAP: JSON.stringify({
+          [`${tenantId}:${objectId}`]: "MAYA",
+        }),
+        CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
+          "https://api-na.myconnectwise.net",
+        ]),
+        CW_PROFILE_LUIS: "must-not-be-read",
+        CW_PROFILE_MAYA: "must-not-be-read",
+      },
+      {
+        get(target, property, receiver) {
+          reads.push(String(property));
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+
+    const result = await getServiceTicketResult(authProps(), env, 123, {
+      createClient: () => {
+        clientCreations += 1;
+        throw new Error("must not construct client");
+      },
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "ConnectWise ticket lookup failed" }],
+    });
+    expect(clientCreations).toBe(0);
+    expect(reads).toEqual([
+      "ENTRA_TENANT_ID",
+      "IDENTITY_PROFILE_MAP",
+      "ALLOWED_GROUP_IDS",
+      "ALLOWED_APP_ROLES",
+    ]);
+    expect(reads.every((binding) => !binding.startsWith("CW_PROFILE_"))).toBe(
+      true,
+    );
+  });
+
   it("constructs separate clients from separate authenticated profiles", async () => {
     const profile = (companyId: string) =>
       JSON.stringify({
@@ -501,6 +546,7 @@ describe("get_service_ticket", () => {
         clientId: "partner-client-id",
       });
     const env = {
+      ...authorizationEnv,
       CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
         "https://api-na.myconnectwise.net",
       ]),
@@ -521,18 +567,12 @@ describe("get_service_ticket", () => {
       };
     };
 
-    const luis = await getServiceTicketResult(
-      { profileAlias: "LUIS", scopes: ["mcp:read"] },
-      env,
-      1,
-      { createClient },
-    );
-    const maya = await getServiceTicketResult(
-      { profileAlias: "MAYA", scopes: ["mcp:read"] },
-      env,
-      2,
-      { createClient },
-    );
+    const luis = await getServiceTicketResult(authProps(), env, 1, {
+      createClient,
+    });
+    const maya = await getServiceTicketResult(authProps("MAYA"), env, 2, {
+      createClient,
+    });
 
     expect(selectedCompanies).toEqual(["company-luis", "company-maya"]);
     expect(luis).toMatchObject({

@@ -11,7 +11,7 @@ import {
   type ConnectWiseClient,
 } from "./connectwise-client";
 import {
-  resolveConnectWiseCredentials,
+  resolveIdentityBoundConnectWiseCredentials,
   type ConnectWiseCredentials,
 } from "./connectwise-profile";
 import type { EntraAccessTokenProps } from "./auth-handler";
@@ -262,7 +262,9 @@ function failureMessage(error: unknown): string {
 async function runAuthorizedTool(
   props: AuthProps,
   tool: ToolAuditName,
-  operation: (profileAlias: string) => Promise<unknown>,
+  operation: (
+    authorizedProps: NonNullable<AuthProps> & { profileAlias: string },
+  ) => Promise<unknown>,
   dependencies: BusinessToolDependencies,
 ): Promise<CallToolResult> {
   const startedAtMs = getAuditStartTime(dependencies.audit);
@@ -300,7 +302,10 @@ async function runAuthorizedTool(
     };
   }
   try {
-    const result = await operation(props.profileAlias);
+    const result = await operation({
+      ...props,
+      profileAlias: props.profileAlias,
+    });
     emitToolAudit(
       {
         props,
@@ -348,9 +353,12 @@ async function runBusinessTool(
   return runAuthorizedTool(
     props,
     tool,
-    async (profileAlias) => {
+    async (authorizedProps) => {
       const requestLog = dependencies.requestLog ?? ((message: string) => {});
-      const credentials = resolveConnectWiseCredentials(env, profileAlias);
+      const credentials = resolveIdentityBoundConnectWiseCredentials(
+        env,
+        authorizedProps,
+      );
       const clientFactory =
         dependencies.createClient ??
         ((c: ConnectWiseCredentials) =>
