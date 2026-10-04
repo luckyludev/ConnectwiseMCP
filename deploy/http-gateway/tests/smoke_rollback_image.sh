@@ -35,14 +35,19 @@ common_env=(
   --env CONNECTWISE_PRIVATE_KEY=ci-only-private-key
   --env CONNECTWISE_AUTH_PREFIX=ci-only-prefix+
 )
+runtime_security=(
+  --cap-drop ALL
+  --security-opt no-new-privileges:true
+)
 
-runtime_uid="$(docker run --rm --entrypoint python "$image" -c 'import os; print(os.geteuid())')"
+runtime_uid="$(docker run --rm "${runtime_security[@]}" --entrypoint python "$image" -c 'import os; print(os.geteuid())')"
 if [[ ! "$runtime_uid" =~ ^[0-9]+$ || "$runtime_uid" -eq 0 ]]; then
   printf '%s\n' "Rollback image must run as a numeric non-root user." >&2
   exit 1
 fi
 
 docker run --detach --name "$container" \
+  "${runtime_security[@]}" \
   --publish 127.0.0.1::8000 \
   --health-interval 1s \
   --health-timeout 3s \
@@ -93,6 +98,7 @@ check_missing_secret() {
   shift 2
 
   docker run --detach --name "$name" \
+    "${runtime_security[@]}" \
     "${common_env[@]}" \
     "$@" \
     "$image" >/dev/null

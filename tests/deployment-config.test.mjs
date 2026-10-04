@@ -192,7 +192,7 @@ describe("legacy rollback image security", () => {
     );
     expect(workflow).toContain('docker pull "$cloudflared_image"');
     expect(workflow).toContain(
-      'docker run --rm "$cloudflared_image" --version',
+      'docker run --rm --cap-drop ALL --security-opt no-new-privileges:true "$cloudflared_image" --version',
     );
   });
 
