@@ -991,6 +991,25 @@ export function createConnectWiseClient(
     return result;
   }
 
+  function assertBoardOptionIdentities(records: unknown): void {
+    if (
+      !Array.isArray(records) ||
+      records.some((record) => {
+        if (!record || typeof record !== "object" || Array.isArray(record)) {
+          return true;
+        }
+        const recordId = (record as Record<string, unknown>).id;
+        return (
+          typeof recordId !== "number" ||
+          !Number.isSafeInteger(recordId) ||
+          recordId <= 0
+        );
+      })
+    ) {
+      throw new Error("Invalid ConnectWise board option response");
+    }
+  }
+
   function mappedMemberId(operation: string): number {
     const memberId = credentials.memberId;
     if (memberId === undefined) {
@@ -1447,20 +1466,24 @@ export function createConnectWiseClient(
 
     async getBoardStatuses(boardId: number): Promise<unknown> {
       positiveId(boardId, "board ID");
-      return requestBoundedList(
+      const result = await requestBoundedList(
         `/service/boards/${boardId}/statuses`,
         { fields: BOARD_STATUS_COLLECTION_FIELDS, pageSize: 50 },
         50,
       );
+      assertBoardOptionIdentities(result);
+      return result;
     },
 
     async getBoardTypes(boardId: number): Promise<unknown> {
       positiveId(boardId, "board ID");
-      return requestBoundedList(
+      const result = await requestBoundedList(
         `/service/boards/${boardId}/types`,
         { fields: BOARD_TYPE_COLLECTION_FIELDS, pageSize: 50 },
         50,
       );
+      assertBoardOptionIdentities(result);
+      return result;
     },
 
     async listBoardTickets(
@@ -1834,6 +1857,12 @@ export function createConnectWiseClient(
         boundedPageSize(requestedPageSize);
       }
       const result = await requestBoundedList(path, query, requestedPageSize);
+      if (
+        route === "service.boards.statuses" ||
+        route === "service.boards.types"
+      ) {
+        assertBoardOptionIdentities(result);
+      }
       if (route === "system.documents") {
         return verifiedDocumentList(
           result,
