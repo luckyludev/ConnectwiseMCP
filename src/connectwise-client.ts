@@ -991,7 +991,7 @@ export function createConnectWiseClient(
     return result;
   }
 
-  function assertBoardOptionIdentities(records: unknown): void {
+  function assertReferenceCollectionIdentities(records: unknown): void {
     if (
       !Array.isArray(records) ||
       records.some((record) => {
@@ -1006,7 +1006,7 @@ export function createConnectWiseClient(
         );
       })
     ) {
-      throw new Error("Invalid ConnectWise board option response");
+      throw new Error("Invalid ConnectWise reference response");
     }
   }
 
@@ -1423,7 +1423,7 @@ export function createConnectWiseClient(
     },
 
     async getServiceBoards(): Promise<unknown> {
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/service/boards",
         {
           fields: SERVICE_BOARD_COLLECTION_FIELDS,
@@ -1432,6 +1432,8 @@ export function createConnectWiseClient(
         },
         50,
       );
+      assertReferenceCollectionIdentities(result);
+      return result;
     },
 
     async getBoardStatuses(boardId: number): Promise<unknown> {
@@ -1441,7 +1443,7 @@ export function createConnectWiseClient(
         { fields: BOARD_STATUS_COLLECTION_FIELDS, pageSize: 50 },
         50,
       );
-      assertBoardOptionIdentities(result);
+      assertReferenceCollectionIdentities(result);
       return result;
     },
 
@@ -1452,7 +1454,7 @@ export function createConnectWiseClient(
         { fields: BOARD_TYPE_COLLECTION_FIELDS, pageSize: 50 },
         50,
       );
-      assertBoardOptionIdentities(result);
+      assertReferenceCollectionIdentities(result);
       return result;
     },
 
@@ -1477,7 +1479,7 @@ export function createConnectWiseClient(
     },
 
     async getServiceStatuses(): Promise<unknown> {
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/service/statuses",
         {
           fields: SERVICE_STATUS_COLLECTION_FIELDS,
@@ -1486,10 +1488,12 @@ export function createConnectWiseClient(
         },
         50,
       );
+      assertReferenceCollectionIdentities(result);
+      return result;
     },
 
     async getServicePriorities(): Promise<unknown> {
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/service/priorities",
         {
           fields: SERVICE_PRIORITY_COLLECTION_FIELDS,
@@ -1498,10 +1502,12 @@ export function createConnectWiseClient(
         },
         50,
       );
+      assertReferenceCollectionIdentities(result);
+      return result;
     },
 
     async getServiceSources(): Promise<unknown> {
-      return requestBoundedList(
+      const result = await requestBoundedList(
         "/service/sources",
         {
           fields: SERVICE_SOURCE_COLLECTION_FIELDS,
@@ -1510,6 +1516,8 @@ export function createConnectWiseClient(
         },
         50,
       );
+      assertReferenceCollectionIdentities(result);
+      return result;
     },
 
     async getMyMember(): Promise<unknown> {
@@ -1831,7 +1839,7 @@ export function createConnectWiseClient(
         route === "service.boards.statuses" ||
         route === "service.boards.types"
       ) {
-        assertBoardOptionIdentities(result);
+        assertReferenceCollectionIdentities(result);
       }
       if (route === "system.documents") {
         return verifiedDocumentList(

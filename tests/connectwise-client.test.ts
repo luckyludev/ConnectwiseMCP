@@ -1274,17 +1274,29 @@ describe("ConnectWiseClient", () => {
       name: "unsafe integer",
       option: { id: Number.MAX_SAFE_INTEGER + 1, name: "New" },
     },
-  ])("rejects board options with a $name ID", async ({ option }) => {
+  ])("rejects reference records with a $name ID", async ({ option }) => {
     const createClient = () =>
       createConnectWiseClient(credentials, {
         fetcher: async () => Response.json([option]),
       });
-    const expectedError = "Invalid ConnectWise board option response";
+    const expectedError = "Invalid ConnectWise reference response";
 
+    await expect(createClient().getServiceBoards()).rejects.toThrow(
+      expectedError,
+    );
     await expect(createClient().getBoardStatuses(32)).rejects.toThrow(
       expectedError,
     );
     await expect(createClient().getBoardTypes(32)).rejects.toThrow(
+      expectedError,
+    );
+    await expect(createClient().getServiceStatuses()).rejects.toThrow(
+      expectedError,
+    );
+    await expect(createClient().getServicePriorities()).rejects.toThrow(
+      expectedError,
+    );
+    await expect(createClient().getServiceSources()).rejects.toThrow(
       expectedError,
     );
     await expect(
@@ -1295,7 +1307,7 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow(expectedError);
   });
 
-  it("preserves board options with positive safe-integer IDs", async () => {
+  it("preserves reference records with positive safe-integer IDs", async () => {
     const options = [
       { id: 1, name: "New" },
       { id: Number.MAX_SAFE_INTEGER, name: "Escalated" },
@@ -1304,8 +1316,12 @@ describe("ConnectWiseClient", () => {
       fetcher: async () => Response.json(options),
     });
 
+    await expect(client.getServiceBoards()).resolves.toEqual(options);
     await expect(client.getBoardStatuses(32)).resolves.toEqual(options);
     await expect(client.getBoardTypes(32)).resolves.toEqual(options);
+    await expect(client.getServiceStatuses()).resolves.toEqual(options);
+    await expect(client.getServicePriorities()).resolves.toEqual(options);
+    await expect(client.getServiceSources()).resolves.toEqual(options);
     await expect(
       client.catalogGet("service.boards.statuses", { boardId: 32 }),
     ).resolves.toEqual(options);
