@@ -212,6 +212,22 @@ describe("legacy rollback image security", () => {
     const retainOffset = workflow.indexOf(
       "- name: Retain the verified rollback image",
     );
+    const attestJobOffset = workflow.indexOf("\n  attest:\n");
+    const downloadOffset = workflow.indexOf(
+      "- name: Download the verified rollback artifact",
+    );
+    const attestOffset = workflow.indexOf(
+      "- name: Attest the verified rollback artifact",
+    );
+    const retainStep = workflow.slice(retainOffset, attestJobOffset);
+    const attestJob = workflow.slice(attestJobOffset);
+    const attestStep = workflow.slice(attestOffset);
+    const artifactFiles = [
+      "connectwise-legacy-rollback-image.tar.gz",
+      "connectwise-legacy-rollback-image.sha256",
+      "connectwise-legacy-rollback-image.json",
+      "connectwise-legacy-rollback-image.cdx.json",
+    ];
 
     expect(buildOffset).toBeGreaterThan(-1);
     expect(scanOffset).toBeGreaterThan(buildOffset);
@@ -222,6 +238,13 @@ describe("legacy rollback image security", () => {
     expect(reloadOffset).toBeGreaterThan(verifyArtifactOffset);
     expect(smokeOffset).toBeGreaterThan(reloadOffset);
     expect(retainOffset).toBeGreaterThan(smokeOffset);
+    expect(attestJobOffset).toBeGreaterThan(retainOffset);
+    expect(downloadOffset).toBeGreaterThan(attestJobOffset);
+    expect(attestOffset).toBeGreaterThan(downloadOffset);
+    expect(workflow).toMatch(/^permissions:\n  contents: read$/mu);
+    expect(attestJob).toMatch(
+      /^  attest:\n    needs: verify\n    if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\)\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      id-token: write\n      attestations: write$/mu,
+    );
     expect(workflow).toContain(
       "uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
     );
@@ -277,23 +300,32 @@ describe("legacy rollback image security", () => {
     expect(workflow).toContain(
       'test "$(docker image inspect --format \'{{.Id}}\' connectwise-legacy-rollback-ci)" = "$image_id"',
     );
-    expect(workflow).toContain(
+    expect(attestJob).toContain(
+      "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+    );
+    expect(attestJob).toContain(
+      "name: legacy-rollback-image-${{ github.sha }}",
+    );
+    expect(attestStep).toContain(
+      "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2",
+    );
+    const subjectBlock = `          subject-path: |\n${artifactFiles
+      .map((file) => `            ${file}`)
+      .join("\n")}\n`;
+    expect(attestStep.endsWith(subjectBlock)).toBe(true);
+    expect(attestStep.match(/subject-path: \|/gu)).toHaveLength(1);
+    expect(retainStep).toContain(
       "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
     );
-    expect(workflow).toContain("name: legacy-rollback-image-${{ github.sha }}");
-    expect(workflow).toContain(
+    expect(retainStep).toContain(
       "if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')",
     );
-    for (const artifactFile of [
-      "connectwise-legacy-rollback-image.tar.gz",
-      "connectwise-legacy-rollback-image.sha256",
-      "connectwise-legacy-rollback-image.json",
-      "connectwise-legacy-rollback-image.cdx.json",
-    ]) {
-      expect(workflow).toContain(artifactFile);
-    }
-    expect(workflow).toContain("if-no-files-found: error");
-    expect(workflow).toContain("retention-days: 90");
+    const retainedPathBlock = `          path: |\n${artifactFiles
+      .map((file) => `            ${file}`)
+      .join("\n")}\n          if-no-files-found: error`;
+    expect(retainStep).toContain(retainedPathBlock);
+    expect(retainStep.match(/path: \|/gu)).toHaveLength(1);
+    expect(retainStep).toContain("retention-days: 90");
     expect(dockerfile).toMatch(
       /^FROM python:3\.12-slim@sha256:[0-9a-f]{64}$/mu,
     );
@@ -405,14 +437,36 @@ describe("staging deployment configuration", () => {
       "A failed or late rehearsal blocks cutover",
       "non-production rehearsal",
       "legacy-rollback-image-<release-commit>",
+      "set -euo pipefail",
+      'gh attestation verify "$artifact_file"',
+      "--signer-workflow luckyludev/ConnectwiseMCP/.github/workflows/legacy-oauth-ci.yml",
+      "--source-digest <FULL_RELEASE_COMMIT>",
+      "--source-ref refs/heads/main",
       "python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py",
       "docker compose up -d --no-build --pull never",
       "docker compose stop cloudflared || exit 1",
       "The image-ID comparison must pass before starting the tunnel or routing any client",
-      "A pull-request merge commit, a failed run, an expired artifact, or a local rebuild is not rollback evidence",
+      "A pull-request merge commit, a failed run, an expired artifact, an unattested file, or a local rebuild is not rollback evidence",
     ]) {
       expect(runbook).toContain(requiredControl);
     }
+    const failFastOffset = runbook.indexOf("set -euo pipefail");
+    const provenanceOffset = runbook.indexOf(
+      'gh attestation verify "$artifact_file"',
+    );
+    const localVerificationOffset = runbook.indexOf(
+      "python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py",
+    );
+    const imageLoadOffset = runbook.indexOf(
+      "gzip -dc connectwise-legacy-rollback-image.tar.gz | docker load",
+    );
+    expect(failFastOffset).toBeGreaterThan(-1);
+    expect(provenanceOffset).toBeGreaterThan(failFastOffset);
+    expect(localVerificationOffset).toBeGreaterThan(provenanceOffset);
+    expect(imageLoadOffset).toBeGreaterThan(localVerificationOffset);
+    expect(runbook).toContain(
+      "for artifact_file in \\\n  connectwise-legacy-rollback-image.tar.gz \\\n  connectwise-legacy-rollback-image.sha256 \\\n  connectwise-legacy-rollback-image.json \\\n  connectwise-legacy-rollback-image.cdx.json\ndo",
+    );
     const legacyHealthOffset = runbook.indexOf(
       "Confirm the legacy gateway and tunnel are access-restricted and healthy",
     );
