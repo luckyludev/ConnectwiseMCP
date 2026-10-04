@@ -1264,6 +1264,56 @@ describe("ConnectWiseClient", () => {
     }
   });
 
+  it.each([
+    { name: "missing", option: { name: "New" } },
+    { name: "string", option: { id: "7", name: "New" } },
+    { name: "zero", option: { id: 0, name: "New" } },
+    { name: "negative", option: { id: -1, name: "New" } },
+    { name: "fractional", option: { id: 1.5, name: "New" } },
+    {
+      name: "unsafe integer",
+      option: { id: Number.MAX_SAFE_INTEGER + 1, name: "New" },
+    },
+  ])("rejects board options with a $name ID", async ({ option }) => {
+    const createClient = () =>
+      createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([option]),
+      });
+    const expectedError = "Invalid ConnectWise board option response";
+
+    await expect(createClient().getBoardStatuses(32)).rejects.toThrow(
+      expectedError,
+    );
+    await expect(createClient().getBoardTypes(32)).rejects.toThrow(
+      expectedError,
+    );
+    await expect(
+      createClient().catalogGet("service.boards.statuses", { boardId: 32 }),
+    ).rejects.toThrow(expectedError);
+    await expect(
+      createClient().catalogGet("service.boards.types", { boardId: 32 }),
+    ).rejects.toThrow(expectedError);
+  });
+
+  it("preserves board options with positive safe-integer IDs", async () => {
+    const options = [
+      { id: 1, name: "New" },
+      { id: Number.MAX_SAFE_INTEGER, name: "Escalated" },
+    ];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json(options),
+    });
+
+    await expect(client.getBoardStatuses(32)).resolves.toEqual(options);
+    await expect(client.getBoardTypes(32)).resolves.toEqual(options);
+    await expect(
+      client.catalogGet("service.boards.statuses", { boardId: 32 }),
+    ).resolves.toEqual(options);
+    await expect(
+      client.catalogGet("service.boards.types", { boardId: 32 }),
+    ).resolves.toEqual(options);
+  });
+
   it("minimizes documented board and reference collections upstream", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
