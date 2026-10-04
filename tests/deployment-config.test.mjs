@@ -172,6 +172,30 @@ describe("legacy rollback deployment surface", () => {
 });
 
 describe("legacy rollback image security", () => {
+  it("smoke-tests the digest-pinned cloudflared image rendered from Compose", async () => {
+    const [workflow, compose] = await Promise.all([
+      readFile(
+        new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../deploy/http-gateway/docker-compose.yml", import.meta.url),
+        "utf8",
+      ),
+    ]);
+    const imagePattern = /cloudflare\/cloudflared:latest@sha256:[0-9a-f]{64}/gu;
+
+    expect(compose.match(imagePattern)).toHaveLength(1);
+    expect(workflow.match(imagePattern)).toBeNull();
+    expect(workflow).toContain(
+      'cloudflared_image="$(python -c \'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["services"]["cloudflared"]["image"])\' /tmp/rollback-compose.json)"',
+    );
+    expect(workflow).toContain('docker pull "$cloudflared_image"');
+    expect(workflow).toContain(
+      'docker run --rm "$cloudflared_image" --version',
+    );
+  });
+
   it("fails CI on severe findings and retains the exact smoke-tested image", async () => {
     const [workflow, dockerfile, compose] = await Promise.all([
       readFile(

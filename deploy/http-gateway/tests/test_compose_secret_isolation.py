@@ -15,6 +15,8 @@ def compose_config() -> dict:
                 "environment": {name: f"gateway-{name}" for name in GATEWAY_ENVIRONMENT}
             },
             "cloudflared": {
+                "image": "cloudflare/cloudflared:latest@sha256:"
+                + "a" * 64,
                 "environment": {name: f"tunnel-{name}" for name in TUNNEL_ENVIRONMENT},
                 "depends_on": {
                     "mcp-gateway": {
@@ -29,6 +31,28 @@ def compose_config() -> dict:
 
 def test_accepts_exact_service_environment_allowlists():
     validate_compose_config(compose_config())
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        None,
+        "cloudflare/cloudflared:latest",
+        "cloudflare/cloudflared@sha256:" + "a" * 64,
+        "cloudflare/cloudflared:latest@sha256:" + "A" * 64,
+        "cloudflare/cloudflared:latest@sha256:" + "a" * 63,
+        "example.invalid/cloudflared:latest@sha256:" + "a" * 64,
+    ],
+)
+def test_rejects_unpinned_or_unofficial_cloudflared_image(image):
+    config = compose_config()
+    if image is None:
+        del config["services"]["cloudflared"]["image"]
+    else:
+        config["services"]["cloudflared"]["image"] = image
+
+    with pytest.raises(ValueError, match="cloudflared image must"):
+        validate_compose_config(config)
 
 
 @pytest.mark.parametrize(

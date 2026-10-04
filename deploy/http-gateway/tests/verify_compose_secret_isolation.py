@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
+
+CLOUDFLARED_IMAGE_PATTERN = re.compile(
+    r"cloudflare/cloudflared:latest@sha256:[0-9a-f]{64}\Z"
+)
 
 GATEWAY_ENVIRONMENT = {
     "AZURE_AUDIENCE",
@@ -48,6 +53,15 @@ def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> No
     tunnel = services.get("cloudflared")
     gateway_keys = _environment_keys(gateway, "mcp-gateway")
     tunnel_keys = _environment_keys(tunnel, "cloudflared")
+
+    tunnel_image = tunnel.get("image")
+    if not isinstance(tunnel_image, str) or not CLOUDFLARED_IMAGE_PATTERN.fullmatch(
+        tunnel_image
+    ):
+        raise ValueError(
+            "cloudflared image must be the official latest tag pinned by a lowercase "
+            "sha256 digest"
+        )
 
     tunnel_dependencies = tunnel.get("depends_on")
     if not isinstance(tunnel_dependencies, dict) or set(tunnel_dependencies) != {
