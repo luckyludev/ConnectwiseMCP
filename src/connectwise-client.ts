@@ -2379,7 +2379,25 @@ export function createConnectWiseClient(
       if (input.notes !== undefined && input.notes.length > 0) {
         payload.notes = input.notes;
       }
-      return requestJson("POST", "/time/entries", undefined, payload);
+      const created = await requestJson(
+        "POST",
+        "/time/entries",
+        undefined,
+        payload,
+      );
+      if (!created || typeof created !== "object" || Array.isArray(created)) {
+        throw new Error("Invalid ConnectWise time entry response");
+      }
+      const createdId = (created as Record<string, unknown>).id;
+      if (
+        typeof createdId !== "number" ||
+        !Number.isSafeInteger(createdId) ||
+        createdId <= 0
+      ) {
+        throw new Error("Invalid ConnectWise time entry response");
+      }
+      assertMappedMember(created, memberId);
+      return created;
     },
   };
 }
