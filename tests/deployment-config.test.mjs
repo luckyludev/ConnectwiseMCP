@@ -336,6 +336,30 @@ describe("legacy rollback image security", () => {
 });
 
 describe("staging deployment configuration", () => {
+  it("exercises the verified staging artifact without deploying it", async () => {
+    const workflow = await readFile(
+      new URL("../.github/workflows/v2-ci.yml", import.meta.url),
+      "utf8",
+    );
+    const checkOffset = workflow.indexOf("      - run: npm run check");
+    const dryRunOffset = workflow.indexOf(
+      "      - name: Exercise verified staging deployment path",
+    );
+    const nextStepOffset = workflow.indexOf("\n      - ", dryRunOffset + 1);
+    const dryRunStep = workflow.slice(
+      dryRunOffset,
+      nextStepOffset === -1 ? undefined : nextStepOffset,
+    );
+
+    expect(checkOffset).toBeGreaterThan(-1);
+    expect(dryRunOffset).toBeGreaterThan(checkOffset);
+    expect(dryRunStep).toContain("STAGING_RELEASE_SHA: ${{ github.sha }}");
+    expect(dryRunStep).toContain(
+      "run: node scripts/staging-bundle-integrity.mjs dry-run",
+    );
+    expect(dryRunStep).not.toContain("staging-bundle-integrity.mjs deploy");
+  });
+
   it("preserves remote variables and isolates staging OAuth storage", async () => {
     const [config, packageJson] = await Promise.all([
       readWranglerConfig(),

@@ -71,3 +71,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Exercise verified staging deployment path
+        env:
+          STAGING_RELEASE_SHA: ${{ github.sha }}
+        run: node scripts/staging-bundle-integrity.mjs dry-run
