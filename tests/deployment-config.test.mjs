@@ -411,9 +411,10 @@ describe("staging deployment configuration", () => {
   });
 
   it("preserves remote variables and isolates staging OAuth storage", async () => {
-    const [config, packageJson] = await Promise.all([
+    const [config, packageJson, productionEnvironment] = await Promise.all([
       readWranglerConfig(),
       readJson("../package.json"),
+      readFile(new URL("../config/empty.env", import.meta.url)),
     ]);
     const staging = config.env?.staging;
     const stagingOAuthBindings = (staging?.kv_namespaces ?? []).filter(
@@ -444,6 +445,18 @@ describe("staging deployment configuration", () => {
     expect(packageJson.scripts?.["deploy:staging"]).toContain(
       "npm run check && node scripts/verify-staging-release.mjs && node scripts/staging-bundle-integrity.mjs deploy",
     );
+    expect(productionEnvironment).toHaveLength(0);
+    expect(packageJson.scripts?.["build:production"]).toBe(
+      'wrangler deploy --env="" --env-file config/empty.env --keep-vars --strict --dry-run --outdir dist && node scripts/staging-bundle-integrity.mjs create production',
+    );
+    expect(packageJson.scripts?.["dry-run:production"]).toBe(
+      "node scripts/verify-staging-release.mjs production && npm run build:production && node scripts/verify-staging-release.mjs production && node scripts/staging-bundle-integrity.mjs dry-run production",
+    );
+    expect(packageJson.scripts?.["deploy:production"]).toBeUndefined();
+    expect(packageJson.scripts?.["build:production"]).not.toContain(
+      "--env staging",
+    );
+    expect(packageJson.scripts?.check).not.toContain("deploy:production");
 
     expect(stagingOAuthBindings).toHaveLength(1);
     const [stagingKv] = stagingOAuthBindings;

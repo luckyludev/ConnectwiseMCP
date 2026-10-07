@@ -94,6 +94,30 @@ The image-ID comparison must pass before starting the tunnel or routing any clie
 
 ## 3. Preflight gate
 
+### Production release artifact gate
+
+Production deployment is an operator-only action after the change record, release approval, staging acceptance, rollback evidence, and change window are all approved. CI and ordinary `npm run check` must never run `npm run deploy:production`; they may only exercise dry-run builds and verified dry-run consumption. Do not provide live Cloudflare credentials to CI for this path.
+
+From a fresh, dedicated checkout of the approved canonical `origin/main` commit, with no `.env`, `.env.local`, `.env.production`, or `.env.production.local` file, perform the non-deploying preparation exactly as follows. `<FULL_RELEASE_COMMIT>` must be the approved 40-character lowercase commit, not a branch, abbreviated SHA, or mutable tag:
+
+```bash
+git remote get-url origin
+git fetch --no-tags origin main
+git checkout --detach <FULL_RELEASE_COMMIT>
+export PRODUCTION_RELEASE_SHA=<FULL_RELEASE_COMMIT>
+node scripts/verify-staging-release.mjs production
+npm ci
+npm run check
+node scripts/verify-staging-release.mjs production
+npm run dry-run:production
+```
+
+The production guard fetches the canonical repository itself and fails unless tracked and non-ignored content is clean, the listed implicit Wrangler environment files are absent, the checkout exactly matches `PRODUCTION_RELEASE_SHA`, and that commit is contained in canonical `origin/main`. Ignored dependency and generated-output directories may exist so that the guard can be repeated after the build; the manifest still binds the consumed bundle and configuration bytes. The production build uses the top-level `wrangler.jsonc` target without `--env staging` and explicitly supplies the reviewed, empty `config/empty.env` so Wrangler cannot load implicit environment files. It creates `dist/production-bundle-manifest.json` and binds the generated bundle, reviewed configuration, and immutable commit. The verified dry run gives Wrangler only private read-only copies, an explicit empty environment file, `--keep-vars --strict`, and the full commit as both the tag and part of the release message; it verifies those copies after Wrangler returns and removes them. Any guard, build, manifest, dry-run, cleanup, or tamper-check failure is a stop condition.
+
+Record sanitized evidence of the successful commands and independently confirm that the manifest's `releaseCommit` is the approved value. Do not edit or recreate the manifest. This repository intentionally does **not** expose a `deploy:production` package script while the reviewed top-level configuration still contains production placeholders. The integrity utility also rejects `deploy production` directly, so a locally generated manifest cannot bypass that gate.
+
+Enabling production deployment now requires reviewed live configuration input: replace the top-level production KV, canonical URL, Entra identifiers, and authorization/origin policy placeholders with the approved values without committing secrets, then add a focused deployment command that re-runs the canonical clean-release guard inside the credential-bearing action. That future command must not run dependency installation, tests, lifecycle scripts, or general builds while live Cloudflare credentials are present. It must be separately reviewed and exercised first as a non-deploying dry run. Until that change merges and the deployment approval is explicitly reconfirmed, stop after `npm run dry-run:production`; do not use direct `wrangler deploy` as a workaround.
+
 Complete immediately before routing production clients:
 
 1. Verify the candidate commit is the exact reviewed commit and all required checks passed on it.

@@ -8,10 +8,24 @@ import {
   realpathSync,
 } from "node:fs";
 
-const approvedRelease = process.env.STAGING_RELEASE_SHA;
+const target = process.argv[2] ?? "staging";
+if (
+  process.argv.length > 3 ||
+  (target !== "staging" && target !== "production")
+) {
+  process.stderr.write(
+    "Usage: node scripts/verify-staging-release.mjs [staging|production]\n",
+  );
+  process.exit(1);
+}
+
+const releaseName = target;
+const releaseVariable =
+  target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
+const approvedRelease = process.env[releaseVariable];
 if (!approvedRelease || !/^[0-9a-f]{40}$/u.test(approvedRelease)) {
   process.stderr.write(
-    "STAGING_RELEASE_SHA must be the approved full 40-character lowercase release commit.\n",
+    `${releaseVariable} must be the approved full 40-character lowercase release commit.\n`,
   );
   process.exit(1);
 }
@@ -57,11 +71,11 @@ function gitBytes(args, failureMessage) {
 
 const repositoryRoot = git(
   ["rev-parse", "--show-toplevel"],
-  "Unable to resolve the staging release worktree.",
+  `Unable to resolve the ${releaseName} release worktree.`,
 ).trim();
 if (realpathSync(repositoryRoot) !== realpathSync(process.cwd())) {
   process.stderr.write(
-    "The staging release guard must run from the repository root.\n",
+    `The ${releaseName} release guard must run from the repository root.\n`,
   );
   process.exit(1);
 }
@@ -69,12 +83,12 @@ if (realpathSync(repositoryRoot) !== realpathSync(process.cwd())) {
 const implicitWranglerEnvironmentFiles = [
   ".env",
   ".env.local",
-  ".env.staging",
-  ".env.staging.local",
+  `.env.${target}`,
+  `.env.${target}.local`,
 ];
 if (implicitWranglerEnvironmentFiles.some((path) => existsSync(path))) {
   process.stderr.write(
-    "Implicit Wrangler environment files are not allowed in the staging release checkout.\n",
+    `Implicit Wrangler environment files are not allowed in the ${releaseName} release checkout.\n`,
   );
   process.exit(1);
 }
@@ -97,7 +111,7 @@ const urlRewriteRules = spawnSync(
 );
 if (urlRewriteRules.status === 0) {
   process.stderr.write(
-    "Git URL rewrite rules are not allowed for staging release verification.\n",
+    `Git URL rewrite rules are not allowed for ${releaseName} release verification.\n`,
   );
   process.exit(1);
 }
@@ -112,18 +126,18 @@ const graftsPath = git(
 ).trim();
 if (existsSync(graftsPath)) {
   process.stderr.write(
-    "Legacy Git graft metadata is not allowed for staging release verification.\n",
+    `Legacy Git graft metadata is not allowed for ${releaseName} release verification.\n`,
   );
   process.exit(1);
 }
 
 const head = git(
   ["rev-parse", "--verify", "HEAD^{commit}"],
-  "Unable to resolve the staging release commit.",
+  `Unable to resolve the ${releaseName} release commit.`,
 ).trim();
 if (head !== approvedRelease) {
   process.stderr.write(
-    "STAGING_RELEASE_SHA does not match the checked-out staging release commit.\n",
+    `${releaseVariable} does not match the checked-out ${releaseName} release commit.\n`,
   );
   process.exit(1);
 }
@@ -173,15 +187,15 @@ const reviewBoundary = spawnSync(
 if (reviewBoundary.status !== 0) {
   process.stderr.write(
     reviewBoundary.status === 1
-      ? "The staging release commit is not contained in fetched origin/main.\n"
-      : "Unable to verify the staging release against fetched origin/main.\n",
+      ? `The ${releaseName} release commit is not contained in fetched origin/main.\n`
+      : `Unable to verify the ${releaseName} release against fetched origin/main.\n`,
   );
   process.exit(1);
 }
 
 git(
   ["diff-index", "--cached", "--quiet", head, "--"],
-  "The staging release index must match the reviewed commit.",
+  `The ${releaseName} release index must match the reviewed commit.`,
 );
 
 function blobObjectId(content) {
@@ -197,7 +211,9 @@ let stagedOffset = 0;
 while (stagedOffset < stagedEntries.length) {
   const terminator = stagedEntries.indexOf(0, stagedOffset);
   if (terminator < 0) {
-    process.stderr.write("The staging release index is not canonical.\n");
+    process.stderr.write(
+      `The ${releaseName} release index is not canonical.\n`,
+    );
     process.exit(1);
   }
   const entry = stagedEntries.subarray(stagedOffset, terminator);
@@ -209,7 +225,9 @@ while (stagedOffset < stagedEntries.length) {
   const path = entry.subarray(separator + 1);
   const [indexMode, indexObjectId, stage] = metadata;
   if (separator < 0 || metadata.length !== 3 || stage !== "0") {
-    process.stderr.write("The staging release index is not canonical.\n");
+    process.stderr.write(
+      `The ${releaseName} release index is not canonical.\n`,
+    );
     process.exit(1);
   }
 
@@ -234,7 +252,7 @@ while (stagedOffset < stagedEntries.length) {
     }
   } catch {
     process.stderr.write(
-      "Tracked staging release content must match the reviewed index byte-for-byte.\n",
+      `Tracked ${releaseName} release content must match the reviewed index byte-for-byte.\n`,
     );
     process.exit(1);
   }
@@ -242,7 +260,7 @@ while (stagedOffset < stagedEntries.length) {
 
 const trackedEntries = git(
   ["ls-files", "-v"],
-  "Unable to inspect tracked staging release files.",
+  `Unable to inspect tracked ${releaseName} release files.`,
 );
 if (
   trackedEntries
@@ -251,20 +269,20 @@ if (
     .some((entry) => !entry.startsWith("H "))
 ) {
   process.stderr.write(
-    "Tracked staging release files must not use special index flags.\n",
+    `Tracked ${releaseName} release files must not use special index flags.\n`,
   );
   process.exit(1);
 }
 
 const worktreeStatus = git(
   ["status", "--porcelain=v1", "--untracked-files=all"],
-  "Unable to inspect the staging release worktree.",
+  `Unable to inspect the ${releaseName} release worktree.`,
 );
 if (worktreeStatus.length !== 0) {
   process.stderr.write(
-    "The staging release worktree must be clean, including untracked files.\n",
+    `The ${releaseName} release worktree must be clean, including untracked files.\n`,
   );
   process.exit(1);
 }
 
-process.stdout.write(`Verified clean staging release ${head}.\n`);
+process.stdout.write(`Verified clean ${releaseName} release ${head}.\n`);
