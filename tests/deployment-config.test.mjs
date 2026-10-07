@@ -49,8 +49,8 @@ describe("dependency maintenance configuration", () => {
     expect(source.match(/interval: "weekly"/gu)).toHaveLength(5);
     expect(source.match(/timezone: "America\/New_York"/gu)).toHaveLength(5);
     expect(source).not.toContain('package-ecosystem: "pip"');
-    expect(v2Workflow.match(/- "config\/\*\*"/gu)).toHaveLength(2);
-    expect(v2Workflow.match(/- "\.github\/dependabot\.yml"/gu)).toHaveLength(2);
+    expect(v2Workflow.match(/- "config\/\*\*"/gu)).toHaveLength(1);
+    expect(v2Workflow.match(/- "\.github\/dependabot\.yml"/gu)).toHaveLength(1);
     expect(
       legacyWorkflow.match(/- "\.github\/dependabot\.yml"/gu),
     ).toHaveLength(1);
@@ -153,10 +153,10 @@ describe("legacy rollback deployment surface", () => {
       "http-gateway/docker-compose.yml",
     ]);
     expect(legacyWorkflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(1);
-    expect(v2Workflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(2);
+    expect(v2Workflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(1);
     expect(
       v2Workflow.match(/- "\.github\/workflows\/legacy-oauth-ci\.yml"/gu),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
 
     const legacyPushTrigger = legacyWorkflow.match(
       /^  push:\n(?<body>(?:    [^\n]*\n)*)/mu,
@@ -164,6 +164,14 @@ describe("legacy rollback deployment surface", () => {
     expect(legacyPushTrigger?.groups?.body).toBe("    branches: [main]\n");
     expect(legacyWorkflow).toContain(
       "group: legacy-oauth-ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}",
+    );
+
+    const v2PushTrigger = v2Workflow.match(
+      /^  push:\n(?<body>(?:    [^\n]*\n)*)/mu,
+    );
+    expect(v2PushTrigger?.groups?.body).toBe("    branches: [main]\n");
+    expect(v2Workflow).toContain(
+      "group: v2-ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}",
     );
   });
 

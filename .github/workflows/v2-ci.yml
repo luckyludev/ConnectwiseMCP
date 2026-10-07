@@ -28,33 +28,12 @@ on:
       - ".github/workflows/v2-ci.yml"
   push:
     branches: [main]
-    paths:
-      - "src/**"
-      - "tests/**"
-      - "ui/**"
-      - ".attachment-app-dist/**"
-      - "scripts/**"
-      - "config/**"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.json"
-      - "tsconfig.ui.json"
-      - "vite.attachment.config.ts"
-      - "vitest.config.ts"
-      - "wrangler.jsonc"
-      - ".prettierignore"
-      - ".gitignore"
-      - "docs/**"
-      - "deploy/**"
-      - ".github/dependabot.yml"
-      - ".github/workflows/legacy-oauth-ci.yml"
-      - ".github/workflows/v2-ci.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: v2-ci-${{ github.event_name }}-${{ github.ref }}
+  group: v2-ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
