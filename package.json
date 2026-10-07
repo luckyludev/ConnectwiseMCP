@@ -20,7 +20,7 @@
     "build:staging": "wrangler deploy --env staging --keep-vars --strict --dry-run --outdir dist && node scripts/staging-bundle-integrity.mjs create",
     "build:production": "wrangler deploy --env=\"\" --env-file config/empty.env --keep-vars --strict --dry-run --outdir dist && node scripts/staging-bundle-integrity.mjs create production",
     "dry-run:production": "node scripts/verify-staging-release.mjs production && npm run build:production && node scripts/verify-staging-release.mjs production && node scripts/staging-bundle-integrity.mjs dry-run production",
-    "deploy:staging": "node scripts/verify-staging-release.mjs && npm ci && npm run check && node scripts/verify-staging-release.mjs && node scripts/staging-bundle-integrity.mjs deploy",
+    "prepare:staging": "node scripts/verify-staging-release.mjs && npm ci && npm run check && node scripts/verify-staging-release.mjs",
     "check": "npm run scripts:check && npm run typecheck && npm test && npm run format:check && npm audit --audit-level=moderate && npm run build && npm run build:staging"
   },
   "dependencies": {

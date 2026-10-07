@@ -8,24 +8,29 @@
 
 - Use an approved Cloudflare account and a staging-only Worker/KV target. Never reuse production KV namespaces or Worker secrets in staging.
 - Use a dedicated staging Worker name and, initially, an account `workers.dev` hostname to avoid custom DNS changes. A custom domain needs its own explicit DNS/TLS approval.
-- Run commands from a reviewed release checkout after `npm ci` and `npm run check` pass.
-- Use the active Wrangler OAuth session or approved operator authentication. Do not paste tokens, browser cookies, config files, account IDs, or secrets into chat, Git, PRs, shell history, screenshots, or this document.
+- Run preparation from a reviewed release checkout in an environment that cannot access Cloudflare credentials or an authenticated Wrangler session. Dependency installation, lifecycle scripts, tests, and builds must finish before credentials are made available.
+- Make approved operator authentication available only to narrowly scoped Cloudflare inspection, secret-management, or publish processes. For publishing, expose it only to the final direct integrity-wrapper invocation. Do not paste tokens, browser cookies, config files, account IDs, or secrets into chat, Git, PRs, shell history, screenshots, or this document.
 - The implementation must remain fail-closed until all non-secret policy settings and secrets are intentionally entered. Do not make placeholder values functional by weakening authorization checks.
 
 ## 1. Inspect—do not mutate
 
-The operator can verify local authentication and existing KV namespaces before planning a change:
+The operator first validates the checkout with no Cloudflare credentials or authenticated Wrangler state available:
 
 ```bash
-npx wrangler whoami
-npx wrangler kv namespace list
 npm ci
 npm run check
 npx wrangler deploy --env staging --keep-vars --dry-run --outdir dist-staging
 rm -rf dist-staging
 ```
 
-`npm run check` runs typechecking, tests, formatting, a moderate-or-higher npm audit, and explicit top-level and staging dry-runs. The staging dry-run validates only the local bundle and selected configuration path; it does not authenticate, inspect remote variables, validate their presence or values, or publish a Worker. `--keep-vars` protects remote variables when the same command is later run without `--dry-run`.
+Only after those commands finish may an authorized operator make the approved authentication available to a separate read-only inspection process:
+
+```bash
+npx wrangler whoami
+npx wrangler kv namespace list
+```
+
+`npm run check` runs typechecking, tests, formatting, a moderate-or-higher npm audit, and explicit top-level and staging dry-runs. The staging dry-run validates only the local bundle and selected configuration path; it does not authenticate, inspect remote variables, validate their presence or values, or publish a Worker. `--keep-vars` protects remote variables when the same command is later run without `--dry-run`. Never run dependency installation, lifecycle scripts, tests, or builds in the credential-bearing process.
 
 Record account/operator and release evidence in an approved secure operations record. Do not put sensitive command output in Git.
 
@@ -35,8 +40,6 @@ Namespaces are account-scoped, not domain-scoped. Before creating anything, inve
 
 ```bash
 npx wrangler kv namespace list
-npx wrangler deploy --env staging --keep-vars --dry-run --outdir dist-staging
-rm -rf dist-staging
 ```
 
 Confirm the `OAUTH_KV` namespace already bound in `wrangler.jsonc` is the approved **runtime** staging namespace. Do not create another runtime namespace or replace that binding merely because this procedure is being followed. Record only sanitized evidence in the secure operations record; do not paste namespace IDs into chat, tickets, or this repository.
@@ -78,13 +81,22 @@ Empty eligibility lists and absent secrets must remain fail-closed. Do not deplo
 
 ## 4. Review and publish the fail-closed staging Worker
 
-A configuration change requires the normal repository review and CI process. Once the target release is merged, fetch the canonical `origin` remote, record the merged release's full lowercase 40-character commit SHA in the approved release evidence, and do not move or synthesize the local `origin/main` tracking ref. An authorized operator must use a dedicated checkout with no concurrent writers, check out that exact commit with a clean worktree, explicitly supply the recorded SHA, and publish only the staging environment:
+A configuration change requires the normal repository review and CI process. Once the target release is merged, fetch the canonical `origin` remote, record the merged release's full lowercase 40-character commit SHA in the approved release evidence, and do not move or synthesize the local `origin/main` tracking ref. An authorized operator must use a dedicated checkout with no concurrent writers, check out that exact commit with a clean worktree, and explicitly supply the recorded SHA. First prepare and verify the bundle in a process that cannot access Cloudflare credentials or authenticated Wrangler state:
 
 ```bash
-STAGING_RELEASE_SHA=<approved-full-release-commit> npm run deploy:staging
+STAGING_RELEASE_SHA=<approved-full-release-commit> npm run prepare:staging
 ```
 
-The repository-owned command fails before validation unless `STAGING_RELEASE_SHA` exactly matches `HEAD`, `origin` names the canonical GitHub repository, no Git URL-rewrite or legacy graft metadata can redirect or alter verification, a fresh fetch of its `main` branch succeeds, the release commit is contained in that fetched review boundary with Git replacement objects disabled, the checkout is the repository root, the index matches the approved commit, every tracked file's raw bytes and executable mode match that index independently of Git filters or stat caches, no tracked file uses `skip-worktree` or `assume-unchanged`, the non-ignored untracked worktree state is clean, and no implicit Wrangler `.env` variant exists. It discards the existing dependency tree and runs `npm ci` so deployment tooling is restored from the integrity-protected lockfile, runs the complete blocking `npm run check` suite, and creates a strict manifest that binds the generated regular, non-symlink, single-link `dist/index.js` bytes and SHA-256 digest to the checked-out commit. Immediately before invoking Wrangler, it repeats the release/worktree guard and rejects a missing, replaced, linked, modified, or differently bound bundle, manifest, or output directory. The integrity wrapper then copies the verified bytes to a randomly named private directory, removes write permission from both the copy and its directory while Wrangler consumes it, supplies the reviewed `wrangler.jsonc` and a private empty `--env-file` explicitly, and rechecks the private copies before cleanup. The empty file prevents ignored checkout files from changing the deployment account or credential; approved operator authentication still comes from the invoking process environment. It preserves approved remote variables and retains strict mode. If any validation fails, the wrapper does not invoke Wrangler. If Wrangler reports conflicting remote changes, stop and review the drift through the approved configuration workflow; do not bypass the release guard, bundle-integrity wrapper, `--strict`, or run an ad hoc deploy command.
+After preparation succeeds, record the printed bundle and configuration SHA-256 digests in the approved operations record. Do not recompute or derive them in the credential-bearing process. Make approved operator authentication available only to a separate process that publishes the already verified staging bundle, supplying those independently retained values as `STAGING_BUNDLE_SHA256` and `STAGING_CONFIG_SHA256`. Invoke the reviewed Node entry point directly so npm cannot run pre/post lifecycle hooks or a configured script shell:
+
+```bash
+STAGING_RELEASE_SHA=<approved-full-release-commit> \
+STAGING_BUNDLE_SHA256=<approved-bundle-sha256> \
+STAGING_CONFIG_SHA256=<approved-configuration-sha256> \
+  node scripts/staging-bundle-integrity.mjs deploy
+```
+
+The preparation command fails before validation unless `STAGING_RELEASE_SHA` exactly matches `HEAD`, `origin` names the canonical GitHub repository, no Git URL-rewrite or legacy graft metadata can redirect or alter verification, a fresh fetch of its `main` branch succeeds, the release commit is contained in that fetched review boundary with Git replacement objects disabled, the checkout is the repository root, the index matches the approved commit, every tracked file's raw bytes and executable mode match that index independently of Git filters or stat caches, no tracked file uses `skip-worktree` or `assume-unchanged`, the non-ignored untracked worktree state is clean, and no implicit Wrangler `.env` variant exists. It discards the existing dependency tree and runs `npm ci` so deployment tooling is restored from the integrity-protected lockfile, runs the complete blocking `npm run check` suite, creates a strict manifest that binds the generated regular, non-symlink, single-link `dist/index.js` bytes and SHA-256 digest to the checked-out commit, and repeats the release/worktree guard after the build. The credential-bearing deployment command runs no Git or npm subprocess, dependency installation, lifecycle script, test, or build. It requires the independently retained bundle and configuration digests and rejects a missing, replaced, linked, modified, or differently bound bundle, manifest, or configuration before invoking Wrangler. The integrity wrapper then copies the verified bytes to a randomly named private directory, removes write permission from both the copy and its directory while Wrangler consumes it, supplies the reviewed `wrangler.jsonc` and a private empty `--env-file` explicitly, and rechecks the private copies before cleanup. The empty file prevents ignored checkout files from changing the deployment account or credential; approved operator authentication still comes from the invoking process environment. It preserves approved remote variables and retains strict mode. If any validation fails, the wrapper does not invoke Wrangler. If Wrangler reports conflicting remote changes, stop and review the drift through the approved configuration workflow; do not bypass the release guard, bundle-integrity wrapper, `--strict`, or run an ad hoc deploy command.
 
 This creates or updates the staging Worker and its Workers.dev endpoint. The integrity wrapper labels the deployed Worker version with the exact verified `STAGING_RELEASE_SHA` as its Wrangler tag and includes that SHA in the version message. Record the returned Worker version ID in the secure operations record, then use the approved Cloudflare read-only workflow to confirm that version's tag exactly equals the approved full release SHA. A missing or mismatched tag blocks acceptance. The deployment does not create a custom-domain route.
 

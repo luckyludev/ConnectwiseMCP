@@ -48,6 +48,14 @@ const CONFIG_PATH = "wrangler.jsonc";
 const MANIFEST_PATH = `dist/${target}-bundle-manifest.json`;
 const releaseVariable =
   target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
+const bundleDigestVariable =
+  target === "production"
+    ? "PRODUCTION_BUNDLE_SHA256"
+    : "STAGING_BUNDLE_SHA256";
+const configDigestVariable =
+  target === "production"
+    ? "PRODUCTION_CONFIG_SHA256"
+    : "STAGING_CONFIG_SHA256";
 const gitEnvironment = {
   ...Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
@@ -248,7 +256,7 @@ function createManifest() {
     fail(`The ${target} bundle manifest could not be written safely.`);
   }
   process.stdout.write(
-    `Recorded ${target} bundle ${manifest.sha256} for ${manifest.releaseCommit}.\n`,
+    `Recorded ${target} bundle ${manifest.sha256} and configuration ${manifest.configSha256} for ${manifest.releaseCommit}.\n`,
   );
 }
 
@@ -260,7 +268,17 @@ function verifyManifest() {
       `${releaseVariable} must be the approved full 40-character lowercase release commit.`,
     );
   }
-  if (gitHead() !== approvedRelease) {
+  if (action === "deploy") {
+    for (const [name, value] of [
+      [bundleDigestVariable, process.env[bundleDigestVariable]],
+      [configDigestVariable, process.env[configDigestVariable]],
+    ]) {
+      if (!value || !/^[0-9a-f]{64}$/u.test(value)) {
+        fail(`${name} must be an approved lowercase SHA-256 digest.`);
+      }
+    }
+  }
+  if (action !== "deploy" && gitHead() !== approvedRelease) {
     fail(`${releaseVariable} does not match the ${target} bundle checkout.`);
   }
 
@@ -308,6 +326,15 @@ function verifyManifest() {
   if (manifest.releaseCommit !== approvedRelease) {
     fail(`The ${target} bundle manifest is not bound to ${releaseVariable}.`);
   }
+  if (
+    action === "deploy" &&
+    (manifest.sha256 !== process.env[bundleDigestVariable] ||
+      manifest.configSha256 !== process.env[configDigestVariable])
+  ) {
+    fail(
+      `The ${target} bundle manifest does not match the approved artifact digests.`,
+    );
+  }
 
   const bundle = readRegularFile(BUNDLE_PATH, `The ${target} bundle`);
   if (bundle.length !== manifest.size || sha256(bundle) !== manifest.sha256) {
@@ -325,7 +352,7 @@ function verifyManifest() {
       `The ${target} Wrangler configuration does not match its release manifest.`,
     );
   }
-  requireReleaseConfig(config, approvedRelease);
+  if (action !== "deploy") requireReleaseConfig(config, approvedRelease);
   process.stdout.write(
     `Verified ${target} bundle ${manifest.sha256} for ${approvedRelease}.\n`,
   );

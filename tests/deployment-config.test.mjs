@@ -49,6 +49,7 @@ describe("dependency maintenance configuration", () => {
     expect(source.match(/interval: "weekly"/gu)).toHaveLength(5);
     expect(source.match(/timezone: "America\/New_York"/gu)).toHaveLength(5);
     expect(source).not.toContain('package-ecosystem: "pip"');
+    expect(v2Workflow.match(/- "config\/\*\*"/gu)).toHaveLength(2);
     expect(v2Workflow.match(/- "\.github\/dependabot\.yml"/gu)).toHaveLength(2);
     expect(
       legacyWorkflow.match(/- "\.github\/dependabot\.yml"/gu),
@@ -411,11 +412,19 @@ describe("staging deployment configuration", () => {
   });
 
   it("preserves remote variables and isolates staging OAuth storage", async () => {
-    const [config, packageJson, productionEnvironment] = await Promise.all([
-      readWranglerConfig(),
-      readJson("../package.json"),
-      readFile(new URL("../config/empty.env", import.meta.url)),
-    ]);
+    const [config, packageJson, productionEnvironment, stagingHowto] =
+      await Promise.all([
+        readWranglerConfig(),
+        readJson("../package.json"),
+        readFile(new URL("../config/empty.env", import.meta.url)),
+        readFile(
+          new URL(
+            "../docs/cloudflare-workers-staging-howto.md",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ]);
     const staging = config.env?.staging;
     const stagingOAuthBindings = (staging?.kv_namespaces ?? []).filter(
       ({ binding }) => binding === "OAUTH_KV",
@@ -439,12 +448,22 @@ describe("staging deployment configuration", () => {
     expect(packageJson.scripts?.["build:staging"]).toBe(
       "wrangler deploy --env staging --keep-vars --strict --dry-run --outdir dist && node scripts/staging-bundle-integrity.mjs create",
     );
-    expect(packageJson.scripts?.["deploy:staging"]).toBe(
-      "node scripts/verify-staging-release.mjs && npm ci && npm run check && node scripts/verify-staging-release.mjs && node scripts/staging-bundle-integrity.mjs deploy",
+    expect(packageJson.scripts?.["prepare:staging"]).toBe(
+      "node scripts/verify-staging-release.mjs && npm ci && npm run check && node scripts/verify-staging-release.mjs",
     );
-    expect(packageJson.scripts?.["deploy:staging"]).toContain(
-      "npm run check && node scripts/verify-staging-release.mjs && node scripts/staging-bundle-integrity.mjs deploy",
+    expect(packageJson.scripts?.["deploy:staging"]).toBeUndefined();
+    expect(stagingHowto).toContain(
+      "STAGING_BUNDLE_SHA256=<approved-bundle-sha256>",
     );
+    expect(stagingHowto).toContain(
+      "STAGING_CONFIG_SHA256=<approved-configuration-sha256>",
+    );
+    expect(stagingHowto).toContain(
+      "node scripts/staging-bundle-integrity.mjs deploy",
+    );
+    expect(stagingHowto).not.toContain("npm run deploy:staging");
+    expect(packageJson.scripts?.["prepare:staging"]).toContain("npm ci");
+    expect(packageJson.scripts?.["prepare:staging"]).toContain("npm run check");
     expect(productionEnvironment).toHaveLength(0);
     expect(packageJson.scripts?.["build:production"]).toBe(
       'wrangler deploy --env="" --env-file config/empty.env --keep-vars --strict --dry-run --outdir dist && node scripts/staging-bundle-integrity.mjs create production',
