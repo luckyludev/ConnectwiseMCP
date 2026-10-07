@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMcpHandler } from "agents/mcp/server";
+import { createMcpHandler } from "../src/mcp-handler";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { createMcpServer } from "../src/mcp-server";

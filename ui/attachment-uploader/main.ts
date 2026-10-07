@@ -4,7 +4,7 @@ import {
   applyHostStyleVariables,
   type McpUiHostContext,
 } from "@modelcontextprotocol/ext-apps";
-import type { CallToolResult } from "@modelcontextprotocol/client";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import "./styles.css";
 
 const MAX_ORIGINAL_BYTES = 20_000_000;

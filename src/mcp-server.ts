@@ -1,5 +1,5 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
-import { getMcpAuthContext } from "agents/mcp/server";
+import { getMcpAuthContext } from "./mcp-handler";
 import { z } from "zod";
 import {
   createConnectWiseClient,
@@ -189,6 +189,8 @@ export function createMcpServer(
   env: object = {},
   dependencies: ServiceTicketDependencies = {},
 ): McpServer {
+  const authProps = getMcpAuthContext()?.props as
+    Partial<EntraAccessTokenProps> | undefined;
   const server = new McpServer({
     name: "ConnectWise MCP v2",
     version: "2.0.0-alpha.1",
@@ -207,8 +209,7 @@ export function createMcpServer(
       },
     },
     async (_args): Promise<CallToolResult> => {
-      const props = getMcpAuthContext()?.props as
-        Partial<EntraAccessTokenProps> | undefined;
+      const props = authProps;
       return whoamiResult(props, dependencies);
     },
   );
@@ -227,25 +228,18 @@ export function createMcpServer(
       },
     },
     async ({ ticketId }): Promise<CallToolResult> => {
-      const props = getMcpAuthContext()?.props as
-        Partial<EntraAccessTokenProps> | undefined;
+      const props = authProps;
       return getServiceTicketResult(props, env, ticketId, dependencies);
     },
   );
 
-  registerConnectWiseBusinessTools(
-    server,
-    env,
-    () =>
-      getMcpAuthContext()?.props as Partial<EntraAccessTokenProps> | undefined,
-    {
-      ...(dependencies.audit ? { audit: dependencies.audit } : {}),
-      ...(dependencies.createBusinessClient
-        ? { createClient: dependencies.createBusinessClient }
-        : {}),
-      requestLog: dependencies.requestLog ?? console.info,
-    },
-  );
+  registerConnectWiseBusinessTools(server, env, () => authProps, {
+    ...(dependencies.audit ? { audit: dependencies.audit } : {}),
+    ...(dependencies.createBusinessClient
+      ? { createClient: dependencies.createBusinessClient }
+      : {}),
+    requestLog: dependencies.requestLog ?? console.info,
+  });
 
   return server;
 }
