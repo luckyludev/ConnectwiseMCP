@@ -32,14 +32,14 @@ Set non-secret variables in `wrangler.jsonc` or environment-specific Wrangler co
 - `ALLOWED_APP_ROLES` — JSON array
 - `ALLOWED_CLIENT_REDIRECT_URIS` — JSON array of exact HTTPS callback URIs; HTTP callbacks are limited to explicitly allowed paths on `127.0.0.1`, `[::1]`, or `localhost`, with only the port permitted to vary for local clients
 
-Provision these as Worker secrets; do not place values in Git, `.dev.vars`, command arguments, or ordinary request headers:
+Provision these as Worker secrets; do not place values in Git, `.dev.vars`, command arguments, or ordinary request headers. The following example is staging-only and deliberately names the environment so it cannot mutate the top-level production Worker. Production secret entry requires the separate approved production procedure and its explicit approval boundary.
 
 ```bash
-npx wrangler secret put ENTRA_CLIENT_SECRET
-npx wrangler secret put OAUTH_STATE_SECRET
-npx wrangler secret put IDENTITY_PROFILE_MAP
+npx wrangler secret put ENTRA_CLIENT_SECRET --env staging
+npx wrangler secret put OAUTH_STATE_SECRET --env staging
+npx wrangler secret put IDENTITY_PROFILE_MAP --env staging
 # Repeat once per configured alias, for example:
-npx wrangler secret put CW_PROFILE_LUIS
+npx wrangler secret put CW_PROFILE_LUIS --env staging
 ```
 
 `OAUTH_STATE_SECRET` must contain at least 32 random bytes. `IDENTITY_PROFILE_MAP` is JSON such as:
