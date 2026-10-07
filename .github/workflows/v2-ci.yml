@@ -60,4 +60,6 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           PRODUCTION_RELEASE_SHA: ${{ github.sha }}
-        run: npm run dry-run:production
+        run: |
+          git remote set-url origin https://github.com/luckyludev/ConnectwiseMCP.git
+          npm run dry-run:production
