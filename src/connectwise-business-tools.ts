@@ -4,6 +4,7 @@ import {
   CATALOG_ROUTE_IDS,
   CONNECTWISE_IMAGE_MIME_TYPES,
   ConnectWiseDownloadError,
+  ConnectWiseIndeterminateWriteError,
   ConnectWiseRequestError,
   ConnectWiseUserError,
   MAX_IMAGE_UPLOAD_BYTES,
@@ -236,6 +237,9 @@ function output(value: unknown): CallToolResult {
 }
 
 function failureMessage(error: unknown): string {
+  if (error instanceof ConnectWiseIndeterminateWriteError) {
+    return "ConnectWise update outcome is unknown; verify the record before retrying";
+  }
   if (error instanceof ConnectWiseRequestError) {
     if (error.status === 401 || error.status === 403) {
       return "ConnectWise denied this operation";
