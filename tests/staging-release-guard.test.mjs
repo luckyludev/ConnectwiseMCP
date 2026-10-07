@@ -87,18 +87,25 @@ process.exit(result.status ?? 1);
   return { bare, cwd, head, root };
 }
 
-function runGuard(cwd, releaseSha, environmentOverrides = {}) {
+function runGuard(
+  cwd,
+  releaseSha,
+  environmentOverrides = {},
+  target = "staging",
+) {
   const env = {
     ...process.env,
     ...repositoryEnvironments.get(cwd),
-    ...environmentOverrides,
   };
-  if (releaseSha === undefined) {
-    delete env.STAGING_RELEASE_SHA;
-  } else {
-    env.STAGING_RELEASE_SHA = releaseSha;
-  }
-  return spawnSync(process.execPath, [guardPath], {
+  delete env.STAGING_RELEASE_SHA;
+  delete env.PRODUCTION_RELEASE_SHA;
+  Object.assign(env, environmentOverrides);
+  const releaseVariable =
+    target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
+  if (releaseSha !== undefined) env[releaseVariable] = releaseSha;
+  const arguments_ = [guardPath];
+  if (target !== "staging") arguments_.push(target);
+  return spawnSync(process.execPath, arguments_, {
     cwd,
     env,
     encoding: "utf8",
@@ -227,7 +234,7 @@ describe("staging release guard", () => {
         "The staging release commit is not contained in fetched origin/main.",
       );
     });
-  });
+  }, 15_000);
 
   it("rejects legacy graft metadata before ancestry checks", async () => {
     await withRepository(async ({ cwd, head: reviewedHead }) => {
@@ -444,4 +451,61 @@ describe("staging release guard", () => {
       );
     });
   });
+});
+
+describe("production release guard", () => {
+  it("accepts the clean canonical reviewed commit using PRODUCTION_RELEASE_SHA", async () => {
+    await withRepository(async ({ cwd, head }) => {
+      const result = runGuard(cwd, head, {}, "production");
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe(
+        `Verified clean production release ${head}.\n`,
+      );
+    });
+  });
+
+  it.each([".env", ".env.local", ".env.production", ".env.production.local"])(
+    "rejects implicit production Wrangler environment file %s",
+    async (filename) => {
+      await withRepository(async ({ cwd, head }) => {
+        await writeFile(join(cwd, filename), "UNREVIEWED=true\n");
+
+        const result = runGuard(cwd, head, {}, "production");
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          "Implicit Wrangler environment files are not allowed in the production release checkout.",
+        );
+      });
+    },
+  );
+
+  it.each([undefined, "abc", "A".repeat(40)])(
+    "rejects a missing or malformed PRODUCTION_RELEASE_SHA (%s)",
+    async (releaseSha) => {
+      await withRepository(async ({ cwd }) => {
+        const result = runGuard(cwd, releaseSha, {}, "production");
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          "PRODUCTION_RELEASE_SHA must be the approved full 40-character lowercase release commit.",
+        );
+      });
+    },
+  );
+
+  it.each(["prod", "Production", "staging-extra"])(
+    "rejects unsupported target %s",
+    async (target) => {
+      await withRepository(async ({ cwd }) => {
+        const result = runGuard(cwd, undefined, {}, target);
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toBe(
+          "Usage: node scripts/verify-staging-release.mjs [staging|production]\n",
+        );
+      });
+    },
+  );
 });

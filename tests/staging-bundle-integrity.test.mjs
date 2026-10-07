@@ -53,11 +53,23 @@ async function createCheckout() {
   return { cwd, head: git(cwd, ["rev-parse", "HEAD"]) };
 }
 
-function run(cwd, action, releaseSha, environmentOverrides = {}) {
-  const env = { ...process.env, ...environmentOverrides };
-  if (releaseSha === undefined) delete env.STAGING_RELEASE_SHA;
-  else env.STAGING_RELEASE_SHA = releaseSha;
-  return spawnSync(process.execPath, [integrityPath, action], {
+function run(
+  cwd,
+  action,
+  releaseSha,
+  environmentOverrides = {},
+  target = "staging",
+) {
+  const env = { ...process.env };
+  delete env.STAGING_RELEASE_SHA;
+  delete env.PRODUCTION_RELEASE_SHA;
+  Object.assign(env, environmentOverrides);
+  const releaseVariable =
+    target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
+  if (releaseSha !== undefined) env[releaseVariable] = releaseSha;
+  const arguments_ = [integrityPath, action];
+  if (target !== "staging") arguments_.push(target);
+  return spawnSync(process.execPath, arguments_, {
     cwd,
     env,
     encoding: "utf8",
@@ -356,6 +368,134 @@ unlinkSync(process.argv[3]);
         expect(result.status).toBe(1);
         expect(result.stderr).toContain(
           "STAGING_RELEASE_SHA must be the approved full 40-character lowercase release commit.",
+        );
+      });
+    },
+  );
+});
+
+describe("production bundle integrity", () => {
+  it("uses a separately named manifest bound to PRODUCTION_RELEASE_SHA", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const created = run(cwd, "create", undefined, {}, "production");
+      const verified = run(
+        cwd,
+        "verify",
+        head,
+        { STAGING_RELEASE_SHA: "0".repeat(40) },
+        "production",
+      );
+      const manifest = JSON.parse(
+        await readFile(
+          join(cwd, "dist", "production-bundle-manifest.json"),
+          "utf8",
+        ),
+      );
+
+      expect(created.status, created.stderr).toBe(0);
+      expect(verified.status, verified.stderr).toBe(0);
+      expect(manifest.schemaVersion).toBe(3);
+      expect(manifest.target).toBe("production");
+      expect(manifest.releaseCommit).toBe(head);
+      expect(manifest.bundlePath).toBe("dist/index.js");
+      expect(manifest.configPath).toBe("wrangler.jsonc");
+      await expect(
+        readFile(join(cwd, "dist", "staging-bundle-manifest.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  it("rejects a manifest bound to a different deployment target", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      expect(run(cwd, "create", undefined, {}, "production").status).toBe(0);
+      const manifestPath = join(cwd, "dist", "production-bundle-manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      manifest.target = "staging";
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+      const result = run(cwd, "verify", head, {}, "production");
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The production bundle manifest has an invalid schema.",
+      );
+    });
+  });
+
+  it("passes exact top-level production arguments and private verified files", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const bin = join(cwd, "node_modules", ".bin");
+      const wrangler = join(bin, "wrangler");
+      await mkdir(bin, { recursive: true });
+      await writeFile(
+        wrangler,
+        `#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+const args = process.argv.slice(2);
+if (args[0] !== "deploy" || args[2] !== "--no-bundle" || args[3] !== "--config") process.exit(2);
+if (dirname(resolve(args[4])) !== process.cwd()) process.exit(3);
+if (args.includes("staging") || args.some((value) => value === "--env=staging")) process.exit(4);
+if (args[args.indexOf("--env") + 1] !== "") process.exit(5);
+const expectedFlags = ["--env", "--keep-vars", "--strict", "--env-file", "--tag", "--message", "--dry-run"];
+for (const flag of expectedFlags) if (!args.includes(flag)) process.exit(6);
+const environmentPath = args[args.indexOf("--env-file") + 1];
+if (readFileSync(environmentPath).length !== 0) process.exit(7);
+if (args[args.indexOf("--tag") + 1] !== ${JSON.stringify(head)}) process.exit(8);
+if (args[args.indexOf("--message") + 1] !== ${JSON.stringify(`ConnectwiseMCP production release ${head}`)}) process.exit(9);
+if (!readFileSync(args[1], "utf8").includes("export default")) process.exit(10);
+if (!readFileSync(args[4], "utf8").includes("connectwise-staging-bundle-test")) process.exit(11);
+`,
+      );
+      await chmod(wrangler, 0o755);
+      expect(run(cwd, "create", undefined, {}, "production").status).toBe(0);
+
+      const result = run(cwd, "dry-run", head, {}, "production");
+
+      expect(result.status, result.stderr).toBe(0);
+      const privateConfigs = (await readdir(cwd)).filter((name) =>
+        name.startsWith(".wrangler.production-deploy-"),
+      );
+      expect(privateConfigs).toEqual([]);
+    });
+  });
+
+  it.each([undefined, "abc", "A".repeat(40)])(
+    "rejects a missing or malformed production SHA (%s)",
+    async (releaseSha) => {
+      await withCheckout(async ({ cwd }) => {
+        expect(run(cwd, "create", undefined, {}, "production").status).toBe(0);
+
+        const result = run(cwd, "verify", releaseSha, {}, "production");
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          "PRODUCTION_RELEASE_SHA must be the approved full 40-character lowercase release commit.",
+        );
+      });
+    },
+  );
+
+  it("fails closed when production deployment is requested directly", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const result = run(cwd, "deploy", head, {}, "production");
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toBe(
+        "Production deployment is disabled until reviewed live configuration replaces the repository placeholders.\n",
+      );
+    });
+  });
+
+  it.each(["prod", "Production", "staging-extra"])(
+    "rejects unsupported target %s",
+    async (target) => {
+      await withCheckout(async ({ cwd }) => {
+        const result = run(cwd, "create", undefined, {}, target);
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toBe(
+          "Usage: node scripts/staging-bundle-integrity.mjs <create|verify|deploy|dry-run> [staging|production]\n",
         );
       });
     },
