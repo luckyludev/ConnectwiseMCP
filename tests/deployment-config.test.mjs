@@ -401,22 +401,45 @@ describe("staging deployment configuration", () => {
       "utf8",
     );
     const checkOffset = workflow.indexOf("      - run: npm run check");
-    const dryRunOffset = workflow.indexOf(
+    const stagingDryRunOffset = workflow.indexOf(
       "      - name: Exercise verified staging deployment path",
     );
-    const nextStepOffset = workflow.indexOf("\n      - ", dryRunOffset + 1);
-    const dryRunStep = workflow.slice(
-      dryRunOffset,
+    const productionDryRunOffset = workflow.indexOf(
+      "      - name: Exercise verified production dry-run path",
+    );
+    const nextStepOffset = workflow.indexOf(
+      "\n      - ",
+      stagingDryRunOffset + 1,
+    );
+    const stagingDryRunStep = workflow.slice(
+      stagingDryRunOffset,
       nextStepOffset === -1 ? undefined : nextStepOffset,
     );
+    const productionDryRunStep = workflow.slice(productionDryRunOffset);
 
     expect(checkOffset).toBeGreaterThan(-1);
-    expect(dryRunOffset).toBeGreaterThan(checkOffset);
-    expect(dryRunStep).toContain("STAGING_RELEASE_SHA: ${{ github.sha }}");
-    expect(dryRunStep).toContain(
+    expect(stagingDryRunOffset).toBeGreaterThan(checkOffset);
+    expect(productionDryRunOffset).toBeGreaterThan(stagingDryRunOffset);
+    expect(stagingDryRunStep).toContain(
+      "STAGING_RELEASE_SHA: ${{ github.sha }}",
+    );
+    expect(stagingDryRunStep).toContain(
       "run: node scripts/staging-bundle-integrity.mjs dry-run",
     );
-    expect(dryRunStep).not.toContain("staging-bundle-integrity.mjs deploy");
+    expect(stagingDryRunStep).not.toContain(
+      "staging-bundle-integrity.mjs deploy",
+    );
+    expect(productionDryRunStep).toContain(
+      "if: github.event_name != 'pull_request'",
+    );
+    expect(productionDryRunStep).toContain(
+      "PRODUCTION_RELEASE_SHA: ${{ github.sha }}",
+    );
+    expect(productionDryRunStep).not.toContain("STAGING_RELEASE_SHA");
+    expect(productionDryRunStep).toContain("run: npm run dry-run:production");
+    expect(productionDryRunStep).not.toContain(
+      "staging-bundle-integrity.mjs deploy",
+    );
   });
 
   it("preserves remote variables and isolates staging OAuth storage", async () => {
