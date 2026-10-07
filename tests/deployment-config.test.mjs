@@ -175,6 +175,44 @@ describe("legacy rollback deployment surface", () => {
     );
   });
 
+  it("labels local legacy builds as development-only rollback exclusions", async () => {
+    const [readme, exampleEnvironment] = await Promise.all([
+      readFile(new URL("../README.md", import.meta.url), "utf8"),
+      readFile(
+        new URL("../deploy/http-gateway/.env.example", import.meta.url),
+        "utf8",
+      ),
+    ]);
+    const localSetupOffset = readme.indexOf(
+      "## Local development Docker setup (gateway only)",
+    );
+    const nextSectionOffset = readme.indexOf("\n## ", localSetupOffset + 1);
+    const localSetup = readme.slice(localSetupOffset, nextSectionOffset);
+
+    expect(localSetupOffset).toBeGreaterThan(-1);
+    expect(localSetup).toContain("**Development only:**");
+    expect(localSetup).toContain("--no-build --pull never");
+    expect(localSetup).toContain("docker compose up -d --build mcp-gateway");
+    expect(localSetup).toContain(
+      "not the supported emergency rollback procedure",
+    );
+    expect(localSetup).toContain("do not attach a tunnel or public route");
+    expect(localSetup).not.toContain("connectwisemcp.funcshun.com");
+    expect(localSetup).not.toContain("CLOUDFLARE_TUNNEL_TOKEN");
+    expect(readme).not.toContain("Test via Cloudflare");
+    expect(readme).not.toContain("connectwisemcp.funcshun.com");
+    expect(readme).not.toContain("CLOUDFLARE_TUNNEL_TOKEN");
+    expect(exampleEnvironment).toContain("SERVER_URL=http://127.0.0.1:8000");
+    expect(exampleEnvironment).toContain(
+      "MCP_RESOURCE_URL=http://127.0.0.1:8000",
+    );
+    expect(exampleEnvironment).toContain("CLOUDFLARE_TUNNEL_TOKEN=\n");
+    expect(exampleEnvironment).not.toContain("connectwisemcp.funcshun.com");
+    expect(exampleEnvironment).toContain(
+      "approved, time-bounded rollback procedure",
+    );
+  });
+
   it("keeps local legacy credential artifacts out of version control", () => {
     for (const path of [
       "deploy/cwm-mcp/credentials.json",
@@ -395,6 +433,24 @@ describe("legacy rollback image security", () => {
 });
 
 describe("staging deployment configuration", () => {
+  it("scopes foundation secret examples to staging", async () => {
+    const foundation = await readFile(
+      new URL("../docs/v2-foundation.md", import.meta.url),
+      "utf8",
+    );
+    const secretCommands = foundation
+      .split("\n")
+      .filter((line) => line.startsWith("npx wrangler secret put "));
+
+    expect(secretCommands).toHaveLength(4);
+    for (const command of secretCommands) {
+      expect(command).toMatch(/ --env staging$/u);
+    }
+    expect(foundation).toContain(
+      "Production secret entry requires the separate approved production procedure",
+    );
+  });
+
   it("exercises the verified staging artifact without deploying it", async () => {
     const workflow = await readFile(
       new URL("../.github/workflows/v2-ci.yml", import.meta.url),

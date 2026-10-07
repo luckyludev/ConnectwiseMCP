@@ -78,12 +78,11 @@ Do not treat this gateway as the production target or leave it generally exposed
 
 The rollback build uses hash-locked Python dependencies and digest-pinned Python and `cloudflared` images. `legacy-oauth-ci` rebuilds, audits, scans, reloads, and smoke-tests the gateway image, then retains the exact tested archive, SHA-256 checksum, and release manifest for 90 days. Use the successful canonical `main` run for the reviewed release commit; a locally rebuilt image is not equivalent evidence. Dependency changes start in `deploy/http-gateway/requirements.txt` and `deploy/cwm-mcp/requirements.txt`; regenerate `requirements.lock` with the exact `uv pip compile` command recorded at the top of that file and review the resolved versions and hashes. Image changes require the same reviewed CI path. Before rollback, follow the artifact verification and `--no-build --pull never` procedure in the [cutover and rollback runbook](docs/cutover-rollback-runbook.md). Do not replace a digest with a floating image reference during an incident.
 
-## Docker setup (gateway + tunnel)
+## Local development Docker setup (gateway only)
 
-The Docker setup lives in `deploy/http-gateway/docker-compose.yml` and runs:
+> **Development only:** The commands in this section build the broad legacy gateway locally. They are not the supported emergency rollback procedure and must not be used to expose a rollback deployment. For rollback, use the successful canonical `main` artifact and the runbook's verified `--no-build --pull never` procedure.
 
-- `mcp-gateway` (FastAPI HTTP gateway)
-- `cloudflared` (Cloudflare Tunnel)
+The local Docker setup lives in `deploy/http-gateway/docker-compose.yml`; start only `mcp-gateway` (the FastAPI HTTP gateway). Do not start the `cloudflared` service for local development.
 
 Steps:
 
@@ -98,13 +97,14 @@ Required values:
 - `MCP_STATIC_TOKEN` (strong random token)
 - `JWT_SECRET_KEY` (required for OAuth tokens)
 - `CONNECTWISE_*` variables
-- `CLOUDFLARE_TUNNEL_TOKEN`
+- `SERVER_URL=http://127.0.0.1:8000`
+- `MCP_RESOURCE_URL=http://127.0.0.1:8000`
 
-2. Build + run:
+2. Build and run the local-only gateway:
 
 ```
 cd deploy/http-gateway
-docker compose up -d --build
+docker compose up -d --build mcp-gateway
 ```
 
 3. Verify:
@@ -113,10 +113,7 @@ docker compose up -d --build
 curl http://127.0.0.1:8000/health
 ```
 
-Notes:
-
-- The gateway binds to `127.0.0.1:8000` and is only exposed publicly through Cloudflare.
-- Ensure your Cloudflare Tunnel routes `connectwisemcp.funcshun.com` to this service.
+Note: the gateway binds to `127.0.0.1:8000`. Keep this local development instance private; do not attach a tunnel or public route.
 
 ## Local macOS install (Homebrew + Docker)
 
@@ -173,20 +170,12 @@ curl http://127.0.0.1:8000/health
 - **Auth:** Bearer token
 - **Token:** your `MCP_STATIC_TOKEN`
 
-> If you want the Cloudflare tunnel too, set `CLOUDFLARE_TUNNEL_TOKEN` and run `docker compose up -d --build` without the service name.
+## Quick start (local token auth)
 
-## Quick start (token auth)
-
-1. Test locally:
+Test locally:
 
 ```
-curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:8000/mcp
-```
-
-2. Test via Cloudflare:
-
-```
-curl -H "Authorization: Bearer YOUR_TOKEN" https://connectwisemcp.funcshun.com/mcp
+curl -H "Authorization: Bearer ***" http://127.0.0.1:8000/mcp
 ```
 
 ## Legacy-only JSON-RPC example
