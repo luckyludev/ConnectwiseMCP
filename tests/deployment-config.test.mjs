@@ -56,6 +56,32 @@ describe("dependency maintenance configuration", () => {
     expect(legacyWorkflow).toContain("node-version: 24.11.0");
   });
 
+  it("keeps the legacy rollback lock above the multidict security floor", async () => {
+    const [input, lock] = await Promise.all([
+      readFile(
+        new URL("../deploy/http-gateway/requirements.txt", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../deploy/http-gateway/requirements.lock", import.meta.url),
+        "utf8",
+      ),
+    ]);
+    const lockedVersion = lock.match(/^multidict==(\d+)\.(\d+)\.(\d+)/mu);
+
+    expect(input).toMatch(/^multidict>=6\.9\.1$/mu);
+    expect(lockedVersion).not.toBeNull();
+    expect(lockedVersion.slice(1).map(Number)).toEqual(
+      expect.arrayContaining([expect.any(Number)]),
+    );
+    expect(
+      lockedVersion
+        .slice(1)
+        .map(Number)
+        .reduce((result, part, index) => result || part - [6, 9, 1][index], 0),
+    ).toBeGreaterThanOrEqual(0);
+  });
+
   it("installs legacy CI tooling only from a reproducible hash lock", async () => {
     const [workflow, input, lock] = await Promise.all([
       readFile(
