@@ -436,7 +436,10 @@ describe("staging deployment configuration", () => {
       "PRODUCTION_RELEASE_SHA: ${{ github.sha }}",
     );
     expect(productionDryRunStep).not.toContain("STAGING_RELEASE_SHA");
-    expect(productionDryRunStep).toContain("run: npm run dry-run:production");
+    expect(productionDryRunStep).toContain(
+      "git remote set-url origin https://github.com/luckyludev/ConnectwiseMCP.git",
+    );
+    expect(productionDryRunStep).toContain("npm run dry-run:production");
     expect(productionDryRunStep).not.toContain(
       "staging-bundle-integrity.mjs deploy",
     );
