@@ -63,6 +63,10 @@ function run(
   const env = { ...process.env };
   delete env.STAGING_RELEASE_SHA;
   delete env.PRODUCTION_RELEASE_SHA;
+  delete env.STAGING_BUNDLE_SHA256;
+  delete env.STAGING_CONFIG_SHA256;
+  delete env.PRODUCTION_BUNDLE_SHA256;
+  delete env.PRODUCTION_CONFIG_SHA256;
   Object.assign(env, environmentOverrides);
   const releaseVariable =
     target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
@@ -74,6 +78,16 @@ function run(
     env,
     encoding: "utf8",
   });
+}
+
+async function stagingDeploymentDigests(cwd) {
+  const manifest = JSON.parse(
+    await readFile(join(cwd, "dist", "staging-bundle-manifest.json"), "utf8"),
+  );
+  return {
+    STAGING_BUNDLE_SHA256: manifest.sha256,
+    STAGING_CONFIG_SHA256: manifest.configSha256,
+  };
 }
 
 async function withCheckout(callback) {
@@ -93,7 +107,9 @@ describe("staging bundle integrity", () => {
 
       expect(created.status, created.stderr).toBe(0);
       expect(created.stdout).toMatch(
-        new RegExp(`^Recorded staging bundle [0-9a-f]{64} for ${head}\\.\\n$`),
+        new RegExp(
+          `^Recorded staging bundle [0-9a-f]{64} and configuration [0-9a-f]{64} for ${head}\\.\\n$`,
+        ),
       );
       expect(verified.status, verified.stderr).toBe(0);
       expect(verified.stdout).toMatch(
@@ -309,6 +325,75 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
     });
   });
 
+  it("keeps Git and npm outside the credential-bearing deployment path", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      expect(run(cwd, "create").status).toBe(0);
+      const bin = join(cwd, "node_modules", ".bin");
+      const wrangler = join(bin, "wrangler");
+      const gitMarker = join(cwd, "git-was-invoked");
+      await mkdir(bin, { recursive: true });
+      await writeFile(
+        join(bin, "git"),
+        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(gitMarker)}, "called\\n");\nprocess.exit(91);\n`,
+      );
+      await writeFile(
+        wrangler,
+        `#!${process.execPath}\nif (process.env.CLOUDFLARE_API_TOKEN !== "credential-canary") process.exit(92);\n`,
+      );
+      await chmod(join(bin, "git"), 0o755);
+      await chmod(wrangler, 0o755);
+
+      const result = run(cwd, "deploy", head, {
+        ...(await stagingDeploymentDigests(cwd)),
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+        PATH: bin,
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      await expect(readFile(gitMarker)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+  });
+
+  it("requires externally approved artifact digests for deployment", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      expect(run(cwd, "create").status).toBe(0);
+
+      const result = run(cwd, "deploy", head);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "STAGING_BUNDLE_SHA256 must be an approved lowercase SHA-256 digest.",
+      );
+    });
+  });
+
+  it("rejects self-consistent artifact replacement after preparation", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      expect(run(cwd, "create").status).toBe(0);
+      const approvedDigests = await stagingDeploymentDigests(cwd);
+      const bundle = Buffer.from("tampered bundle\n");
+      const config = Buffer.from('{"name":"tampered"}\n');
+      const manifestPath = join(cwd, "dist", "staging-bundle-manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      manifest.sha256 = createHash("sha256").update(bundle).digest("hex");
+      manifest.size = bundle.length;
+      manifest.configSha256 = createHash("sha256").update(config).digest("hex");
+      manifest.configSize = config.length;
+      await writeFile(join(cwd, "dist", "index.js"), bundle);
+      await writeFile(join(cwd, "wrangler.jsonc"), config);
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+      const result = run(cwd, "deploy", head, approvedDigests);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging bundle manifest does not match the approved artifact digests.",
+      );
+    });
+  });
+
   it("cleans up the private directory when its bundle copy is removed", async () => {
     await withCheckout(async ({ cwd, head }) => {
       const bin = join(cwd, "node_modules", ".bin");
@@ -331,7 +416,12 @@ unlinkSync(process.argv[3]);
         ),
       );
 
-      const result = run(cwd, "deploy", head);
+      const result = run(
+        cwd,
+        "deploy",
+        head,
+        await stagingDeploymentDigests(cwd),
+      );
       const after = (await readdir(tmpdir())).filter((name) =>
         name.startsWith("connectwise-staging-deploy-"),
       );
