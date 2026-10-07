@@ -2952,6 +2952,7 @@ describe("authenticated MCP transport", () => {
       }
       return Response.json({
         id: 1927659,
+        owner: { id: 212 },
         privateKey: "UPSTREAM_PRIVATE_VALUE",
         customFields: [{ value: "UPSTREAM_PRIVATE_VALUE" }],
       });
@@ -3160,7 +3161,11 @@ describe("authenticated MCP transport", () => {
         ]);
       }
       if (method === "PATCH") {
-        return Response.json({ id: 1927963, board: { id: 64 } });
+        return Response.json({
+          id: 1927963,
+          board: { id: 64 },
+          status: { id: 935 },
+        });
       }
       return Response.json([]);
     };

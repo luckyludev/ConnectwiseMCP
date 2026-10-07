@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ConnectWiseIndeterminateWriteError,
   ConnectWiseRequestError,
   MAX_CONNECTWISE_RESPONSE_CHUNKS,
   MAX_IMAGE_UPLOAD_BYTES,
@@ -2550,6 +2551,13 @@ describe("ConnectWiseClient", () => {
           url: String(input),
           ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
         });
+        if (method === "PATCH") {
+          return Response.json({
+            id: 9,
+            summary: "Updated",
+            owner: { id: 12 },
+          });
+        }
         return Response.json({
           id: 9,
           summary: "Original",
@@ -2579,6 +2587,193 @@ describe("ConnectWiseClient", () => {
       { op: "replace", path: "owner", value: { id: 12 } },
       { op: "replace", path: "summary", value: "Updated" },
     ]);
+  });
+
+  it("reconciles a misrouted service ticket update response", async () => {
+    const methods: string[] = [];
+    let getCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PATCH") {
+          return Response.json({
+            id: 10,
+            summary: "Other ticket",
+            company: { id: 123, name: "Other customer" },
+          });
+        }
+        getCount += 1;
+        if (getCount === 1) return Response.json({ id: 9 });
+        expect(new URL(String(input)).searchParams.get("fields")).toBe(
+          "id,summary,company,board,status,priority,type,owner,contact,closedFlag,closedDate,dateResolved,_info",
+        );
+        return Response.json({
+          id: 9,
+          summary: "Updated",
+          company: { id: 1, name: "Expected customer" },
+        });
+      },
+    });
+
+    await expect(
+      client.updateServiceTicket(9, { summary: "Updated" }),
+    ).resolves.toEqual({
+      id: 9,
+      summary: "Updated",
+      company: { id: 1, name: "Expected customer" },
+    });
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
+  });
+
+  it("rejects a service ticket update that cannot be confirmed", async () => {
+    const methods: string[] = [];
+    let getCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PATCH") {
+          return Response.json({ id: 10, summary: "Other ticket" });
+        }
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          summary: getCount === 1 ? "Original" : "Still original",
+        });
+      },
+    });
+
+    await expect(
+      client.updateServiceTicket(9, { summary: "Updated" }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
+  });
+
+  it("does not reconcile a definitive service ticket update rejection", async () => {
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        return method === "PATCH"
+          ? new Response(null, { status: 403 })
+          : Response.json({ id: 9 });
+      },
+    });
+
+    let error: unknown;
+    try {
+      await client.updateServiceTicket(9, { summary: "Updated" });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(ConnectWiseRequestError);
+    expect((error as ConnectWiseRequestError).status).toBe(403);
+    expect(methods).toEqual(["GET", "PATCH"]);
+  });
+
+  it("reconciles an ambiguous 5xx service ticket update response", async () => {
+    const methods: string[] = [];
+    let getCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PATCH") return new Response(null, { status: 503 });
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          summary: getCount === 1 ? "Original" : "Still original",
+        });
+      },
+    });
+
+    await expect(
+      client.updateServiceTicket(9, { summary: "Updated" }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
+  });
+
+  it("does not reconcile a refused service ticket update redirect", async () => {
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        return method === "PATCH"
+          ? new Response(null, {
+              status: 307,
+              headers: { Location: "https://other.example/ticket" },
+            })
+          : Response.json({ id: 9 });
+      },
+    });
+
+    await expect(
+      client.updateServiceTicket(9, { summary: "Updated" }),
+    ).rejects.toThrow("redirected the request (307)");
+    expect(methods).toEqual(["GET", "PATCH"]);
+  });
+
+  it("confirms every service ticket update field", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        if (method === "GET") return Response.json({ id: 9 });
+        return Response.json({
+          id: 9,
+          owner: { id: 11 },
+          status: { id: 12 },
+          board: { id: 13 },
+          priority: { id: 14 },
+          type: { id: 15 },
+          summary: "Updated",
+          contact: { id: 16 },
+        });
+      },
+    });
+
+    await expect(
+      client.updateServiceTicket(9, {
+        ownerId: 11,
+        statusId: 12,
+        boardId: 13,
+        priorityId: 14,
+        typeId: 15,
+        summary: "Updated",
+        contactId: 16,
+      }),
+    ).resolves.toMatchObject({ id: 9, summary: "Updated" });
+  });
+
+  it("reconciles an ambiguous service ticket response without a second write", async () => {
+    const methods: string[] = [];
+    let getCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PATCH") throw new Error("response connection lost");
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          summary: getCount === 1 ? "Original" : "Updated",
+        });
+      },
+    });
+
+    await expect(
+      client.updateServiceTicket(9, { summary: "Updated" }),
+    ).resolves.toMatchObject({ id: 9, summary: "Updated" });
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
   it("updates a schedule entry via an ownership read and explicit patch", async () => {

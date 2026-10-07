@@ -249,6 +249,22 @@ export class ConnectWiseRequestError extends Error {
   }
 }
 
+export class ConnectWiseIndeterminateWriteError extends Error {
+  constructor() {
+    super("ConnectWise write outcome could not be confirmed");
+    this.name = "ConnectWiseIndeterminateWriteError";
+  }
+}
+
+class ConnectWiseRedirectError extends Error {
+  constructor(status: number) {
+    super(
+      `ConnectWise redirected the request (${status}); redirects are not followed`,
+    );
+    this.name = "ConnectWiseRedirectError";
+  }
+}
+
 export class ConnectWiseDownloadError extends Error {
   constructor(readonly status: number) {
     super(`ConnectWise download failed (${status})`);
@@ -479,6 +495,7 @@ const SCHEDULE_ENTRY_OWNERSHIP_FIELDS = "id,member";
 // `_info` preserves the created/updated metadata exposed by the ticket projector.
 const SERVICE_TICKET_READ_FIELDS =
   "id,summary,company,board,status,priority,type,owner,contact,closedFlag,closedDate,dateResolved,_info";
+const SERVICE_TICKET_UPDATE_RESULT_FIELDS = SERVICE_TICKET_READ_FIELDS;
 const MEMBER_DETAIL_FIELDS = "id,name,firstName,lastName,email,phone,status";
 const MEMBER_SEARCH_FIELDS = "id,name,status";
 const COMPANY_SEARCH_FIELDS = "id,name,phoneNumber,addressLine1,status";
@@ -931,9 +948,7 @@ export function createConnectWiseClient(
           startedAtMs,
           "redirect_refused",
         );
-        throw new Error(
-          `ConnectWise redirected the request (${response.status}); redirects are not followed`,
-        );
+        throw new ConnectWiseRedirectError(response.status);
       }
       if (
         method === "GET" &&
@@ -2109,12 +2124,86 @@ export function createConnectWiseClient(
       if (operations.length === 0) {
         throw new Error("at least one service ticket update field is required");
       }
-      return requestJson(
-        "PATCH",
-        `/service/tickets/${ticketId}`,
-        undefined,
-        operations,
-      );
+      const confirmUpdate = (record: unknown): Record<string, unknown> => {
+        const verified = verifiedRecordIdentity(
+          record,
+          ticketId,
+          "service ticket",
+        );
+        const referenceId = (field: string): unknown => {
+          const value = verified[field];
+          return value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, unknown>).id
+            : undefined;
+        };
+        const confirmed =
+          (input.ownerId === undefined ||
+            referenceId("owner") === input.ownerId) &&
+          (input.statusId === undefined ||
+            referenceId("status") === input.statusId) &&
+          (input.boardId === undefined ||
+            referenceId("board") === input.boardId) &&
+          (input.priorityId === undefined ||
+            referenceId("priority") === input.priorityId) &&
+          (input.typeId === undefined ||
+            referenceId("type") === input.typeId) &&
+          (input.summary === undefined ||
+            verified.summary === input.summary.trim()) &&
+          (input.contactId === undefined ||
+            referenceId("contact") === input.contactId);
+        if (!confirmed) {
+          throw new Error(
+            "ConnectWise service ticket update could not be confirmed",
+          );
+        }
+        return verified;
+      };
+      const reconcile = async () => {
+        try {
+          return confirmUpdate(
+            await requestJson("GET", `/service/tickets/${ticketId}`, {
+              fields: SERVICE_TICKET_UPDATE_RESULT_FIELDS,
+            }),
+          );
+        } catch {
+          throw new ConnectWiseIndeterminateWriteError();
+        }
+      };
+
+      let response: unknown;
+      try {
+        response = await requestJson(
+          "PATCH",
+          `/service/tickets/${ticketId}`,
+          undefined,
+          operations,
+        );
+      } catch (error) {
+        if (error instanceof ConnectWiseRedirectError) {
+          // Redirects are refused before a response body is accepted.
+          throw error;
+        }
+        if (
+          error instanceof ConnectWiseRequestError &&
+          error.status !== 408 &&
+          error.status < 500
+        ) {
+          // Ordinary 4xx responses are explicit upstream rejections. A timeout
+          // or 5xx can arrive after an intermediary accepted the PATCH.
+          throw error;
+        }
+        // The request may have reached ConnectWise even if its response could
+        // not be read. Confirm stored state before reporting an indeterminate
+        // outcome that callers must not retry blindly.
+        return reconcile();
+      }
+      try {
+        return confirmUpdate(response);
+      } catch {
+        // A 2xx PATCH can carry an empty, stale, malformed, or misrouted body.
+        // Re-read the requested ticket and verify every requested change.
+        return reconcile();
+      }
     },
 
     async createScheduleEntry(input): Promise<unknown> {
