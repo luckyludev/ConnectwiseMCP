@@ -1,5 +1,5 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { createMcpHandler } from "agents/mcp/server";
+import { createMcpHandler } from "./mcp-handler";
 import { env as cloudflareEnv } from "cloudflare:workers";
 import {
   createEntraAuthHandler,

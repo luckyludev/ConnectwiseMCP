@@ -1,4 +1,4 @@
-import { createMcpHandler } from "agents/mcp/server";
+import { createMcpHandler } from "../src/mcp-handler";
 import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/mcp-server";
 import { TOOL_ACCESS } from "../src/tool-access";

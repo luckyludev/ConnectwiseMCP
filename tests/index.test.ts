@@ -13,7 +13,7 @@ vi.mock("cloudflare:workers", () => ({
   },
 }));
 
-vi.mock("agents/mcp/server", () => ({
+vi.mock("../src/mcp-handler", () => ({
   createMcpHandler: () => downstream.mcpHandler,
 }));
 
