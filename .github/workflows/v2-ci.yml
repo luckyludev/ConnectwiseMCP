@@ -56,3 +56,8 @@ jobs:
         env:
           STAGING_RELEASE_SHA: ${{ github.sha }}
         run: node scripts/staging-bundle-integrity.mjs dry-run
+      - name: Exercise verified production dry-run path
+        if: github.event_name != 'pull_request'
+        env:
+          PRODUCTION_RELEASE_SHA: ${{ github.sha }}
+        run: npm run dry-run:production
