@@ -2911,6 +2911,7 @@ describe("authenticated MCP transport", () => {
           company: { id: 250 },
           board: { id: 32, name: "Triage" },
           status: { id: 547, name: "New" },
+          owner: { id: 212, name: "Luis" },
           customFields: [{ value: "UPSTREAM_PRIVATE_VALUE" }],
           privateKey: "UPSTREAM_PRIVATE_VALUE",
         });
