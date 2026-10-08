@@ -6,7 +6,7 @@
 
 Before the change window, record these non-secret references in the approved operations system:
 
-- immutable, reviewed V2 release commit and successful CI run;
+- immutable, reviewed V2 release commit, successful canonical `v2-ci` run, and verified references to its attested staging and production release-evidence artifacts;
 - production V2 Worker target and canonical MCP URL;
 - legacy Docker/FastAPI rollback endpoint and last verified rollback-image commit/digest;
 - change window, monitoring window, support contacts, incident commander, and the single rollback decision authority;
