@@ -52,6 +52,27 @@ def _validate_runtime_restrictions(service: Any, name: str) -> None:
         raise ValueError(f"{name} must drop all Linux capabilities")
     if service.get("security_opt") != ["no-new-privileges:true"]:
         raise ValueError(f"{name} must forbid privilege acquisition")
+    if service.get("network_mode") == "host":
+        raise ValueError(f"{name} must not use host networking")
+
+
+def _validate_network_exposure(gateway: dict[str, Any], tunnel: dict[str, Any]) -> None:
+    expected_gateway_ports = [
+        {
+            "mode": "ingress",
+            "target": 8000,
+            "published": "8000",
+            "protocol": "tcp",
+            "host_ip": "127.0.0.1",
+        }
+    ]
+    if gateway.get("ports") != expected_gateway_ports:
+        raise ValueError(
+            "mcp-gateway must publish only TCP port 8000 on 127.0.0.1:8000"
+        )
+    tunnel_ports = tunnel.get("ports")
+    if tunnel_ports is not None and tunnel_ports != []:
+        raise ValueError("cloudflared must not publish host ports")
 
 
 def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> None:
@@ -64,6 +85,7 @@ def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> No
     tunnel_keys = _environment_keys(tunnel, "cloudflared")
     _validate_runtime_restrictions(gateway, "mcp-gateway")
     _validate_runtime_restrictions(tunnel, "cloudflared")
+    _validate_network_exposure(gateway, tunnel)
 
     tunnel_image = tunnel.get("image")
     if not isinstance(tunnel_image, str) or not CLOUDFLARED_IMAGE_PATTERN.fullmatch(
