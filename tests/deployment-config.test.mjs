@@ -845,9 +845,17 @@ describe("staging deployment configuration", () => {
       "--source-digest <FULL_RELEASE_COMMIT>",
       "--source-ref refs/heads/main",
       "python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py",
-      'verified_compose_dir=$(mktemp -d "${TMPDIR:-/tmp}/connectwise-rollback-compose.XXXXXXXX")',
-      'chmod 700 "$verified_compose_dir"',
+      "umask 077",
+      "artifact_dir=$(mktemp -d /tmp/connectwise-rollback-artifact.XXXXXXXX)",
+      '--dir "$artifact_dir"',
+      "trap 'rm -rf -- \"$artifact_dir\"' EXIT",
+      'verified_output_dir="$artifact_dir/verified"',
+      'mkdir -m 700 "$verified_output_dir"',
       '--verified-compose-output "$verified_compose"',
+      '--verified-archive-output "$verified_archive"',
+      '--verified-image-id-output "$verified_image_id"',
+      'gzip -dc "$verified_archive" | docker load',
+      'expected_image_id=$(cat "$verified_image_id")',
       '--file "$verified_compose"',
       "--project-directory <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway",
       "up -d --no-build --pull never mcp-gateway",
@@ -865,7 +873,7 @@ describe("staging deployment configuration", () => {
       "python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py",
     );
     const imageLoadOffset = runbook.indexOf(
-      "gzip -dc connectwise-legacy-rollback-image.tar.gz | docker load",
+      'gzip -dc "$verified_archive" | docker load',
     );
     expect(failFastOffset).toBeGreaterThan(-1);
     expect(provenanceOffset).toBeGreaterThan(failFastOffset);

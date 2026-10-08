@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 import verify_rollback_artifact as verifier
-
 from verify_rollback_artifact import (
     ARCHIVE_NAME,
     CHECKSUM_NAME,
@@ -82,18 +81,52 @@ def test_accepts_exact_bound_artifact_bundle(tmp_path):
     )
 
 
-def test_writes_exact_verified_compose_to_new_private_file(tmp_path):
+def test_writes_exact_verified_outputs_to_new_private_files(tmp_path):
     artifact_bundle(tmp_path)
     private_directory = tmp_path / "private"
     private_directory.mkdir(mode=0o700)
-    output = private_directory / "verified-compose.yml"
+    compose_output = private_directory / "verified-compose.yml"
+    archive_output = private_directory / "verified-archive.tar.gz"
+    image_id_output = private_directory / "verified-image-id"
 
     verify_rollback_artifact(
-        tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID, verified_compose_output=output
+        tmp_path,
+        RELEASE_COMMIT,
+        WORKFLOW_RUN_ID,
+        verified_compose_output=compose_output,
+        verified_archive_output=archive_output,
+        verified_image_id_output=image_id_output,
     )
 
-    assert output.read_bytes() == (tmp_path / COMPOSE_NAME).read_bytes()
-    assert stat.S_IMODE(output.stat().st_mode) == 0o400
+    assert compose_output.read_bytes() == (tmp_path / COMPOSE_NAME).read_bytes()
+    assert archive_output.read_bytes() == (tmp_path / ARCHIVE_NAME).read_bytes()
+    assert image_id_output.read_text(encoding="ascii") == f"{IMAGE_ID}\n"
+    for output in (compose_output, archive_output, image_id_output):
+        assert stat.S_IMODE(output.stat().st_mode) == 0o400
+
+
+def test_private_outputs_survive_download_path_replacement(tmp_path):
+    manifest = artifact_bundle(tmp_path)
+    private_directory = tmp_path / "private"
+    private_directory.mkdir(mode=0o700)
+    compose_output = private_directory / "verified-compose.yml"
+    archive_output = private_directory / "verified-archive.tar.gz"
+    image_id_output = private_directory / "verified-image-id"
+
+    verify_rollback_artifact(
+        tmp_path,
+        RELEASE_COMMIT,
+        WORKFLOW_RUN_ID,
+        verified_compose_output=compose_output,
+        verified_archive_output=archive_output,
+        verified_image_id_output=image_id_output,
+    )
+    (tmp_path / ARCHIVE_NAME).write_bytes(b"substituted archive")
+    manifest["imageId"] = "sha256:" + "c" * 64
+    write_manifest(tmp_path, manifest)
+
+    assert archive_output.read_bytes() == b"verified rollback image archive"
+    assert image_id_output.read_text(encoding="ascii") == f"{IMAGE_ID}\n"
 
 
 def test_rejects_existing_verified_compose_output(tmp_path):
@@ -273,31 +306,47 @@ def test_rejects_non_exact_manifest_schema(tmp_path, change):
 def test_rejects_malformed_checksum_file(tmp_path):
     artifact_bundle(tmp_path)
     checksum = (tmp_path / CHECKSUM_NAME).read_text(encoding="ascii")
-    (tmp_path / CHECKSUM_NAME).write_text(
-        checksum.replace("  ", " "), encoding="ascii"
-    )
+    (tmp_path / CHECKSUM_NAME).write_text(checksum.replace("  ", " "), encoding="ascii")
 
     with pytest.raises(ValueError, match="Checksum file"):
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
 
 
-def test_rejects_archive_digest_mismatch(tmp_path):
+def test_rejects_archive_digest_mismatch_and_removes_partial_private_copy(tmp_path):
     artifact_bundle(tmp_path)
     (tmp_path / ARCHIVE_NAME).write_bytes(b"tampered")
+    private_directory = tmp_path / "private"
+    private_directory.mkdir(mode=0o700)
+    archive_output = private_directory / "verified-archive.tar.gz"
 
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
-        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+        verify_rollback_artifact(
+            tmp_path,
+            RELEASE_COMMIT,
+            WORKFLOW_RUN_ID,
+            verified_archive_output=archive_output,
+        )
+    assert not archive_output.exists()
 
 
-def test_rejects_sbom_digest_mismatch(tmp_path):
+def test_rejects_sbom_digest_mismatch_and_removes_archive_output(tmp_path):
     artifact_bundle(tmp_path)
     (tmp_path / SBOM_NAME).write_text(
         '{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}\n',
         encoding="utf-8",
     )
+    private_directory = tmp_path / "private"
+    private_directory.mkdir(mode=0o700)
+    archive_output = private_directory / "verified-archive.tar.gz"
 
     with pytest.raises(ValueError, match="SBOM SHA-256 mismatch"):
-        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+        verify_rollback_artifact(
+            tmp_path,
+            RELEASE_COMMIT,
+            WORKFLOW_RUN_ID,
+            verified_archive_output=archive_output,
+        )
+    assert not archive_output.exists()
 
 
 @pytest.mark.parametrize(
