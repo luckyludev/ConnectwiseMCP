@@ -34,6 +34,8 @@ npx wrangler kv namespace list
 
 Record account/operator and release evidence in an approved secure operations record. Do not put sensitive command output in Git.
 
+Every successful canonical `main` `v2-ci` push, schedule, or manual run retains separate `v2-staging-release-<release-commit>` and `v2-production-release-<release-commit>` evidence artifacts for 90 days. Each contains the exact dry-run bundle, target manifest, reviewed `wrangler.jsonc`, locked npm dependency graph, and CycloneDX SBOM produced by that run. GitHub attestations bind every retained file to the canonical repository and `.github/workflows/v2-ci.yml`. Before approving a release, verify the run succeeded on the exact full commit, download the target artifact without renaming files, and run `gh attestation verify` on all five files with the canonical repository, signer workflow, `refs/heads/main`, and full source digest constraints. Independently confirm the manifest's `releaseCommit`, bundle digest, configuration digest, and deployment-runtime digest against the approved release record. An expired artifact, failed run, pull-request run, unattested file, renamed/substituted file, or local rebuild is not release evidence. Retention and attestation provide review evidence only; they do not authorize deployment or permit CI to receive Cloudflare credentials.
+
 ## 2. Inventory and isolate staging OAuth storage
 
 Namespaces are account-scoped, not domain-scoped. Before creating anything, inventory the approved Cloudflare account and the reviewed `env.staging` configuration:

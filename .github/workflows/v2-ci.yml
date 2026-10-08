@@ -56,6 +56,31 @@ jobs:
         env:
           STAGING_RELEASE_SHA: ${{ github.sha }}
         run: node scripts/staging-bundle-integrity.mjs dry-run
+      - name: Generate V2 CycloneDX SBOM
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: |
+          npm sbom --sbom-format=cyclonedx > "${{ runner.temp }}/connectwise-v2-release.cdx.json"
+          node -e "const fs=require('node:fs'); const sbom=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if(sbom.bomFormat!=='CycloneDX'||!Array.isArray(sbom.components)||sbom.components.length===0) process.exit(1)" "${{ runner.temp }}/connectwise-v2-release.cdx.json"
+      - name: Stage verified staging release evidence
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: |
+          mkdir -p "${{ runner.temp }}/release-evidence/staging"
+          cp dist/index.js "${{ runner.temp }}/release-evidence/staging/index.js"
+          cp dist/staging-bundle-manifest.json "${{ runner.temp }}/release-evidence/staging/staging-bundle-manifest.json"
+          cp wrangler.jsonc "${{ runner.temp }}/release-evidence/staging/wrangler.jsonc"
+          cp package-lock.json "${{ runner.temp }}/release-evidence/staging/package-lock.json"
+          cp "${{ runner.temp }}/connectwise-v2-release.cdx.json" "${{ runner.temp }}/release-evidence/staging/connectwise-v2-staging.cdx.json"
+      - name: Retain verified staging release evidence
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: v2-staging-release-${{ github.sha }}
+          path: ${{ runner.temp }}/release-evidence/staging
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
       - name: Exercise verified production dry-run path
         if: github.event_name != 'pull_request'
         env:
@@ -63,3 +88,62 @@ jobs:
         run: |
           git remote set-url origin https://github.com/luckyludev/ConnectwiseMCP.git
           npm run dry-run:production
+      - name: Stage verified production release evidence
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: |
+          mkdir -p "${{ runner.temp }}/release-evidence/production"
+          cp dist/index.js "${{ runner.temp }}/release-evidence/production/index.js"
+          cp dist/production-bundle-manifest.json "${{ runner.temp }}/release-evidence/production/production-bundle-manifest.json"
+          cp wrangler.jsonc "${{ runner.temp }}/release-evidence/production/wrangler.jsonc"
+          cp package-lock.json "${{ runner.temp }}/release-evidence/production/package-lock.json"
+          cp "${{ runner.temp }}/connectwise-v2-release.cdx.json" "${{ runner.temp }}/release-evidence/production/connectwise-v2-production.cdx.json"
+      - name: Retain verified production release evidence
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: v2-production-release-${{ github.sha }}
+          path: ${{ runner.temp }}/release-evidence/production
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
+
+  attest:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download verified staging release evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: v2-staging-release-${{ github.sha }}
+          path: release-evidence/staging
+      - name: Download verified production release evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: v2-production-release-${{ github.sha }}
+          path: release-evidence/production
+      - name: Attest verified staging release evidence
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            release-evidence/staging/index.js
+            release-evidence/staging/staging-bundle-manifest.json
+            release-evidence/staging/wrangler.jsonc
+            release-evidence/staging/package-lock.json
+            release-evidence/staging/connectwise-v2-staging.cdx.json
+      - name: Attest verified production release evidence
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            release-evidence/production/index.js
+            release-evidence/production/production-bundle-manifest.json
+            release-evidence/production/wrangler.jsonc
+            release-evidence/production/package-lock.json
+            release-evidence/production/connectwise-v2-production.cdx.json

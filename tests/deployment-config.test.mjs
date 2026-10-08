@@ -501,6 +501,194 @@ describe("staging deployment configuration", () => {
     );
   });
 
+  it("retains and attests canonical V2 release evidence", async () => {
+    const [workflow, stagingHowto, runbook] = await Promise.all([
+      readFile(
+        new URL("../.github/workflows/v2-ci.yml", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../docs/cloudflare-workers-staging-howto.md", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../docs/cutover-rollback-runbook.md", import.meta.url),
+        "utf8",
+      ),
+    ]);
+    const stagingDryRunOffset = workflow.indexOf(
+      "      - name: Exercise verified staging deployment path",
+    );
+    const sbomOffset = workflow.indexOf(
+      "      - name: Generate V2 CycloneDX SBOM",
+    );
+    const stageStagingOffset = workflow.indexOf(
+      "      - name: Stage verified staging release evidence",
+    );
+    const retainStagingOffset = workflow.indexOf(
+      "      - name: Retain verified staging release evidence",
+    );
+    const productionDryRunOffset = workflow.indexOf(
+      "      - name: Exercise verified production dry-run path",
+    );
+    const stageProductionOffset = workflow.indexOf(
+      "      - name: Stage verified production release evidence",
+    );
+    const retainProductionOffset = workflow.indexOf(
+      "      - name: Retain verified production release evidence",
+    );
+    const attestJobOffset = workflow.indexOf("\n  attest:\n");
+    const downloadStagingOffset = workflow.indexOf(
+      "      - name: Download verified staging release evidence",
+      attestJobOffset,
+    );
+    const downloadProductionOffset = workflow.indexOf(
+      "      - name: Download verified production release evidence",
+      downloadStagingOffset,
+    );
+    const attestStagingOffset = workflow.indexOf(
+      "      - name: Attest verified staging release evidence",
+      downloadProductionOffset,
+    );
+    const attestProductionOffset = workflow.indexOf(
+      "      - name: Attest verified production release evidence",
+      attestStagingOffset,
+    );
+    const canonicalRunCondition =
+      "if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')";
+    const uploadAction =
+      "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1";
+    const downloadAction =
+      "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1";
+    const attestAction =
+      "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2";
+
+    expect(stagingDryRunOffset).toBeGreaterThan(-1);
+    expect(sbomOffset).toBeGreaterThan(stagingDryRunOffset);
+    expect(stageStagingOffset).toBeGreaterThan(sbomOffset);
+    expect(retainStagingOffset).toBeGreaterThan(stageStagingOffset);
+    expect(productionDryRunOffset).toBeGreaterThan(retainStagingOffset);
+    expect(stageProductionOffset).toBeGreaterThan(productionDryRunOffset);
+    expect(retainProductionOffset).toBeGreaterThan(stageProductionOffset);
+    expect(attestJobOffset).toBeGreaterThan(retainProductionOffset);
+    expect(downloadStagingOffset).toBeGreaterThan(attestJobOffset);
+    expect(downloadProductionOffset).toBeGreaterThan(downloadStagingOffset);
+    expect(attestStagingOffset).toBeGreaterThan(downloadProductionOffset);
+    expect(attestProductionOffset).toBeGreaterThan(attestStagingOffset);
+    const sbomStep = workflow.slice(sbomOffset, stageStagingOffset);
+    const stageStagingStep = workflow.slice(
+      stageStagingOffset,
+      retainStagingOffset,
+    );
+    const retainStagingStep = workflow.slice(
+      retainStagingOffset,
+      productionDryRunOffset,
+    );
+    const stageProductionStep = workflow.slice(
+      stageProductionOffset,
+      retainProductionOffset,
+    );
+    const retainProductionStep = workflow.slice(
+      retainProductionOffset,
+      attestJobOffset,
+    );
+    const downloadStagingStep = workflow.slice(
+      downloadStagingOffset,
+      downloadProductionOffset,
+    );
+    const downloadProductionStep = workflow.slice(
+      downloadProductionOffset,
+      attestStagingOffset,
+    );
+    const attestStagingStep = workflow.slice(
+      attestStagingOffset,
+      attestProductionOffset,
+    );
+    const attestProductionStep = workflow.slice(attestProductionOffset);
+
+    expect(sbomStep).toContain(canonicalRunCondition);
+    expect(sbomStep).toContain(
+      'npm sbom --sbom-format=cyclonedx > "${{ runner.temp }}/connectwise-v2-release.cdx.json"',
+    );
+    expect(sbomStep).toContain("sbom.bomFormat!=='CycloneDX'");
+    expect(stageStagingStep).toContain(canonicalRunCondition);
+    expect(stageStagingStep).toContain(
+      'mkdir -p "${{ runner.temp }}/release-evidence/staging"',
+    );
+    expect(retainStagingStep).toContain(canonicalRunCondition);
+    expect(retainStagingStep).toContain(uploadAction);
+    expect(retainStagingStep).toContain(
+      "path: ${{ runner.temp }}/release-evidence/staging",
+    );
+    expect(retainStagingStep).toContain("retention-days: 90");
+    expect(stageProductionStep).toContain(canonicalRunCondition);
+    expect(stageProductionStep).toContain(
+      'mkdir -p "${{ runner.temp }}/release-evidence/production"',
+    );
+    expect(retainProductionStep).toContain(canonicalRunCondition);
+    expect(retainProductionStep).toContain(uploadAction);
+    expect(retainProductionStep).toContain(
+      "path: ${{ runner.temp }}/release-evidence/production",
+    );
+    expect(retainProductionStep).toContain("retention-days: 90");
+    expect(downloadStagingStep).toContain(downloadAction);
+    expect(downloadStagingStep).toContain(
+      "name: v2-staging-release-${{ github.sha }}",
+    );
+    expect(downloadProductionStep).toContain(downloadAction);
+    expect(downloadProductionStep).toContain(
+      "name: v2-production-release-${{ github.sha }}",
+    );
+    expect(attestStagingStep).toContain(attestAction);
+    expect(attestProductionStep).toContain(attestAction);
+    expect(workflow.split(canonicalRunCondition)).toHaveLength(7);
+    expect(workflow.split(uploadAction)).toHaveLength(3);
+    expect(workflow.split(downloadAction)).toHaveLength(3);
+    expect(workflow.split(attestAction)).toHaveLength(3);
+    expect(workflow).toMatch(
+      /^  attest:\n    needs: verify\n    if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\)\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      id-token: write\n      attestations: write$/mu,
+    );
+
+    for (const target of ["staging", "production"]) {
+      const manifest = `${target}-bundle-manifest.json`;
+      const sbom = `connectwise-v2-${target}.cdx.json`;
+      const artifact = `v2-${target}-release-\${{ github.sha }}`;
+      const evidenceFiles = [
+        "index.js",
+        manifest,
+        "wrangler.jsonc",
+        "package-lock.json",
+        sbom,
+      ];
+
+      const retainStep =
+        target === "staging" ? retainStagingStep : retainProductionStep;
+      const attestStep =
+        target === "staging" ? attestStagingStep : attestProductionStep;
+
+      expect(retainStep).toContain(`name: ${artifact}`);
+      expect(retainStep).toContain(
+        `path: \${{ runner.temp }}/release-evidence/${target}`,
+      );
+      expect(retainStep).toContain("retention-days: 90");
+      for (const file of evidenceFiles) {
+        expect(attestStep).toContain(`release-evidence/${target}/${file}`);
+      }
+    }
+    expect(stagingHowto).toContain(
+      "`v2-staging-release-<release-commit>` and `v2-production-release-<release-commit>` evidence artifacts for 90 days",
+    );
+    expect(stagingHowto).toContain(
+      "GitHub attestations bind every retained file to the canonical repository and `.github/workflows/v2-ci.yml`",
+    );
+    expect(stagingHowto).toContain(
+      "Retention and attestation provide review evidence only; they do not authorize deployment or permit CI to receive Cloudflare credentials",
+    );
+    expect(runbook).toContain(
+      "successful canonical `v2-ci` run, and verified references to its attested staging and production release-evidence artifacts",
+    );
+  });
+
   it("preserves remote variables and isolates staging OAuth storage", async () => {
     const [config, packageJson, productionEnvironment, stagingHowto] =
       await Promise.all([
