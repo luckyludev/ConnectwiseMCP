@@ -15,6 +15,15 @@ def compose_config() -> dict:
                 "environment": {name: f"gateway-{name}" for name in GATEWAY_ENVIRONMENT},
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
+                "ports": [
+                    {
+                        "mode": "ingress",
+                        "target": 8000,
+                        "published": "8000",
+                        "protocol": "tcp",
+                        "host_ip": "127.0.0.1",
+                    }
+                ],
             },
             "cloudflared": {
                 "image": "cloudflare/cloudflared:latest@sha256:"
@@ -62,6 +71,127 @@ def test_rejects_permissive_or_non_allowlisted_runtime_settings(
     config["services"][service][field] = value
 
     with pytest.raises(ValueError, match=error):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
+def test_rejects_host_networking(service):
+    config = compose_config()
+    config["services"][service]["network_mode"] = "host"
+
+    with pytest.raises(ValueError, match="must not use host networking"):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize(
+    "ports",
+    [
+        None,
+        [],
+        [
+            {
+                "mode": "ingress",
+                "target": 8000,
+                "published": "8000",
+                "protocol": "tcp",
+            }
+        ],
+        [
+            {
+                "mode": "ingress",
+                "target": 8000,
+                "published": "8000",
+                "protocol": "tcp",
+                "host_ip": "0.0.0.0",
+            }
+        ],
+        [
+            {
+                "mode": "ingress",
+                "target": 8000,
+                "published": "8000",
+                "protocol": "tcp",
+                "host_ip": "::",
+            }
+        ],
+        [
+            {
+                "mode": "ingress",
+                "target": 8001,
+                "published": "8000",
+                "protocol": "tcp",
+                "host_ip": "127.0.0.1",
+            }
+        ],
+        [
+            {
+                "mode": "ingress",
+                "target": 8000,
+                "published": "8001",
+                "protocol": "tcp",
+                "host_ip": "127.0.0.1",
+            }
+        ],
+        [
+            {
+                "mode": "ingress",
+                "target": 8000,
+                "published": "8000",
+                "protocol": "udp",
+                "host_ip": "127.0.0.1",
+            }
+        ],
+        [
+            {
+                "mode": "host",
+                "target": 8000,
+                "published": "8000",
+                "protocol": "tcp",
+                "host_ip": "127.0.0.1",
+            }
+        ],
+        [
+            {
+                "mode": "ingress",
+                "target": 8000,
+                "published": "8000",
+                "protocol": "tcp",
+                "host_ip": "127.0.0.1",
+            },
+            {
+                "mode": "ingress",
+                "target": 9000,
+                "published": "9000",
+                "protocol": "tcp",
+                "host_ip": "127.0.0.1",
+            },
+        ],
+    ],
+)
+def test_rejects_non_loopback_or_extra_gateway_ports(ports):
+    config = compose_config()
+    if ports is None:
+        del config["services"]["mcp-gateway"]["ports"]
+    else:
+        config["services"]["mcp-gateway"]["ports"] = ports
+
+    with pytest.raises(ValueError, match="publish only TCP port 8000"):
+        validate_compose_config(config)
+
+
+def test_rejects_published_cloudflared_ports():
+    config = compose_config()
+    config["services"]["cloudflared"]["ports"] = [
+        {
+            "mode": "ingress",
+            "target": 7844,
+            "published": "7844",
+            "protocol": "tcp",
+            "host_ip": "127.0.0.1",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="cloudflared must not publish host ports"):
         validate_compose_config(config)
 
 
