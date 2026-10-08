@@ -35,7 +35,7 @@ The rollback authority may roll back before a threshold is crossed when evidence
 
 ### Verified rollback image artifact
 
-Every successful canonical `main` run of `legacy-oauth-ci` retains `legacy-rollback-image-<release-commit>` for 90 days. The artifact contains the exact image archive that CI reloaded and smoke-tested, its SHA-256 checksum, a CycloneDX SBOM generated from that image, and a manifest binding both the archive and SBOM digests plus the image ID to the workflow commit and run. GitHub artifact attestations cryptographically bind all four files to the canonical repository and workflow identity. A pull-request merge commit, a failed run, an expired artifact, an unattested file, or a local rebuild is not rollback evidence.
+Every successful canonical `main` run of `legacy-oauth-ci` retains `legacy-rollback-image-<release-commit>` for 90 days. The artifact contains the exact image archive that CI reloaded and smoke-tested, its SHA-256 checksum, a CycloneDX SBOM generated from that image, the exact Compose descriptor validated by CI, and a manifest binding the archive, SBOM, and Compose digests plus the image ID to the workflow commit and run. GitHub artifact attestations cryptographically bind all five files to the canonical repository and workflow identity. A pull-request merge commit, a failed run, an expired artifact, an unattested file, or a local rebuild is not rollback evidence.
 
 Before the change window, select a successful `push`, `schedule`, or manually dispatched run on `refs/heads/main` whose full 40-character `headSha` is the reviewed release commit. Record its run URL/ID in the approved operations system. Download the artifact without renaming its files:
 
@@ -50,7 +50,8 @@ for artifact_file in \
   connectwise-legacy-rollback-image.tar.gz \
   connectwise-legacy-rollback-image.sha256 \
   connectwise-legacy-rollback-image.json \
-  connectwise-legacy-rollback-image.cdx.json
+  connectwise-legacy-rollback-image.cdx.json \
+  connectwise-legacy-rollback-compose.yml
 do
   gh attestation verify "$artifact_file" \
     --repo luckyludev/ConnectwiseMCP \
@@ -58,11 +59,16 @@ do
     --source-digest <FULL_RELEASE_COMMIT> \
     --source-ref refs/heads/main
 done
+verified_compose_dir=$(mktemp -d "${TMPDIR:-/tmp}/connectwise-rollback-compose.XXXXXXXX")
+chmod 700 "$verified_compose_dir"
+trap 'rm -rf -- "$verified_compose_dir"' EXIT
+verified_compose="$verified_compose_dir/docker-compose.yml"
 python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py \
-  . <FULL_RELEASE_COMMIT> <SUCCESSFUL_MAIN_RUN_ID>
+  . <FULL_RELEASE_COMMIT> <SUCCESSFUL_MAIN_RUN_ID> \
+  --verified-compose-output "$verified_compose"
 ```
 
-Each `gh attestation verify` command must pass against the canonical repository, signer workflow, release commit, and `refs/heads/main`; this rejects substituted or locally rebuilt files even when their filenames match. The local verifier then fails closed unless the artifact directory itself is a real directory, the manifest has the exact schema and expected release/run bindings, the four fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, the downloaded archive and bounded CycloneDX SBOM match their manifest SHA-256 digests, and the SBOM contains a component inventory. It opens the directory and files without following symlinks and keeps every validation/read bound to the same file descriptors, rejecting metadata changes observed during a read. Do not edit, rename, symlink, or hard-link the artifact directory or files to make verification pass, and do not continue when any provenance or local verification check fails.
+Each `gh attestation verify` command must pass against the canonical repository, signer workflow, release commit, and `refs/heads/main`; this rejects substituted or locally rebuilt files even when their filenames match. The local verifier then fails closed unless the artifact directory itself is a real directory, the manifest has the exact schema and expected release/run bindings, the five fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, the downloaded archive, bounded CycloneDX SBOM, and bounded Compose descriptor match their manifest SHA-256 digests, and the SBOM contains a component inventory. It opens the directory and files without following symlinks and keeps every validation/read bound to the same file descriptors, rejecting metadata changes observed during a read. In the same descriptor-bound operation, it writes the verified Compose bytes exactly once with mode `0400` into the new operator-owned mode-`0700` directory; every later Compose command uses only that private copy, and the exit trap removes it. Do not edit, rename, symlink, or hard-link the artifact directory or files, the private directory, or its verified copy to make verification pass, and do not continue when any provenance or local verification check fails.
 
 Load and verify the tested image before rehearsal and preflight:
 
@@ -75,19 +81,30 @@ test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)"
 The Compose file uses a separate `connectwise-legacy-rollback-local` tag for ordinary local builds. Rollback must stop and verify the existing tunnel is stopped, then use the loaded CI tag, start only the gateway, and prohibit rebuilds and pulls:
 
 ```bash
-cd <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway
 export MCP_GATEWAY_IMAGE=connectwise-legacy-rollback-ci
-docker compose stop cloudflared || exit 1
+docker compose \
+  --file "$verified_compose" \
+  --project-directory <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway \
+  stop cloudflared || exit 1
 if [ "$(docker inspect --format '{{.State.Running}}' connectwise-mcp-cloudflared 2>/dev/null || printf 'false')" != "false" ]; then
   exit 1
 fi
-docker compose up -d --no-build --pull never mcp-gateway
+docker compose \
+  --file "$verified_compose" \
+  --project-directory <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway \
+  up -d --no-build --pull never mcp-gateway
 actual_image_id=$(docker inspect --format '{{.Image}}' connectwise-mcp-gateway)
 if [ "$actual_image_id" != "$expected_image_id" ]; then
-  docker compose stop mcp-gateway
+  docker compose \
+    --file "$verified_compose" \
+    --project-directory <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway \
+    stop mcp-gateway
   exit 1
 fi
-docker compose up -d --no-build --pull never cloudflared
+docker compose \
+  --file "$verified_compose" \
+  --project-directory <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway \
+  up -d --no-build --pull never cloudflared
 ```
 
 The image-ID comparison must pass before starting the tunnel or routing any client. If it fails, immediately stop the gateway and investigate; do not retag, rebuild, or continue. Confirm the digest-pinned `cloudflared` image is available before the window. Do not use `--build`, retag a different image as `connectwise-legacy-rollback-ci`, or allow Compose to substitute another gateway image. If the artifact will expire before the monitoring window ends, manually dispatch `legacy-oauth-ci` against the unchanged reviewed `main` commit or retain the verified files in the approved artifact system before expiry; reverify the successful run's `headSha`, checksum, manifest, and loaded image ID afterward.

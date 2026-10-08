@@ -9,6 +9,7 @@ import verify_rollback_artifact as verifier
 from verify_rollback_artifact import (
     ARCHIVE_NAME,
     CHECKSUM_NAME,
+    COMPOSE_NAME,
     IMAGE_REPOSITORY,
     MANIFEST_NAME,
     SBOM_NAME,
@@ -39,8 +40,14 @@ def artifact_bundle(tmp_path):
         encoding="utf-8",
     )
     sbom_digest = hashlib.sha256(sbom.read_bytes()).hexdigest()
+    compose = tmp_path / COMPOSE_NAME
+    compose.write_text(
+        'services:\n  mcp-gateway:\n    image: "${MCP_GATEWAY_IMAGE}"\n',
+        encoding="utf-8",
+    )
+    compose_digest = hashlib.sha256(compose.read_bytes()).hexdigest()
     manifest = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "releaseCommit": RELEASE_COMMIT,
         "workflowRunId": WORKFLOW_RUN_ID,
         "imageRepository": IMAGE_REPOSITORY,
@@ -49,6 +56,8 @@ def artifact_bundle(tmp_path):
         "archiveSha256": digest,
         "sbom": SBOM_NAME,
         "sbomSha256": sbom_digest,
+        "compose": COMPOSE_NAME,
+        "composeSha256": compose_digest,
     }
     (tmp_path / MANIFEST_NAME).write_text(
         json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8"
@@ -71,6 +80,48 @@ def test_accepts_exact_bound_artifact_bundle(tmp_path):
     assert (
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID) == expected
     )
+
+
+def test_writes_exact_verified_compose_to_new_private_file(tmp_path):
+    artifact_bundle(tmp_path)
+    private_directory = tmp_path / "private"
+    private_directory.mkdir(mode=0o700)
+    output = private_directory / "verified-compose.yml"
+
+    verify_rollback_artifact(
+        tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID, verified_compose_output=output
+    )
+
+    assert output.read_bytes() == (tmp_path / COMPOSE_NAME).read_bytes()
+    assert stat.S_IMODE(output.stat().st_mode) == 0o400
+
+
+def test_rejects_existing_verified_compose_output(tmp_path):
+    artifact_bundle(tmp_path)
+    output = tmp_path / "existing.yml"
+    output.write_text("do not replace\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must not already exist"):
+        verify_rollback_artifact(
+            tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID, verified_compose_output=output
+        )
+    assert output.read_text(encoding="utf-8") == "do not replace\n"
+
+
+def test_rejects_symlinked_verified_compose_output_parent(tmp_path):
+    artifact_bundle(tmp_path)
+    real_directory = tmp_path / "real-private"
+    real_directory.mkdir()
+    linked_directory = tmp_path / "linked-private"
+    linked_directory.symlink_to(real_directory, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="non-symlink directory"):
+        verify_rollback_artifact(
+            tmp_path,
+            RELEASE_COMMIT,
+            WORKFLOW_RUN_ID,
+            verified_compose_output=linked_directory / "verified-compose.yml",
+        )
 
 
 def test_rejects_symlinked_artifact_directory(tmp_path):
@@ -193,6 +244,8 @@ def test_rejects_invalid_or_stale_expected_bindings(
         ("archiveSha256", "A" * 64, "archiveSha256"),
         ("sbom", "renamed.cdx.json", "sbom"),
         ("sbomSha256", "A" * 64, "sbomSha256"),
+        ("compose", "renamed.yml", "compose"),
+        ("composeSha256", "A" * 64, "composeSha256"),
     ],
 )
 def test_rejects_invalid_manifest_values(tmp_path, field, value, message):
@@ -294,8 +347,39 @@ def test_rejects_oversized_sbom(tmp_path, monkeypatch):
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
 
 
+def test_rejects_compose_digest_mismatch(tmp_path):
+    artifact_bundle(tmp_path)
+    (tmp_path / COMPOSE_NAME).write_text("services: {}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Compose file SHA-256 mismatch"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+def test_rejects_empty_compose(tmp_path):
+    manifest = artifact_bundle(tmp_path)
+    compose = tmp_path / COMPOSE_NAME
+    compose.write_bytes(b"")
+    manifest["composeSha256"] = hashlib.sha256(b"").hexdigest()
+    write_manifest(tmp_path, manifest)
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+def test_rejects_oversized_compose(tmp_path, monkeypatch):
+    manifest = artifact_bundle(tmp_path)
+    compose = tmp_path / COMPOSE_NAME
+    compose.write_bytes(b"123456789")
+    manifest["composeSha256"] = hashlib.sha256(compose.read_bytes()).hexdigest()
+    write_manifest(tmp_path, manifest)
+    monkeypatch.setattr(verifier, "MAX_COMPOSE_BYTES", 8)
+
+    with pytest.raises(ValueError, match="maximum allowed size"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
 @pytest.mark.parametrize(
-    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME]
+    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME, COMPOSE_NAME]
 )
 def test_rejects_missing_required_file(tmp_path, name):
     artifact_bundle(tmp_path)
@@ -306,7 +390,7 @@ def test_rejects_missing_required_file(tmp_path, name):
 
 
 @pytest.mark.parametrize(
-    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME]
+    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME, COMPOSE_NAME]
 )
 def test_rejects_symlinked_artifact_file(tmp_path, name):
     artifact_bundle(tmp_path)
@@ -320,7 +404,7 @@ def test_rejects_symlinked_artifact_file(tmp_path, name):
 
 
 @pytest.mark.parametrize(
-    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME]
+    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME, COMPOSE_NAME]
 )
 def test_rejects_hardlinked_artifact_file(tmp_path, name):
     artifact_bundle(tmp_path)

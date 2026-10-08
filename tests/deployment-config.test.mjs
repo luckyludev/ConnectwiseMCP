@@ -324,6 +324,7 @@ describe("legacy rollback image security", () => {
       "connectwise-legacy-rollback-image.sha256",
       "connectwise-legacy-rollback-image.json",
       "connectwise-legacy-rollback-image.cdx.json",
+      "connectwise-legacy-rollback-compose.yml",
     ];
 
     expect(buildOffset).toBeGreaterThan(-1);
@@ -359,6 +360,21 @@ describe("legacy rollback image security", () => {
       "sbom_sha256=$(sha256sum \"$sbom\" | cut -d ' ' -f 1)",
     );
     expect(workflow).toContain(
+      'git diff --exit-code "$GITHUB_SHA" -- deploy/http-gateway/docker-compose.yml',
+    );
+    expect(workflow).toContain(
+      'cp deploy/http-gateway/docker-compose.yml "$compose"',
+    );
+    expect(workflow).toContain(
+      'docker compose --env-file deploy/http-gateway/.env --file "$compose" --project-directory deploy/http-gateway config --format json > /tmp/packaged-rollback-compose.json',
+    );
+    expect(workflow).toContain(
+      "python deploy/http-gateway/tests/verify_compose_secret_isolation.py /tmp/packaged-rollback-compose.json",
+    );
+    expect(workflow).toContain(
+      "compose_sha256=$(sha256sum \"$compose\" | cut -d ' ' -f 1)",
+    );
+    expect(workflow).toContain(
       "docker save connectwise-legacy-rollback-ci | gzip -n -9",
     );
     expect(workflow).toContain(
@@ -371,7 +387,7 @@ describe("legacy rollback image security", () => {
       'printf \'%s  %s\\n\' "$archive_sha256" "$archive" > "$checksum"',
     );
     for (const manifestBinding of [
-      '"schemaVersion":2',
+      '"schemaVersion":3',
       '"releaseCommit":"%s"',
       '"workflowRunId":"%s"',
       '"imageRepository":"connectwise-legacy-rollback-ci"',
@@ -380,7 +396,9 @@ describe("legacy rollback image security", () => {
       '"archiveSha256":"%s"',
       '"sbom":"%s"',
       '"sbomSha256":"%s"',
-      '"$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" "$sbom" "$sbom_sha256"',
+      '"compose":"%s"',
+      '"composeSha256":"%s"',
+      '"$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" "$sbom" "$sbom_sha256" "$compose" "$compose_sha256"',
     ]) {
       expect(workflow).toContain(manifestBinding);
     }
@@ -827,8 +845,13 @@ describe("staging deployment configuration", () => {
       "--source-digest <FULL_RELEASE_COMMIT>",
       "--source-ref refs/heads/main",
       "python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py",
-      "docker compose up -d --no-build --pull never",
-      "docker compose stop cloudflared || exit 1",
+      'verified_compose_dir=$(mktemp -d "${TMPDIR:-/tmp}/connectwise-rollback-compose.XXXXXXXX")',
+      'chmod 700 "$verified_compose_dir"',
+      '--verified-compose-output "$verified_compose"',
+      '--file "$verified_compose"',
+      "--project-directory <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway",
+      "up -d --no-build --pull never mcp-gateway",
+      "stop cloudflared || exit 1",
       "The image-ID comparison must pass before starting the tunnel or routing any client",
       "A pull-request merge commit, a failed run, an expired artifact, an unattested file, or a local rebuild is not rollback evidence",
     ]) {
@@ -849,8 +872,17 @@ describe("staging deployment configuration", () => {
     expect(localVerificationOffset).toBeGreaterThan(provenanceOffset);
     expect(imageLoadOffset).toBeGreaterThan(localVerificationOffset);
     expect(runbook).toContain(
-      "for artifact_file in \\\n  connectwise-legacy-rollback-image.tar.gz \\\n  connectwise-legacy-rollback-image.sha256 \\\n  connectwise-legacy-rollback-image.json \\\n  connectwise-legacy-rollback-image.cdx.json\ndo",
+      "for artifact_file in \\\n  connectwise-legacy-rollback-image.tar.gz \\\n  connectwise-legacy-rollback-image.sha256 \\\n  connectwise-legacy-rollback-image.json \\\n  connectwise-legacy-rollback-image.cdx.json \\\n  connectwise-legacy-rollback-compose.yml\ndo",
     );
+    expect(runbook.match(/^\s*docker compose \\$/gmu)).toHaveLength(4);
+    expect(
+      runbook.match(/^\s*--file "\$verified_compose" \\$/gmu),
+    ).toHaveLength(4);
+    expect(
+      runbook.match(
+        /^\s*--project-directory <REVIEWED_REPOSITORY_CHECKOUT>\/deploy\/http-gateway \\$/gmu,
+      ),
+    ).toHaveLength(4);
     const legacyHealthOffset = runbook.indexOf(
       "Confirm the legacy gateway and tunnel are access-restricted and healthy",
     );
