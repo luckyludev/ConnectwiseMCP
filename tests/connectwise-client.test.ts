@@ -2521,7 +2521,11 @@ describe("ConnectWiseClient", () => {
             ? { body: JSON.parse((init as { body: string }).body) }
             : {}),
         });
-        return Response.json({ id: 777, dateStart: "2026-08-31T16:30:00Z" });
+        return Response.json({
+          id: 777,
+          member: { id: 149 },
+          dateStart: "2026-08-31T16:30:00Z",
+        });
       },
     });
 
@@ -2557,6 +2561,37 @@ describe("ConnectWiseClient", () => {
         dateEnd: "2026-08-31T17:00:00-04:00",
       }),
     ).rejects.toThrow(/objectId is required/);
+  });
+
+  it("rejects malformed or foreign created schedule entries", async () => {
+    const invalidResponses: unknown[] = [
+      null,
+      [],
+      {},
+      { id: 0, member: { id: 149 } },
+      { id: Number.MAX_SAFE_INTEGER + 1, member: { id: 149 } },
+      { id: 777 },
+      { id: 777, member: { id: "149" } },
+      { id: 777, member: { id: 150 } },
+    ];
+
+    for (const response of invalidResponses) {
+      let requests = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json(response);
+        },
+      });
+      await expect(
+        client.createScheduleEntry({
+          objectId: 1892065,
+          dateStart: "2026-08-31T12:30:00-04:00",
+          dateEnd: "2026-08-31T17:00:00-04:00",
+        }),
+      ).rejects.toThrow(/created schedule entry|assigned to mapped member/);
+      expect(requests).toBe(1);
+    }
   });
 
   it.each([
@@ -2597,7 +2632,7 @@ describe("ConnectWiseClient", () => {
   it("logs only allowlisted request metadata", async () => {
     const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
-      fetcher: async () => Response.json({}),
+      fetcher: async () => Response.json({ id: 777, member: { id: 149 } }),
       log: (message) => logs.push(message),
     });
     await client.createScheduleEntry({
