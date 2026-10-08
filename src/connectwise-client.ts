@@ -1040,6 +1040,43 @@ export function createConnectWiseClient(
     return record as Record<string, unknown>;
   }
 
+  function verifiedCreatedServiceTicket(
+    record: unknown,
+    summary: string,
+    references: Readonly<Record<string, number>>,
+  ): Record<string, unknown> {
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      throw new Error("Invalid ConnectWise created service ticket response");
+    }
+    const ticket = record as Record<string, unknown>;
+    if (
+      typeof ticket.id !== "number" ||
+      !Number.isSafeInteger(ticket.id) ||
+      ticket.id <= 0
+    ) {
+      throw new Error("Invalid ConnectWise created service ticket response");
+    }
+    if (ticket.summary !== summary) {
+      throw new Error(
+        "ConnectWise created service ticket does not match requested summary",
+      );
+    }
+    for (const [field, expectedId] of Object.entries(references)) {
+      const reference = ticket[field];
+      if (
+        !reference ||
+        typeof reference !== "object" ||
+        Array.isArray(reference) ||
+        (reference as Record<string, unknown>).id !== expectedId
+      ) {
+        throw new Error(
+          `ConnectWise created service ticket does not match requested ${field}`,
+        );
+      }
+    }
+    return ticket;
+  }
+
   function verifiedAgreementAdditionList(
     records: unknown,
     agreementId: number,
@@ -2033,15 +2070,26 @@ export function createConnectWiseClient(
         positiveId(input.ownerId, "owner ID");
         payload.owner = { id: input.ownerId };
       }
-      const created = (await requestJson(
-        "POST",
-        "/service/tickets",
-        undefined,
-        payload,
-      )) as Record<string, unknown>;
+      const created = verifiedCreatedServiceTicket(
+        await requestJson("POST", "/service/tickets", undefined, payload),
+        summary,
+        {
+          company: input.companyId,
+          board: boardId,
+          status: statusId,
+          ...(input.contactId !== undefined
+            ? { contact: input.contactId }
+            : {}),
+          ...(input.priorityId !== undefined
+            ? { priority: input.priorityId }
+            : {}),
+          ...(input.typeId !== undefined ? { type: input.typeId } : {}),
+          ...(input.ownerId !== undefined ? { owner: input.ownerId } : {}),
+        },
+      );
       if (input.initialDescription !== undefined) {
         const text = input.initialDescription.trim();
-        if (text.length > 0 && typeof created.id === "number") {
+        if (text.length > 0) {
           await requestJson(
             "POST",
             `/service/tickets/${created.id}/notes`,

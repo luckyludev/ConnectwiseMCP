@@ -2345,6 +2345,171 @@ describe("ConnectWiseClient", () => {
     }
   });
 
+  it("verifies a created service ticket before adding its initial description", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        calls.push({
+          method: (init as { method?: string } | undefined)?.method ?? "GET",
+          url: String(input),
+        });
+        if (String(input).endsWith("/service/tickets")) {
+          return Response.json({
+            id: 7001,
+            summary: "Daily Server Backup Audit",
+            company: { id: 250 },
+            board: { id: 32 },
+            status: { id: 547 },
+            contact: { id: 81 },
+            priority: { id: 4 },
+            type: { id: 12 },
+            owner: { id: 212 },
+          });
+        }
+        return Response.json({ id: 9001 });
+      },
+    });
+
+    await expect(
+      client.createServiceTicket({
+        companyId: 250,
+        summary: " Daily Server Backup Audit ",
+        contactId: 81,
+        priorityId: 4,
+        typeId: 12,
+        ownerId: 212,
+        initialDescription: "Verified description",
+      }),
+    ).resolves.toMatchObject({ id: 7001 });
+    expect(
+      calls.map(({ method, url }) => [method, new URL(url).pathname]),
+    ).toEqual([
+      ["POST", "/v4_6_release/apis/3.0/service/tickets"],
+      ["POST", "/v4_6_release/apis/3.0/service/tickets/7001/notes"],
+    ]);
+  });
+
+  it("rejects malformed or misrouted created service tickets without adding a note", async () => {
+    const invalidResponses: unknown[] = [
+      null,
+      [],
+      {},
+      { id: 0 },
+      { id: Number.MAX_SAFE_INTEGER + 1 },
+      {
+        id: 7001,
+        summary: "Wrong summary",
+        company: { id: 250 },
+        board: { id: 32 },
+        status: { id: 547 },
+        contact: { id: 81 },
+        priority: { id: 4 },
+        type: { id: 12 },
+        owner: { id: 212 },
+      },
+      {
+        id: 7001,
+        summary: "Daily Server Backup Audit",
+        company: { id: 251 },
+        board: { id: 32 },
+        status: { id: 547 },
+        contact: { id: 81 },
+        priority: { id: 4 },
+        type: { id: 12 },
+        owner: { id: 212 },
+      },
+      {
+        id: 7001,
+        summary: "Daily Server Backup Audit",
+        company: { id: 250 },
+        board: { id: 33 },
+        status: { id: 547 },
+        contact: { id: 81 },
+        priority: { id: 4 },
+        type: { id: 12 },
+        owner: { id: 212 },
+      },
+      {
+        id: 7001,
+        summary: "Daily Server Backup Audit",
+        company: { id: 250 },
+        board: { id: 32 },
+        status: { id: 548 },
+        contact: { id: 81 },
+        priority: { id: 4 },
+        type: { id: 12 },
+        owner: { id: 212 },
+      },
+      {
+        id: 7001,
+        summary: "Daily Server Backup Audit",
+        company: { id: 250 },
+        board: { id: 32 },
+        status: { id: 547 },
+        contact: { id: 82 },
+        priority: { id: 4 },
+        type: { id: 12 },
+        owner: { id: 212 },
+      },
+      {
+        id: 7001,
+        summary: "Daily Server Backup Audit",
+        company: { id: 250 },
+        board: { id: 32 },
+        status: { id: 547 },
+        contact: { id: 81 },
+        priority: { id: 5 },
+        type: { id: 12 },
+        owner: { id: 212 },
+      },
+      {
+        id: 7001,
+        summary: "Daily Server Backup Audit",
+        company: { id: 250 },
+        board: { id: 32 },
+        status: { id: 547 },
+        contact: { id: 81 },
+        priority: { id: 4 },
+        type: { id: 13 },
+        owner: { id: 212 },
+      },
+      {
+        id: 7001,
+        summary: "Daily Server Backup Audit",
+        company: { id: 250 },
+        board: { id: 32 },
+        status: { id: 547 },
+        contact: { id: 81 },
+        priority: { id: 4 },
+        type: { id: 12 },
+        owner: { id: 213 },
+      },
+    ];
+
+    for (const response of invalidResponses) {
+      const requests: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input) => {
+          requests.push(String(input));
+          return Response.json(response);
+        },
+      });
+      await expect(
+        client.createServiceTicket({
+          companyId: 250,
+          summary: "Daily Server Backup Audit",
+          contactId: 81,
+          priorityId: 4,
+          typeId: 12,
+          ownerId: 212,
+          initialDescription: "must not be posted",
+        }),
+      ).rejects.toThrow(/created service ticket/);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatch(/\/service\/tickets$/);
+    }
+  });
+
   it("creates a schedule entry with UTC conversion and an explicit conflict flag", async () => {
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
     const client = createConnectWiseClient(credentials, {
