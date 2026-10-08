@@ -53,6 +53,96 @@ describe("MCP handler OAuth context adapter", () => {
     expect(await response.text()).not.toContain("opaque-token");
   });
 
+  it("derives tool scopes from verified OAuth metadata, not token props", async () => {
+    const observed: unknown[] = [];
+    const handler = createMcpHandler(() => {
+      observed.push(getMcpAuthContext()?.props);
+      return server();
+    });
+
+    const response = await handler(
+      request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      {},
+      {
+        props: {
+          tenantId: "11111111-1111-4111-8111-111111111111",
+          objectId: "22222222-2222-4222-8222-222222222222",
+          profileAlias: "LUIS",
+          scopes: ["mcp:read", "mcp:write"],
+        },
+        auth: {
+          token: "opaque-token",
+          clientId: "approved-client",
+          scope: ["mcp:read"],
+        },
+      } as unknown as ExecutionContext,
+    );
+
+    expect(response.status).toBe(200);
+    expect(observed).toEqual([
+      {
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        objectId: "22222222-2222-4222-8222-222222222222",
+        profileAlias: "LUIS",
+        scopes: ["mcp:read"],
+      },
+    ]);
+  });
+
+  it("derives direct-fetch tool scopes from AuthInfo, not extra props", async () => {
+    const observed: unknown[] = [];
+    const handler = createMcpHandler(() => {
+      observed.push(getMcpAuthContext()?.props);
+      return server();
+    });
+
+    const response = await handler.fetch(
+      request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      {
+        authInfo: {
+          token: "opaque-token",
+          clientId: "approved-client",
+          scopes: ["mcp:read"],
+          extra: {
+            props: { profileAlias: "LUIS", scopes: ["mcp:write"] },
+          },
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(observed).toEqual([{ profileAlias: "LUIS", scopes: ["mcp:read"] }]);
+  });
+
+  it("never carries authentication props into a request without auth info", async () => {
+    const observed: unknown[] = [];
+    const handler = createMcpHandler(() => {
+      observed.push(getMcpAuthContext()?.props);
+      return server();
+    });
+    const authenticatedProps = { scopes: ["mcp:read"], profileAlias: "LUIS" };
+
+    const first = await handler.fetch(
+      request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      {
+        authInfo: {
+          token: "opaque-token",
+          clientId: "approved-client",
+          scopes: ["mcp:read"],
+          extra: { props: authenticatedProps },
+        },
+      },
+    );
+    const second = await handler.fetch(
+      request({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(observed).toEqual([authenticatedProps, undefined]);
+    expect(getMcpAuthContext()).toBeUndefined();
+  });
+
   it("rejects mismatched host and browser origins before server construction", async () => {
     const factory = vi.fn(server);
     const handler = createMcpHandler(factory);

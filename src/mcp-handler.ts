@@ -22,7 +22,6 @@ type WorkerOAuthContext = ExecutionContext & {
 type HandlerOptions = {
   route?: string;
   corsOptions?: false;
-  authContext?: McpAuthContext;
   legacy?: "stateless" | "reject";
   maxRequestBodySize?: number;
   onerror?: (error: Error) => void;
@@ -97,23 +96,30 @@ function authInfoFromWorkerContext(context: WorkerOAuthContext): AuthInfo {
     }
   }
 
+  const verifiedProps = { ...context.props, scopes: [...scope] };
   return {
     token,
     clientId,
     scopes: [...scope],
     ...(expiresAt === undefined ? {} : { expiresAt }),
     ...(resource === undefined ? {} : { resource }),
-    extra: { props: context.props },
+    extra: { props: verifiedProps },
   };
 }
 
 function authContextFromInfo(
   authInfo: AuthInfo | undefined,
-  fallback: McpAuthContext | undefined,
 ): McpAuthContext | undefined {
   const props = authInfo?.extra?.props;
-  if (plainRecord(props)) return { props };
-  return fallback;
+  const scopes: unknown = authInfo?.scopes;
+  if (
+    !plainRecord(props) ||
+    !Array.isArray(scopes) ||
+    !scopes.every((scope) => typeof scope === "string")
+  ) {
+    return undefined;
+  }
+  return { props: { ...props, scopes: [...scopes] } };
 }
 
 export function createMcpHandler(
@@ -123,7 +129,6 @@ export function createMcpHandler(
   const {
     route = "/mcp",
     corsOptions = false,
-    authContext,
     legacy = "stateless",
     maxRequestBodySize = 16 * 1024 * 1024,
     ...sdkOptions
@@ -134,7 +139,7 @@ export function createMcpHandler(
 
   const sdkHandler = createSdkMcpHandler(
     ({ authInfo }) => {
-      const resolved = authContextFromInfo(authInfo, authContext);
+      const resolved = authContextFromInfo(authInfo);
       return resolved ? constructWithAuthContext(resolved, factory) : factory();
     },
     { legacy, maxRequestBodySize, ...sdkOptions },
