@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ConnectWiseIndeterminateWriteError,
+  ConnectWisePartialServiceTicketCreateError,
   ConnectWiseRequestError,
   MAX_CONNECTWISE_RESPONSE_CHUNKS,
   MAX_IMAGE_UPLOAD_BYTES,
@@ -2427,6 +2428,48 @@ describe("ConnectWiseClient", () => {
       ["POST", "/v4_6_release/apis/3.0/service/tickets/7001/notes"],
     ]);
   });
+
+  for (const noteFailure of ["denied", "network"] as const) {
+    it(`reports the committed ticket ID when its initial description ${noteFailure} write fails`, async () => {
+      const calls: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input) => {
+          const url = String(input);
+          calls.push(url);
+          if (url.endsWith("/service/tickets")) {
+            return Response.json({
+              id: 7001,
+              summary: "Daily Server Backup Audit",
+              company: { id: 250 },
+              board: { id: 32 },
+              status: { id: 547 },
+            });
+          }
+          if (noteFailure === "network") {
+            throw new Error("secret transport detail");
+          }
+          return Response.json(
+            { privateKey: "secret response detail" },
+            { status: 403 },
+          );
+        },
+      });
+
+      const request = client.createServiceTicket({
+        companyId: 250,
+        summary: "Daily Server Backup Audit",
+        initialDescription: "Verified description",
+      });
+      await expect(request).rejects.toBeInstanceOf(
+        ConnectWisePartialServiceTicketCreateError,
+      );
+      await expect(request).rejects.toMatchObject({ ticketId: 7001 });
+      expect(calls.map((url) => new URL(url).pathname)).toEqual([
+        "/v4_6_release/apis/3.0/service/tickets",
+        "/v4_6_release/apis/3.0/service/tickets/7001/notes",
+      ]);
+    });
+  }
 
   it("rejects malformed or misrouted created service tickets without adding a note", async () => {
     const invalidResponses: unknown[] = [

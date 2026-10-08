@@ -2973,6 +2973,76 @@ describe("authenticated MCP transport", () => {
     expect(text).not.toContain("privateKey");
   });
 
+  it("create_service_ticket identifies a committed ticket when its initial description fails", async () => {
+    const calls: string[] = [];
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/service/tickets")) {
+        return Response.json({
+          id: 7001,
+          summary: "Daily Server Backup Audit",
+          company: { id: 250 },
+          board: { id: 32 },
+          status: { id: 547 },
+        });
+      }
+      return Response.json(
+        { privateKey: "UPSTREAM_PRIVATE_VALUE" },
+        { status: 403 },
+      );
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
+        },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_service_ticket",
+            arguments: {
+              companyId: 250,
+              summary: "Daily Server Backup Audit",
+              initialDescription: "Verified description",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+
+    expect(text).toContain("Service ticket 7001 was created");
+    expect(text).toContain("do not recreate the ticket");
+    expect(text).not.toContain("UPSTREAM_PRIVATE_VALUE");
+    expect(text).not.toContain("privateKey");
+    expect(calls.map((url) => new URL(url).pathname)).toEqual([
+      "/v4_6_release/apis/3.0/service/tickets",
+      "/v4_6_release/apis/3.0/service/tickets/7001/notes",
+    ]);
+  });
+
   it("update_service_ticket merges over GET and preserves unpassed fields", async () => {
     const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
     const fetcher: typeof fetch = async (input, init) => {

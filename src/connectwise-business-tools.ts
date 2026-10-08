@@ -5,6 +5,7 @@ import {
   CONNECTWISE_IMAGE_MIME_TYPES,
   ConnectWiseDownloadError,
   ConnectWiseIndeterminateWriteError,
+  ConnectWisePartialServiceTicketCreateError,
   ConnectWiseRequestError,
   ConnectWiseUserError,
   MAX_IMAGE_UPLOAD_BYTES,
@@ -238,6 +239,9 @@ function output(value: unknown): CallToolResult {
 }
 
 function failureMessage(error: unknown): string {
+  if (error instanceof ConnectWisePartialServiceTicketCreateError) {
+    return `Service ticket ${error.ticketId} was created, but its initial description was not added; do not recreate the ticket`;
+  }
   if (error instanceof ConnectWiseIndeterminateWriteError) {
     return "ConnectWise update outcome is unknown; verify the record before retrying";
   }

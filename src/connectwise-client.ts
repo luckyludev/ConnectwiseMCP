@@ -256,6 +256,15 @@ export class ConnectWiseIndeterminateWriteError extends Error {
   }
 }
 
+export class ConnectWisePartialServiceTicketCreateError extends Error {
+  constructor(readonly ticketId: number) {
+    super(
+      "ConnectWise service ticket was created but its initial description failed",
+    );
+    this.name = "ConnectWisePartialServiceTicketCreateError";
+  }
+}
+
 class ConnectWiseRedirectError extends Error {
   constructor(status: number) {
     super(
@@ -1044,7 +1053,7 @@ export function createConnectWiseClient(
     record: unknown,
     summary: string,
     references: Readonly<Record<string, number>>,
-  ): Record<string, unknown> {
+  ): Record<string, unknown> & { id: number } {
     if (!record || typeof record !== "object" || Array.isArray(record)) {
       throw new Error("Invalid ConnectWise created service ticket response");
     }
@@ -1074,7 +1083,7 @@ export function createConnectWiseClient(
         );
       }
     }
-    return ticket;
+    return ticket as Record<string, unknown> & { id: number };
   }
 
   function verifiedCreatedAgreementAddition(
@@ -2124,19 +2133,23 @@ export function createConnectWiseClient(
       if (input.initialDescription !== undefined) {
         const text = input.initialDescription.trim();
         if (text.length > 0) {
-          await requestJson(
-            "POST",
-            `/service/tickets/${created.id}/notes`,
-            undefined,
-            {
-              text,
-              detailDescriptionFlag: true,
-              internalAnalysisFlag: false,
-              resolutionFlag: false,
-              issueFlag: false,
-              externalFlag: true,
-            },
-          );
+          try {
+            await requestJson(
+              "POST",
+              `/service/tickets/${created.id}/notes`,
+              undefined,
+              {
+                text,
+                detailDescriptionFlag: true,
+                internalAnalysisFlag: false,
+                resolutionFlag: false,
+                issueFlag: false,
+                externalFlag: true,
+              },
+            );
+          } catch {
+            throw new ConnectWisePartialServiceTicketCreateError(created.id);
+          }
         }
       }
       return created;
