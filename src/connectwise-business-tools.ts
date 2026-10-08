@@ -9,6 +9,7 @@ import {
   ConnectWiseUserError,
   MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
+  decodeConnectWiseImageBase64,
   type ConnectWiseClient,
 } from "./connectwise-client";
 import {
@@ -394,8 +395,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
   "image/gif": "gif",
 };
-const MAX_IMAGE_BYTES = 10_000_000;
-const MAX_IMAGE_BASE64_CHARS = Math.ceil((MAX_IMAGE_BYTES / 3) * 4);
+const MAX_IMAGE_BASE64_CHARS = 4 * Math.ceil(MAX_IMAGE_UPLOAD_BYTES / 3);
 const IMAGE_DATA_URI_PATTERN =
   /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
 
@@ -403,9 +403,13 @@ const image = z
   .string()
   .min(1)
   .refine((value) => {
-    const match = IMAGE_DATA_URI_PATTERN.exec(value);
-    return match !== null && (match[2] ?? "").length <= MAX_IMAGE_BASE64_CHARS;
-  }, "Expected a base64 image data URI (png, jpeg, webp, or gif), 10 MB maximum");
+    try {
+      imageFromDataUri(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Expected a canonical base64 image data URI matching its declared type (png, jpeg, webp, or gif), 1 MB maximum");
 
 type ImagePayload = {
   base64: string;
@@ -424,9 +428,10 @@ function imageFromDataUri(value: string): ImagePayload {
     base64.length > MAX_IMAGE_BASE64_CHARS
   ) {
     throw new Error(
-      "Expected a base64 image data URI (png, jpeg, webp, or gif), 10 MB maximum",
+      "Expected a canonical base64 image data URI matching its declared type (png, jpeg, webp, or gif), 1 MB maximum",
     );
   }
+  decodeConnectWiseImageBase64(base64, mimeType);
   return {
     base64,
     mimeType,
@@ -930,7 +935,7 @@ export function registerConnectWiseBusinessTools(
     "create_ticket_note",
     {
       description:
-        "Create a service ticket note using the authenticated user's ConnectWise API member permissions. Pass image (base64 data URI) to attach it to the service ticket first and inline it in the note.",
+        "Create a service ticket note using the authenticated user's ConnectWise API member permissions. Pass image (canonical base64 data URI matching its declared type, 1 MB maximum) to attach it to the service ticket first and inline it in the note.",
       inputSchema: {
         ticketId: positiveId,
         text: z.string().trim().min(1).max(8_000),
@@ -1002,7 +1007,7 @@ export function registerConnectWiseBusinessTools(
     "attach_image_to_ticket",
     {
       description:
-        "Attach an image from the chat (base64 data URI, 10 MB maximum) to a ConnectWise service ticket using the authenticated user's ConnectWise API member permissions.",
+        "Attach an image from the chat (canonical base64 data URI matching its declared type, 1 MB maximum) to a ConnectWise service ticket using the authenticated user's ConnectWise API member permissions.",
       inputSchema: {
         ticketId: positiveId,
         image,
@@ -1049,7 +1054,7 @@ export function registerConnectWiseBusinessTools(
     "attach_image_to_time_entry",
     {
       description:
-        "Attach an image from the chat (base64 data URI, 10 MB maximum) to a ConnectWise time entry using the authenticated user's ConnectWise API member permissions.",
+        "Attach an image from the chat (canonical base64 data URI matching its declared type, 1 MB maximum) to a ConnectWise time entry using the authenticated user's ConnectWise API member permissions.",
       inputSchema: {
         timeEntryId: positiveId,
         image,

@@ -397,10 +397,13 @@ function hasImageSignature(
   );
 }
 
-function decodeImageBase64(
+export function decodeConnectWiseImageBase64(
   value: string,
-  mimeType: ConnectWiseImageMimeType,
+  mimeType: string,
 ): Uint8Array {
+  if (!isConnectWiseImageMimeType(mimeType)) {
+    throw new Error("Unsupported image MIME type");
+  }
   const maxEncodedLength = 4 * Math.ceil(MAX_IMAGE_UPLOAD_BYTES / 3);
   if (
     value.length < 4 ||
@@ -740,14 +743,6 @@ function targetedSearchPageSize(value: number): void {
   }
 }
 
-const ATTACHMENT_MIME_TYPES = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-]);
-
-const MAX_ATTACHMENT_BASE64_CHARS = Math.ceil((10_000_000 / 3) * 4);
 const SAFE_DOWNLOAD_MIME_TYPE =
   /^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,62}$/;
 
@@ -763,17 +758,10 @@ function attachmentPayload(input: {
   base64: string;
   mimeType: string;
 }): { filename: string; fileContents: string; fileType: string } {
-  if (!ATTACHMENT_MIME_TYPES.has(input.mimeType)) {
+  if (!isConnectWiseImageMimeType(input.mimeType)) {
     throw new Error("Unsupported image type");
   }
-  if (
-    typeof input.base64 !== "string" ||
-    input.base64.length === 0 ||
-    input.base64.length > MAX_ATTACHMENT_BASE64_CHARS ||
-    !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)
-  ) {
-    throw new Error("Invalid image contents");
-  }
+  decodeConnectWiseImageBase64(input.base64, input.mimeType);
   if (
     typeof input.filename !== "string" ||
     input.filename.length < 1 ||
@@ -1705,7 +1693,7 @@ export function createConnectWiseClient(
       }
       const fileName = imageFileName(input.fileName, input.mimeType);
       const title = imageTitle(input.title, fileName);
-      const bytes = decodeImageBase64(input.base64, input.mimeType);
+      const bytes = decodeConnectWiseImageBase64(input.base64, input.mimeType);
       if (recordType === "TimeEntry") {
         await assertTimeEntryOwnedByMappedMember(
           recordId,
