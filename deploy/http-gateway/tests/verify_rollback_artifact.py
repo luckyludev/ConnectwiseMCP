@@ -8,9 +8,10 @@ import json
 import os
 import re
 import stat
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, BinaryIO, Iterator
+from typing import Any, BinaryIO
 
 ARCHIVE_NAME = "connectwise-legacy-rollback-image.tar.gz"
 CHECKSUM_NAME = "connectwise-legacy-rollback-image.sha256"
@@ -63,7 +64,9 @@ def _artifact_directory(directory: Path) -> Iterator[int]:
     try:
         path_metadata = directory.lstat()
     except OSError as exc:
-        raise ValueError("Artifact directory does not exist or is not a directory") from exc
+        raise ValueError(
+            "Artifact directory does not exist or is not a directory"
+        ) from exc
     if stat.S_ISLNK(path_metadata.st_mode) or not stat.S_ISDIR(path_metadata.st_mode):
         raise ValueError("Artifact directory must be a non-symlink directory")
 
@@ -112,12 +115,15 @@ def _require_exact_string(value: Any, expected: str, field: str) -> None:
         raise ValueError(f"Manifest {field} does not match the expected value")
 
 
-def _write_private_verified_copy(output: Path, content: bytes) -> None:
+@contextmanager
+def _private_verified_output(
+    output: Path, label: str, created_outputs: set[Path]
+) -> Iterator[int]:
     parent = output.parent
     try:
         parent_metadata = parent.lstat()
     except OSError as exc:
-        raise ValueError("Verified Compose output parent does not exist") from exc
+        raise ValueError(f"Verified {label} output parent does not exist") from exc
     if (
         stat.S_ISLNK(parent_metadata.st_mode)
         or not stat.S_ISDIR(parent_metadata.st_mode)
@@ -125,7 +131,7 @@ def _write_private_verified_copy(output: Path, content: bytes) -> None:
         or stat.S_IMODE(parent_metadata.st_mode) & 0o077
     ):
         raise ValueError(
-            "Verified Compose output parent must be a private owned non-symlink directory"
+            f"Verified {label} output parent must be a private owned non-symlink directory"
         )
 
     parent_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -133,43 +139,70 @@ def _write_private_verified_copy(output: Path, content: bytes) -> None:
         parent_descriptor = os.open(parent, parent_flags)
     except OSError as exc:
         raise ValueError(
-            "Verified Compose output parent must be a non-symlink directory"
+            f"Verified {label} output parent must be a non-symlink directory"
         ) from exc
+    created = False
     try:
         opened_parent = os.fstat(parent_descriptor)
         if (
             opened_parent.st_dev != parent_metadata.st_dev
             or opened_parent.st_ino != parent_metadata.st_ino
         ):
-            raise ValueError("Verified Compose output parent changed")
+            raise ValueError(f"Verified {label} output parent changed")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         try:
             descriptor = os.open(output.name, flags, 0o400, dir_fd=parent_descriptor)
+            created = True
+            created_outputs.add(output)
         except OSError as exc:
-            raise ValueError("Verified Compose output must not already exist") from exc
+            raise ValueError(f"Verified {label} output must not already exist") from exc
         try:
-            remaining = memoryview(content)
-            while remaining:
-                written = os.write(descriptor, remaining)
-                if written <= 0:
-                    raise ValueError("Could not write verified Compose output")
-                remaining = remaining[written:]
+            yield descriptor
             os.fsync(descriptor)
             os.fchmod(descriptor, 0o400)
-        finally:
+        except BaseException:
             os.close(descriptor)
+            descriptor = -1
+            if created:
+                os.unlink(output.name, dir_fd=parent_descriptor)
+                created_outputs.discard(output)
+            raise
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
     finally:
         os.close(parent_descriptor)
 
 
-def verify_rollback_artifact(
+def _write_all(descriptor: int, content: bytes, label: str) -> None:
+    remaining = memoryview(content)
+    while remaining:
+        written = os.write(descriptor, remaining)
+        if written <= 0:
+            raise ValueError(f"Could not write verified {label} output")
+        remaining = remaining[written:]
+
+
+def _write_private_verified_copy(
+    output: Path, content: bytes, label: str, created_outputs: set[Path]
+) -> None:
+    with _private_verified_output(output, label, created_outputs) as descriptor:
+        _write_all(descriptor, content, label)
+
+
+def _verify_rollback_artifact(
     directory: Path,
     expected_release_commit: str,
     expected_workflow_run_id: str,
-    verified_compose_output: Path | None = None,
+    verified_compose_output: Path | None,
+    verified_archive_output: Path | None,
+    verified_image_id_output: Path | None,
+    created_outputs: set[Path],
 ) -> dict[str, Any]:
     if not COMMIT_RE.fullmatch(expected_release_commit):
-        raise ValueError("Expected release commit must be 40 lowercase hexadecimal characters")
+        raise ValueError(
+            "Expected release commit must be 40 lowercase hexadecimal characters"
+        )
     if not RUN_ID_RE.fullmatch(expected_workflow_run_id):
         raise ValueError("Expected workflow run ID must be a positive decimal integer")
 
@@ -181,10 +214,7 @@ def verify_rollback_artifact(
             raise ValueError("Manifest must be valid UTF-8 JSON") from exc
         if not isinstance(manifest, dict) or set(manifest) != MANIFEST_KEYS:
             raise ValueError("Manifest must contain exactly the required fields")
-        if (
-            type(manifest["schemaVersion"]) is not int
-            or manifest["schemaVersion"] != 3
-        ):
+        if type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 3:
             raise ValueError("Manifest schemaVersion must be 3")
 
         _require_exact_string(
@@ -202,18 +232,22 @@ def verify_rollback_artifact(
 
         image_id = manifest["imageId"]
         if type(image_id) is not str or not IMAGE_ID_RE.fullmatch(image_id):
-            raise ValueError("Manifest imageId must be a lowercase sha256 Docker image ID")
+            raise ValueError(
+                "Manifest imageId must be a lowercase sha256 Docker image ID"
+            )
         archive_sha256 = manifest["archiveSha256"]
         if type(archive_sha256) is not str or not SHA256_RE.fullmatch(archive_sha256):
-            raise ValueError("Manifest archiveSha256 must be a lowercase SHA-256 digest")
+            raise ValueError(
+                "Manifest archiveSha256 must be a lowercase SHA-256 digest"
+            )
         sbom_sha256 = manifest["sbomSha256"]
         if type(sbom_sha256) is not str or not SHA256_RE.fullmatch(sbom_sha256):
             raise ValueError("Manifest sbomSha256 must be a lowercase SHA-256 digest")
         compose_sha256 = manifest["composeSha256"]
-        if type(compose_sha256) is not str or not SHA256_RE.fullmatch(
-            compose_sha256
-        ):
-            raise ValueError("Manifest composeSha256 must be a lowercase SHA-256 digest")
+        if type(compose_sha256) is not str or not SHA256_RE.fullmatch(compose_sha256):
+            raise ValueError(
+                "Manifest composeSha256 must be a lowercase SHA-256 digest"
+            )
 
         try:
             with _regular_file(directory_descriptor, CHECKSUM_NAME) as checksum_file:
@@ -228,8 +262,18 @@ def verify_rollback_artifact(
 
         digest = hashlib.sha256()
         with _regular_file(directory_descriptor, ARCHIVE_NAME) as archive_file:
-            for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
-                digest.update(chunk)
+            if verified_archive_output is None:
+                for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            else:
+                with _private_verified_output(
+                    verified_archive_output, "archive", created_outputs
+                ) as archive_output:
+                    for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                        _write_all(archive_output, chunk, "archive")
+                    if digest.hexdigest() != archive_sha256:
+                        raise ValueError("Rollback image archive SHA-256 mismatch")
         if digest.hexdigest() != archive_sha256:
             raise ValueError("Rollback image archive SHA-256 mismatch")
 
@@ -272,8 +316,45 @@ def verify_rollback_artifact(
         if hashlib.sha256(compose_bytes).hexdigest() != compose_sha256:
             raise ValueError("Rollback Compose file SHA-256 mismatch")
         if verified_compose_output is not None:
-            _write_private_verified_copy(verified_compose_output, compose_bytes)
+            _write_private_verified_copy(
+                verified_compose_output, compose_bytes, "Compose", created_outputs
+            )
+        if verified_image_id_output is not None:
+            _write_private_verified_copy(
+                verified_image_id_output,
+                f"{image_id}\n".encode("ascii"),
+                "image ID",
+                created_outputs,
+            )
         return manifest
+
+
+def verify_rollback_artifact(
+    directory: Path,
+    expected_release_commit: str,
+    expected_workflow_run_id: str,
+    verified_compose_output: Path | None = None,
+    verified_archive_output: Path | None = None,
+    verified_image_id_output: Path | None = None,
+) -> dict[str, Any]:
+    created_outputs: set[Path] = set()
+    try:
+        return _verify_rollback_artifact(
+            directory,
+            expected_release_commit,
+            expected_workflow_run_id,
+            verified_compose_output,
+            verified_archive_output,
+            verified_image_id_output,
+            created_outputs,
+        )
+    except BaseException:
+        for output in created_outputs:
+            try:
+                output.unlink()
+            except FileNotFoundError:
+                pass
+        raise
 
 
 def main() -> None:
@@ -288,6 +369,16 @@ def main() -> None:
         type=Path,
         help="write the verified Compose bytes once to a new private file",
     )
+    parser.add_argument(
+        "--verified-archive-output",
+        type=Path,
+        help="write the descriptor-bound verified archive once to a new private file",
+    )
+    parser.add_argument(
+        "--verified-image-id-output",
+        type=Path,
+        help="write the verified manifest image ID once to a new private file",
+    )
     args = parser.parse_args()
     try:
         verify_rollback_artifact(
@@ -295,6 +386,8 @@ def main() -> None:
             args.expected_release_commit,
             args.expected_workflow_run_id,
             args.verified_compose_output,
+            args.verified_archive_output,
+            args.verified_image_id_output,
         )
     except ValueError as exc:
         raise SystemExit(f"rollback artifact verification failed: {exc}") from exc

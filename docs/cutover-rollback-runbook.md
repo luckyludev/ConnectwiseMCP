@@ -41,11 +41,14 @@ Before the change window, select a successful `push`, `schedule`, or manually di
 
 ```bash
 set -euo pipefail
+umask 077
+artifact_dir=$(mktemp -d /tmp/connectwise-rollback-artifact.XXXXXXXX)
+trap 'rm -rf -- "$artifact_dir"' EXIT
 gh run download <SUCCESSFUL_MAIN_RUN_ID> \
   --repo luckyludev/ConnectwiseMCP \
   --name legacy-rollback-image-<FULL_RELEASE_COMMIT> \
-  --dir rollback-image-<FULL_RELEASE_COMMIT>
-cd rollback-image-<FULL_RELEASE_COMMIT>
+  --dir "$artifact_dir"
+cd "$artifact_dir"
 for artifact_file in \
   connectwise-legacy-rollback-image.tar.gz \
   connectwise-legacy-rollback-image.sha256 \
@@ -59,22 +62,25 @@ do
     --source-digest <FULL_RELEASE_COMMIT> \
     --source-ref refs/heads/main
 done
-verified_compose_dir=$(mktemp -d "${TMPDIR:-/tmp}/connectwise-rollback-compose.XXXXXXXX")
-chmod 700 "$verified_compose_dir"
-trap 'rm -rf -- "$verified_compose_dir"' EXIT
-verified_compose="$verified_compose_dir/docker-compose.yml"
+verified_output_dir="$artifact_dir/verified"
+mkdir -m 700 "$verified_output_dir"
+verified_compose="$verified_output_dir/docker-compose.yml"
+verified_archive="$verified_output_dir/rollback-image.tar.gz"
+verified_image_id="$verified_output_dir/image-id"
 python3 <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway/tests/verify_rollback_artifact.py \
   . <FULL_RELEASE_COMMIT> <SUCCESSFUL_MAIN_RUN_ID> \
-  --verified-compose-output "$verified_compose"
+  --verified-compose-output "$verified_compose" \
+  --verified-archive-output "$verified_archive" \
+  --verified-image-id-output "$verified_image_id"
 ```
 
-Each `gh attestation verify` command must pass against the canonical repository, signer workflow, release commit, and `refs/heads/main`; this rejects substituted or locally rebuilt files even when their filenames match. The local verifier then fails closed unless the artifact directory itself is a real directory, the manifest has the exact schema and expected release/run bindings, the five fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, the downloaded archive, bounded CycloneDX SBOM, and bounded Compose descriptor match their manifest SHA-256 digests, and the SBOM contains a component inventory. It opens the directory and files without following symlinks and keeps every validation/read bound to the same file descriptors, rejecting metadata changes observed during a read. In the same descriptor-bound operation, it writes the verified Compose bytes exactly once with mode `0400` into the new operator-owned mode-`0700` directory; every later Compose command uses only that private copy, and the exit trap removes it. Do not edit, rename, symlink, or hard-link the artifact directory or files, the private directory, or its verified copy to make verification pass, and do not continue when any provenance or local verification check fails.
+Each `gh attestation verify` command must pass against the canonical repository, signer workflow, release commit, and `refs/heads/main`; this rejects substituted or locally rebuilt files even when their filenames match. The download, attestation checks, local verification, and later consumers stay inside one operator-owned private directory created directly under `/tmp`; its sticky parent prevents another OS account from replacing the directory between those stages. Run this procedure only from the dedicated operator account with no untrusted same-UID process or shared session. The local verifier then fails closed unless the artifact directory itself is a real directory, the manifest has the exact schema and expected release/run bindings, the five fixed artifact filenames are regular non-symlink single-link files, the image repository and image ID are valid, the checksum file has the exact expected syntax, the downloaded archive, bounded CycloneDX SBOM, and bounded Compose descriptor match their manifest SHA-256 digests, and the SBOM contains a component inventory. It opens the directory and files without following symlinks and keeps every validation/read bound to the same file descriptors, rejecting metadata changes observed during a read. In the same descriptor-bound operation, it writes the verified archive, image ID, and Compose bytes exactly once with mode `0400`; if any later bundle check or output write fails, it removes every output it created. Every later image-load, image-ID, and Compose command uses only those private copies, and the exit trap removes the whole private directory. Do not edit, rename, symlink, or hard-link the artifact directory or files, the private directory, or its verified outputs to make verification pass, and do not continue when any provenance or local verification check fails.
 
 Load and verify the tested image before rehearsal and preflight:
 
 ```bash
-gzip -dc connectwise-legacy-rollback-image.tar.gz | docker load
-expected_image_id=$(python3 -c 'import json; print(json.load(open("connectwise-legacy-rollback-image.json", encoding="utf-8"))["imageId"])')
+gzip -dc "$verified_archive" | docker load
+expected_image_id=$(cat "$verified_image_id")
 test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)" = "$expected_image_id"
 ```
 
