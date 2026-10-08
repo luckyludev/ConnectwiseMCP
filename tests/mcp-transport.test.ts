@@ -1,4 +1,4 @@
-import { createMcpHandler } from "../src/mcp-handler";
+import { createMcpHandler as createProductionMcpHandler } from "../src/mcp-handler";
 import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/mcp-server";
 import { TOOL_ACCESS } from "../src/tool-access";
@@ -37,6 +37,37 @@ function authProps(
     roles: [],
     scopes,
   };
+}
+
+type ProductionHandlerOptions = NonNullable<
+  Parameters<typeof createProductionMcpHandler>[1]
+>;
+
+function createMcpHandler(
+  factory: Parameters<typeof createProductionMcpHandler>[0],
+  options: ProductionHandlerOptions & {
+    authContext: { props: Record<string, unknown> };
+  },
+) {
+  const { authContext, ...productionOptions } = options;
+  const handler = createProductionMcpHandler(factory, productionOptions);
+  const scopes = Array.isArray(authContext.props.scopes)
+    ? authContext.props.scopes.filter(
+        (scope): scope is string => typeof scope === "string",
+      )
+    : [];
+  const productionFetch = handler.fetch;
+  return Object.assign(handler, {
+    fetch: (request: Request) =>
+      productionFetch(request, {
+        authInfo: {
+          token: "test-token",
+          clientId: "test-client",
+          scopes,
+          extra: { props: authContext.props },
+        },
+      }),
+  });
 }
 
 const env = {
