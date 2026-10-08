@@ -1148,7 +1148,11 @@ describe("ConnectWiseClient", () => {
       fetcher: async (input, init) => {
         capturedUrl = String(input);
         capturedInit = init;
-        return Response.json({ id: 44 });
+        return Response.json({
+          id: 44,
+          agreementId: 7,
+          product: { id: 8 },
+        });
       },
     });
 
@@ -1174,6 +1178,41 @@ describe("ConnectWiseClient", () => {
       description: "Managed service",
     });
   });
+
+  it.each([
+    null,
+    [],
+    {},
+    { id: 0, agreementId: 7, product: { id: 8 } },
+    { id: "44", agreementId: 7, product: { id: 8 } },
+    { id: 44, product: { id: 8 } },
+    { id: 44, agreementId: "7", product: { id: 8 } },
+    { id: 44, agreementId: 9, product: { id: 8 } },
+    { id: 44, agreementId: 7 },
+    { id: 44, agreementId: 7, product: [] },
+    { id: 44, agreementId: 7, product: { id: "8" } },
+    { id: 44, agreementId: 7, product: { id: 9 } },
+  ])(
+    "rejects an unverified created agreement addition: %j",
+    async (response) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(response),
+      });
+
+      await expect(
+        client.createAgreementAddition(7, {
+          productId: 8,
+          quantity: 2,
+          unitPrice: 15.5,
+          effectiveDate: "2026-08-28",
+          billableOption: "Billable",
+        }),
+      ).rejects.toThrow(
+        "Invalid ConnectWise created agreement addition response",
+      );
+    },
+  );
+
   it("builds fixed board, lookup, and member read routes", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {

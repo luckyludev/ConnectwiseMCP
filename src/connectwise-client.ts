@@ -1077,6 +1077,35 @@ export function createConnectWiseClient(
     return ticket;
   }
 
+  function verifiedCreatedAgreementAddition(
+    record: unknown,
+    agreementId: number,
+    productId: number,
+  ): Record<string, unknown> {
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      throw new Error(
+        "Invalid ConnectWise created agreement addition response",
+      );
+    }
+    const addition = record as Record<string, unknown>;
+    const product = addition.product;
+    if (
+      typeof addition.id !== "number" ||
+      !Number.isSafeInteger(addition.id) ||
+      addition.id <= 0 ||
+      addition.agreementId !== agreementId ||
+      !product ||
+      typeof product !== "object" ||
+      Array.isArray(product) ||
+      (product as Record<string, unknown>).id !== productId
+    ) {
+      throw new Error(
+        "Invalid ConnectWise created agreement addition response",
+      );
+    }
+    return addition;
+  }
+
   function verifiedAgreementAdditionList(
     records: unknown,
     agreementId: number,
@@ -1991,7 +2020,7 @@ export function createConnectWiseClient(
     async createAgreementAddition(agreementId, input): Promise<unknown> {
       positiveId(agreementId, "agreement ID");
       positiveId(input.productId, "product ID");
-      return requestJson(
+      const created = await requestJson(
         "POST",
         `/finance/agreements/${agreementId}/additions`,
         undefined,
@@ -2003,6 +2032,11 @@ export function createConnectWiseClient(
           billableOption: input.billableOption,
           ...(input.description ? { description: input.description } : {}),
         },
+      );
+      return verifiedCreatedAgreementAddition(
+        created,
+        agreementId,
+        input.productId,
       );
     },
 
