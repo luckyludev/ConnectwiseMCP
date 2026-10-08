@@ -45,6 +45,10 @@ async function createCheckout() {
       env: { staging: { name: "connectwise-staging-bundle-test-staging" } },
     }),
   );
+  const bin = join(cwd, "node_modules", ".bin");
+  await mkdir(bin, { recursive: true });
+  await writeFile(join(bin, "wrangler"), `#!${process.execPath}\n`);
+  await chmod(join(bin, "wrangler"), 0o755);
   git(cwd, ["init", "--quiet"]);
   git(cwd, ["config", "user.name", "Staging Bundle Test"]);
   git(cwd, ["config", "user.email", "staging-bundle@example.invalid"]);
@@ -67,6 +71,8 @@ function run(
   delete env.STAGING_CONFIG_SHA256;
   delete env.PRODUCTION_BUNDLE_SHA256;
   delete env.PRODUCTION_CONFIG_SHA256;
+  delete env.STAGING_DEPLOY_RUNTIME_SHA256;
+  delete env.PRODUCTION_DEPLOY_RUNTIME_SHA256;
   Object.assign(env, environmentOverrides);
   const releaseVariable =
     target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
@@ -87,6 +93,7 @@ async function stagingDeploymentDigests(cwd) {
   return {
     STAGING_BUNDLE_SHA256: manifest.sha256,
     STAGING_CONFIG_SHA256: manifest.configSha256,
+    STAGING_DEPLOY_RUNTIME_SHA256: manifest.runtimeSha256,
   };
 }
 
@@ -108,7 +115,7 @@ describe("staging bundle integrity", () => {
       expect(created.status, created.stderr).toBe(0);
       expect(created.stdout).toMatch(
         new RegExp(
-          `^Recorded staging bundle [0-9a-f]{64} and configuration [0-9a-f]{64} for ${head}\\.\\n$`,
+          `^Recorded staging bundle [0-9a-f]{64}, configuration [0-9a-f]{64}, and deployment runtime [0-9a-f]{64} for ${head}\\.\\n$`,
         ),
       );
       expect(verified.status, verified.stderr).toBe(0);
@@ -305,29 +312,115 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
     });
   });
 
-  it("passes the private verified copy to the real Wrangler CLI", async () => {
-    await withCheckout(async ({ cwd, head }) => {
+  it("uses an unambiguous deployment-runtime tree digest", async () => {
+    let firstDigest;
+    await withCheckout(async ({ cwd }) => {
       await writeFile(
-        join(cwd, "wrangler.jsonc"),
-        JSON.stringify({
-          name: "connectwise-staging-bundle-test",
-          compatibility_date: "2026-09-01",
-          env: { staging: { name: "connectwise-staging-bundle-test-staging" } },
-        }),
+        join(cwd, "node_modules", "a"),
+        Buffer.concat([
+          Buffer.from("file"),
+          Buffer.from([0]),
+          Buffer.from("b"),
+          Buffer.from([0]),
+          Buffer.from("420"),
+          Buffer.from([0]),
+          Buffer.from("payload"),
+        ]),
       );
-      await symlink(projectNodeModules, join(cwd, "node_modules"), "dir");
       expect(run(cwd, "create").status).toBe(0);
-
-      const result = run(cwd, "dry-run", head);
-
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toContain("--dry-run: exiting now.");
+      firstDigest = JSON.parse(
+        await readFile(
+          join(cwd, "dist", "staging-bundle-manifest.json"),
+          "utf8",
+        ),
+      ).runtimeSha256;
+    });
+    await withCheckout(async ({ cwd }) => {
+      await writeFile(join(cwd, "node_modules", "a"), "");
+      await writeFile(join(cwd, "node_modules", "b"), "payload");
+      expect(run(cwd, "create").status).toBe(0);
+      const secondDigest = JSON.parse(
+        await readFile(
+          join(cwd, "dist", "staging-bundle-manifest.json"),
+          "utf8",
+        ),
+      ).runtimeSha256;
+      expect(secondDigest).not.toBe(firstDigest);
     });
   });
 
+  it("rejects absolute deployment-runtime symlinks", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const targetPath = join(cwd, "node_modules", "target.js");
+      await writeFile(targetPath, "export {};\n");
+      await symlink(targetPath, join(cwd, "node_modules", "absolute-link.js"));
+
+      const result = run(cwd, "create");
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging deployment runtime link absolute-link.js must be relative.",
+      );
+    });
+  });
+
+  it("rejects a deployment runtime outside the release checkout", async () => {
+    await withCheckout(async ({ cwd }) => {
+      await rm(join(cwd, "node_modules"), { recursive: true, force: true });
+      await symlink(projectNodeModules, join(cwd, "node_modules"), "dir");
+
+      const result = run(cwd, "create");
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging deployment runtime must remain inside the checkout.",
+      );
+    });
+  });
+
+  it.each([
+    ["Wrangler shim", join("node_modules", ".bin", "wrangler")],
+    ["Wrangler implementation", join("node_modules", "wrangler", "cli.js")],
+  ])(
+    "rejects a mutated %s before exposing deployment credentials",
+    async (_label, runtimePath) => {
+      await withCheckout(async ({ cwd, head }) => {
+        if (runtimePath.includes(`${join("wrangler", "cli.js")}`)) {
+          await mkdir(join(cwd, "node_modules", "wrangler"), {
+            recursive: true,
+          });
+          await writeFile(
+            join(cwd, "node_modules", "wrangler", "cli.js"),
+            "export {};\n",
+          );
+        }
+        expect(run(cwd, "create").status).toBe(0);
+        const approvedDigests = await stagingDeploymentDigests(cwd);
+        const marker = join(cwd, "credential-was-exposed");
+        await writeFile(
+          join(cwd, runtimePath),
+          `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
+        );
+        await chmod(join(cwd, runtimePath), 0o755);
+
+        const result = run(cwd, "deploy", head, {
+          ...approvedDigests,
+          CLOUDFLARE_API_TOKEN: "credential-canary",
+        });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          "The staging deployment runtime does not match its release manifest.",
+        );
+        await expect(readFile(marker)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      });
+    },
+  );
+
   it("keeps Git and npm outside the credential-bearing deployment path", async () => {
     await withCheckout(async ({ cwd, head }) => {
-      expect(run(cwd, "create").status).toBe(0);
       const bin = join(cwd, "node_modules", ".bin");
       const wrangler = join(bin, "wrangler");
       const gitMarker = join(cwd, "git-was-invoked");
@@ -338,10 +431,11 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
       );
       await writeFile(
         wrangler,
-        `#!${process.execPath}\nif (process.env.CLOUDFLARE_API_TOKEN !== "credential-canary") process.exit(92);\n`,
+        `#!${process.execPath}\nif (process.env.CLOUDFLARE_API_TOKEN !== "credential-canary") process.exit(92);\nif (import.meta.url.includes(${JSON.stringify(join(cwd, "node_modules"))})) process.exit(93);\n`,
       );
       await chmod(join(bin, "git"), 0o755);
       await chmod(wrangler, 0o755);
+      expect(run(cwd, "create").status).toBe(0);
 
       const result = run(cwd, "deploy", head, {
         ...(await stagingDeploymentDigests(cwd)),
@@ -484,7 +578,7 @@ describe("production bundle integrity", () => {
 
       expect(created.status, created.stderr).toBe(0);
       expect(verified.status, verified.stderr).toBe(0);
-      expect(manifest.schemaVersion).toBe(3);
+      expect(manifest.schemaVersion).toBe(4);
       expect(manifest.target).toBe("production");
       expect(manifest.releaseCommit).toBe(head);
       expect(manifest.bundlePath).toBe("dist/index.js");
