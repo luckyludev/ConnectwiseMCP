@@ -6,6 +6,7 @@ const toolAuditReasons = [
   "lookup_failed",
   "connectwise_denied",
   "operation_failed",
+  "invalid_arguments",
 ] as const;
 const toolAuditNames = [
   "whoami",
@@ -60,6 +61,10 @@ const toolAuditReasonAllowlist: ReadonlySet<unknown> = new Set(
   toolAuditReasons,
 );
 const toolAuditNameAllowlist: ReadonlySet<unknown> = new Set(toolAuditNames);
+
+export function isToolAuditName(value: unknown): value is ToolAuditName {
+  return toolAuditNameAllowlist.has(value);
+}
 
 const entraIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

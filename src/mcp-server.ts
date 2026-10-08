@@ -18,6 +18,7 @@ import {
 import { registerConnectWiseBusinessTools } from "./connectwise-business-tools";
 import { hasMcpScopes } from "./auth-scopes";
 import { requiredMcpScopes } from "./tool-access";
+import { installInvalidArgumentAudit } from "./invalid-argument-audit";
 
 export type AuditedToolDependencies = {
   audit?: ToolAuditDependencies;
@@ -195,6 +196,7 @@ export function createMcpServer(
     name: "ConnectWise MCP v2",
     version: "2.0.0-alpha.1",
   });
+  installInvalidArgumentAudit(server, authProps, dependencies.audit);
 
   server.registerTool(
     "whoami",

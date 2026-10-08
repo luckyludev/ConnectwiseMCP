@@ -409,7 +409,14 @@ describe("authenticated MCP transport", () => {
   it.each([
     {
       name: "search_tickets_by_content",
-      arguments: { searchText: "printer\n", maxResults: 5 },
+      arguments: {
+        searchText: "AUDIT_SECRET_MARKER\n",
+        maxResults: 5,
+      },
+    },
+    {
+      name: "get_service_ticket",
+      arguments: { ticketId: "AUDIT_SECRET_TYPE_MARKER" },
     },
     {
       name: "search_tickets_by_content",
@@ -515,7 +522,19 @@ describe("authenticated MCP transport", () => {
       expect(eventStream).toContain("Invalid");
       expect(bindingReads).toEqual([]);
       expect(clientCreated).toBe(false);
-      expect(auditMessages).toEqual([]);
+      expect(auditMessages).toHaveLength(1);
+      expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+        profileAlias: "LUIS",
+        tool: name,
+        outcome: "denied",
+        reason: "invalid_arguments",
+      });
+      expect(auditMessages.join("\n")).not.toContain("printer");
+      expect(auditMessages.join("\n")).not.toContain("AUDIT_SECRET_MARKER");
+      expect(auditMessages.join("\n")).not.toContain(
+        "AUDIT_SECRET_TYPE_MARKER",
+      );
+      expect(auditMessages.join("\n")).not.toContain("Invalid");
     },
   );
 
