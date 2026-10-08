@@ -597,10 +597,10 @@ describe("staging deployment configuration", () => {
     );
     expect(stagingHowto).toContain("(cutover-rollback-runbook.md)");
     expect(checklist).toContain(
-      "staging release manifest binds both the generated regular, non-symlink, single-link `dist/index.js` bytes and the regular, non-symlink, single-link `wrangler.jsonc` bytes and SHA-256 digests",
+      "staging release manifest binds the generated regular, non-symlink, single-link `dist/index.js` bytes, reviewed `wrangler.jsonc` bytes, and complete installed deployment-runtime tree",
     );
     expect(checklist).toContain(
-      "passes only private read-only copies of those verified bytes to Wrangler while preserving configuration-relative path resolution",
+      "rejects any altered Wrangler shim or installed runtime file before credential exposure and passes only private read-only copies of the verified bundle and configuration bytes to Wrangler",
     );
     for (const requiredSection of [
       "## 1. Required change record",

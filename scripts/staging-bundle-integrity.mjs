@@ -8,16 +8,20 @@ import {
   fstatSync,
   fsyncSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
+  readdirSync,
+  readlinkSync,
   realpathSync,
   renameSync,
-  rmdirSync,
+  rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 
 const action = process.argv[2];
@@ -45,6 +49,7 @@ if (target === "production" && action === "deploy") {
 const DIST_PATH = "dist";
 const BUNDLE_PATH = "dist/index.js";
 const CONFIG_PATH = "wrangler.jsonc";
+const RUNTIME_PATH = "node_modules";
 const MANIFEST_PATH = `dist/${target}-bundle-manifest.json`;
 const releaseVariable =
   target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
@@ -56,6 +61,10 @@ const configDigestVariable =
   target === "production"
     ? "PRODUCTION_CONFIG_SHA256"
     : "STAGING_CONFIG_SHA256";
+const runtimeDigestVariable =
+  target === "production"
+    ? "PRODUCTION_DEPLOY_RUNTIME_SHA256"
+    : "STAGING_DEPLOY_RUNTIME_SHA256";
 const gitEnvironment = {
   ...Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
@@ -137,15 +146,23 @@ function validateDistDirectory() {
   }
 }
 
-function readRegularFile(path, label) {
+function readRegularFile(path, label, allowHardLinks = false, reject = fail) {
   let before;
   try {
     before = lstatSync(path);
   } catch {
-    fail(`${label} is missing.`);
+    reject(`${label} is missing.`);
   }
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
-    fail(`${label} must be a regular, non-symlink, single-link file.`);
+  if (
+    !before.isFile() ||
+    before.isSymbolicLink() ||
+    (!allowHardLinks && before.nlink !== 1)
+  ) {
+    reject(
+      allowHardLinks
+        ? `${label} must be a regular, non-symlink file.`
+        : `${label} must be a regular, non-symlink, single-link file.`,
+    );
   }
 
   let descriptor;
@@ -154,26 +171,27 @@ function readRegularFile(path, label) {
     const opened = fstatSync(descriptor);
     if (
       !opened.isFile() ||
-      opened.nlink !== 1 ||
+      (!allowHardLinks && opened.nlink !== 1) ||
       opened.dev !== before.dev ||
       opened.ino !== before.ino
     ) {
-      fail(`${label} changed while it was being opened.`);
+      reject(`${label} changed while it was being opened.`);
     }
     const content = readFileSync(descriptor);
     const after = fstatSync(descriptor);
     if (
-      after.nlink !== 1 ||
+      (!allowHardLinks && after.nlink !== 1) ||
+      after.nlink !== opened.nlink ||
       after.dev !== opened.dev ||
       after.ino !== opened.ino ||
       after.size !== opened.size ||
       after.mtimeMs !== opened.mtimeMs
     ) {
-      fail(`${label} changed while it was being read.`);
+      reject(`${label} changed while it was being read.`);
     }
     return content;
   } catch {
-    fail(`${label} could not be read safely.`);
+    reject(`${label} could not be read safely.`);
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
   }
@@ -181,6 +199,129 @@ function readRegularFile(path, label) {
 
 function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function deploymentRuntimeDigest(destinationRoot, copiedDirectories = []) {
+  const reject = destinationRoot
+    ? (message) => {
+        throw new Error(message);
+      }
+    : fail;
+  let root;
+  try {
+    root = realpathSync(RUNTIME_PATH);
+  } catch {
+    reject(`The ${target} deployment runtime is missing.`);
+  }
+  const checkout = `${realpathSync(process.cwd())}${sep}`;
+  if (root !== checkout.slice(0, -1) && !root.startsWith(checkout)) {
+    reject(`The ${target} deployment runtime must remain inside the checkout.`);
+  }
+
+  const digest = createHash("sha256");
+  let fileCount = 0;
+  let entryCount = 0;
+  const updateField = (value) => {
+    const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value));
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(bytes.length));
+    digest.update(length);
+    digest.update(bytes);
+  };
+  const updateRecord = (...fields) => {
+    updateField(fields.length);
+    for (const field of fields) updateField(field);
+    entryCount += 1;
+  };
+  const visit = (path, logicalPath, destination) => {
+    if (destination) {
+      mkdirSync(destination, { mode: 0o700 });
+      copiedDirectories.push(destination);
+    }
+    const before = readdirSync(path).sort();
+    updateRecord("directory", logicalPath);
+    for (const name of before) {
+      const child = join(path, name);
+      const childLogical = logicalPath ? `${logicalPath}/${name}` : name;
+      const copiedChild = destination ? join(destination, name) : undefined;
+      const stat = lstatSync(child);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) {
+        visit(child, childLogical, copiedChild);
+      } else if (stat.isFile() && !stat.isSymbolicLink()) {
+        const content = readRegularFile(
+          child,
+          `The ${target} deployment runtime file ${childLogical}`,
+          true,
+          reject,
+        );
+        const mode = stat.mode & 0o777;
+        updateRecord(
+          "file",
+          childLogical,
+          mode,
+          content.length,
+          sha256(content),
+        );
+        if (copiedChild) {
+          const descriptor = openSync(
+            copiedChild,
+            constants.O_WRONLY |
+              constants.O_CREAT |
+              constants.O_EXCL |
+              constants.O_NOFOLLOW,
+            mode & 0o111 ? 0o500 : 0o400,
+          );
+          try {
+            writeFileSync(descriptor, content);
+            fsyncSync(descriptor);
+          } finally {
+            closeSync(descriptor);
+          }
+        }
+        fileCount += 1;
+      } else if (stat.isSymbolicLink()) {
+        const link = readlinkSync(child);
+        if (isAbsolute(link)) {
+          reject(
+            `The ${target} deployment runtime link ${childLogical} must be relative.`,
+          );
+        }
+        const resolved = realpathSync(child);
+        if (resolved !== root && !resolved.startsWith(`${root}${sep}`)) {
+          reject(
+            `The ${target} deployment runtime link ${childLogical} leaves node_modules.`,
+          );
+        }
+        if (readlinkSync(child) !== link) {
+          reject(
+            `The ${target} deployment runtime link ${childLogical} changed while it was read.`,
+          );
+        }
+        updateRecord("link", childLogical, link);
+        if (copiedChild) symlinkSync(link, copiedChild);
+      } else {
+        reject(
+          `The ${target} deployment runtime entry ${childLogical} has an unsupported type.`,
+        );
+      }
+    }
+    const after = readdirSync(path).sort();
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      reject(`The ${target} deployment runtime changed while it was read.`);
+    }
+  };
+  visit(root, "", destinationRoot);
+  updateRecord("summary", entryCount, fileCount);
+  if (destinationRoot) {
+    for (const directory of copiedDirectories.reverse()) {
+      chmodSync(directory, 0o500);
+    }
+  }
+  return {
+    sha256: digest.digest("hex"),
+    fileCount,
+    copiedDirectories,
+  };
 }
 
 function verifyPrivateCopy(path, expectedBytes, label) {
@@ -211,6 +352,7 @@ function createManifest() {
     `The ${target} Wrangler configuration`,
   );
   requireReleaseConfig(config, releaseCommit);
+  const runtime = deploymentRuntimeDigest();
   if (existsSync(MANIFEST_PATH)) {
     const existing = lstatSync(MANIFEST_PATH);
     if (
@@ -224,7 +366,7 @@ function createManifest() {
     }
   }
   const manifest = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     target,
     releaseCommit,
     bundlePath: BUNDLE_PATH,
@@ -233,6 +375,9 @@ function createManifest() {
     configPath: CONFIG_PATH,
     configSha256: sha256(config),
     configSize: config.length,
+    runtimePath: RUNTIME_PATH,
+    runtimeSha256: runtime.sha256,
+    runtimeFileCount: runtime.fileCount,
   };
   const temporaryManifest = `${MANIFEST_PATH}.tmp-${process.pid}`;
   let descriptor;
@@ -256,7 +401,7 @@ function createManifest() {
     fail(`The ${target} bundle manifest could not be written safely.`);
   }
   process.stdout.write(
-    `Recorded ${target} bundle ${manifest.sha256} and configuration ${manifest.configSha256} for ${manifest.releaseCommit}.\n`,
+    `Recorded ${target} bundle ${manifest.sha256}, configuration ${manifest.configSha256}, and deployment runtime ${manifest.runtimeSha256} for ${manifest.releaseCommit}.\n`,
   );
 }
 
@@ -272,6 +417,7 @@ function verifyManifest() {
     for (const [name, value] of [
       [bundleDigestVariable, process.env[bundleDigestVariable]],
       [configDigestVariable, process.env[configDigestVariable]],
+      [runtimeDigestVariable, process.env[runtimeDigestVariable]],
     ]) {
       if (!value || !/^[0-9a-f]{64}$/u.test(value)) {
         fail(`${name} must be an approved lowercase SHA-256 digest.`);
@@ -298,6 +444,9 @@ function verifyManifest() {
     "configSha256",
     "configSize",
     "releaseCommit",
+    "runtimeFileCount",
+    "runtimePath",
+    "runtimeSha256",
     "schemaVersion",
     "sha256",
     "size",
@@ -309,17 +458,21 @@ function verifyManifest() {
     Array.isArray(manifest) ||
     JSON.stringify(Object.keys(manifest).sort()) !==
       JSON.stringify(expectedKeys) ||
-    manifest.schemaVersion !== 3 ||
+    manifest.schemaVersion !== 4 ||
     manifest.target !== target ||
     manifest.bundlePath !== BUNDLE_PATH ||
     manifest.configPath !== CONFIG_PATH ||
+    manifest.runtimePath !== RUNTIME_PATH ||
     !/^[0-9a-f]{40}$/u.test(manifest.releaseCommit ?? "") ||
     !/^[0-9a-f]{64}$/u.test(manifest.sha256 ?? "") ||
     !/^[0-9a-f]{64}$/u.test(manifest.configSha256 ?? "") ||
+    !/^[0-9a-f]{64}$/u.test(manifest.runtimeSha256 ?? "") ||
     !Number.isSafeInteger(manifest.size) ||
     manifest.size < 0 ||
     !Number.isSafeInteger(manifest.configSize) ||
-    manifest.configSize < 0
+    manifest.configSize < 0 ||
+    !Number.isSafeInteger(manifest.runtimeFileCount) ||
+    manifest.runtimeFileCount < 1
   ) {
     fail(`The ${target} bundle manifest has an invalid schema.`);
   }
@@ -329,7 +482,8 @@ function verifyManifest() {
   if (
     action === "deploy" &&
     (manifest.sha256 !== process.env[bundleDigestVariable] ||
-      manifest.configSha256 !== process.env[configDigestVariable])
+      manifest.configSha256 !== process.env[configDigestVariable] ||
+      manifest.runtimeSha256 !== process.env[runtimeDigestVariable])
   ) {
     fail(
       `The ${target} bundle manifest does not match the approved artifact digests.`,
@@ -353,16 +507,40 @@ function verifyManifest() {
     );
   }
   if (action !== "deploy") requireReleaseConfig(config, approvedRelease);
+  const runtime = deploymentRuntimeDigest();
+  if (
+    runtime.sha256 !== manifest.runtimeSha256 ||
+    runtime.fileCount !== manifest.runtimeFileCount
+  ) {
+    fail(
+      `The ${target} deployment runtime does not match its release manifest.`,
+    );
+  }
   process.stdout.write(
     `Verified ${target} bundle ${manifest.sha256} for ${approvedRelease}.\n`,
   );
-  return { bundle, config, releaseCommit: approvedRelease };
+  return {
+    bundle,
+    config,
+    releaseCommit: approvedRelease,
+    runtimeSha256: manifest.runtimeSha256,
+    runtimeFileCount: manifest.runtimeFileCount,
+  };
 }
 
-function deployVerifiedBundle(bundle, config, releaseCommit, dryRun) {
+function deployVerifiedBundle(
+  bundle,
+  config,
+  releaseCommit,
+  runtimeSha256,
+  runtimeFileCount,
+  dryRun,
+) {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), `connectwise-${target}-deploy-`),
   );
+  let runtimeDirectory;
+  let temporaryRuntime;
   const temporaryBundle = join(temporaryDirectory, "index.js");
   const temporaryEnvironment = join(temporaryDirectory, "empty.env");
   const emptyEnvironment = Buffer.alloc(0);
@@ -375,8 +553,13 @@ function deployVerifiedBundle(bundle, config, releaseCommit, dryRun) {
   let bundleWriteDescriptor;
   let environmentWriteDescriptor;
   let configWriteDescriptor;
+  let runtimeSnapshotDirectories = [];
   let result;
   try {
+    runtimeDirectory = mkdtempSync(
+      join(tmpdir(), `connectwise-${target}-runtime-`),
+    );
+    temporaryRuntime = join(runtimeDirectory, "node_modules");
     bundleWriteDescriptor = openSync(
       temporaryBundle,
       constants.O_WRONLY |
@@ -416,12 +599,29 @@ function deployVerifiedBundle(bundle, config, releaseCommit, dryRun) {
     closeSync(configWriteDescriptor);
     configWriteDescriptor = undefined;
 
+    const runtimeSnapshot = deploymentRuntimeDigest(
+      temporaryRuntime,
+      runtimeSnapshotDirectories,
+    );
+    if (
+      runtimeSnapshot.sha256 !== runtimeSha256 ||
+      runtimeSnapshot.fileCount !== runtimeFileCount
+    ) {
+      result = {
+        status: 1,
+        error: new Error(
+          `The ${target} deployment runtime changed before it could be isolated.`,
+        ),
+      };
+    }
+
     chmodSync(temporaryBundle, 0o400);
     chmodSync(temporaryEnvironment, 0o400);
     chmodSync(temporaryConfig, 0o400);
     chmodSync(temporaryDirectory, 0o500);
+    chmodSync(runtimeDirectory, 0o500);
 
-    const wrangler = join(process.cwd(), "node_modules", ".bin", "wrangler");
+    const wrangler = join(temporaryRuntime, ".bin", "wrangler");
     const arguments_ = [
       "deploy",
       temporaryBundle,
@@ -441,10 +641,12 @@ function deployVerifiedBundle(bundle, config, releaseCommit, dryRun) {
       `ConnectwiseMCP ${target} release ${releaseCommit}`,
     );
     if (dryRun) arguments_.push("--dry-run");
-    result = spawnSync(wrangler, arguments_, {
-      env: process.env,
-      stdio: "inherit",
-    });
+    if (!result) {
+      result = spawnSync(wrangler, arguments_, {
+        env: process.env,
+        stdio: "inherit",
+      });
+    }
 
     try {
       verifyPrivateCopy(temporaryBundle, bundle, "private bundle");
@@ -457,36 +659,48 @@ function deployVerifiedBundle(bundle, config, releaseCommit, dryRun) {
     } catch (error) {
       result = { status: 1, error };
     }
+  } catch (error) {
+    result = { status: 1, error };
   } finally {
     if (bundleWriteDescriptor !== undefined) closeSync(bundleWriteDescriptor);
     if (environmentWriteDescriptor !== undefined)
       closeSync(environmentWriteDescriptor);
     if (configWriteDescriptor !== undefined) closeSync(configWriteDescriptor);
+    let cleanupError;
+    if (runtimeDirectory) {
+      try {
+        const runtimeDirectoryStat = lstatSync(runtimeDirectory);
+        if (
+          !runtimeDirectoryStat.isDirectory() ||
+          runtimeDirectoryStat.isSymbolicLink()
+        ) {
+          throw new Error(`Private ${target} runtime directory type changed`);
+        }
+        for (const directory of runtimeSnapshotDirectories) {
+          chmodSync(directory, 0o700);
+        }
+        chmodSync(runtimeDirectory, 0o700);
+        rmSync(runtimeDirectory, { recursive: true, force: true });
+      } catch (error) {
+        if (error?.code !== "ENOENT") cleanupError = error;
+      }
+    }
     try {
       const directoryStat = lstatSync(temporaryDirectory);
       if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
         throw new Error(`Private ${target} directory type changed`);
       }
       chmodSync(temporaryDirectory, 0o700);
+      rmSync(temporaryDirectory, { recursive: true, force: true });
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-    for (const path of [
-      temporaryBundle,
-      temporaryEnvironment,
-      temporaryConfig,
-    ]) {
-      try {
-        unlinkSync(path);
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
-      }
+      if (error?.code !== "ENOENT" && !cleanupError) cleanupError = error;
     }
     try {
-      rmdirSync(temporaryDirectory);
+      unlinkSync(temporaryConfig);
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      if (error?.code !== "ENOENT" && !cleanupError) cleanupError = error;
     }
+    if (cleanupError) result = { status: 1, error: cleanupError };
   }
   if (result?.error || result?.status !== 0) {
     fail(
@@ -505,6 +719,8 @@ else {
       verified.bundle,
       verified.config,
       verified.releaseCommit,
+      verified.runtimeSha256,
+      verified.runtimeFileCount,
       action === "dry-run",
     );
   }
