@@ -3560,15 +3560,23 @@ describe("authenticated MCP transport", () => {
     expect(body).toContain('imageAttached\\":true');
   });
 
-  it("rejects non-image and oversized image payloads before any ConnectWise call", async () => {
-    let attachCalls = 0;
+  it("rejects invalid, mismatched, and oversized images for every chat-image path before any ConnectWise call", async () => {
+    let businessCalls = 0;
     const handler = createMcpHandler(
       () =>
         createMcpServer(env, {
           createBusinessClient: () =>
             businessClient({
               async attachImageToTicket() {
-                attachCalls += 1;
+                businessCalls += 1;
+                return { id: 1 };
+              },
+              async attachImageToTimeEntry() {
+                businessCalls += 1;
+                return { id: 1 };
+              },
+              async createTicketNote() {
+                businessCalls += 1;
                 return { id: 1 };
               },
             }),
@@ -3581,7 +3589,11 @@ describe("authenticated MCP transport", () => {
         },
       },
     );
-    const post = async (id: number, imageValue: string) => {
+    const post = async (
+      id: number,
+      name: string,
+      arguments_: Record<string, unknown>,
+    ) => {
       const response = await handler.fetch(
         new Request("http://localhost/mcp", {
           method: "POST",
@@ -3595,25 +3607,42 @@ describe("authenticated MCP transport", () => {
             jsonrpc: "2.0",
             id,
             method: "tools/call",
-            params: {
-              name: "attach_image_to_ticket",
-              arguments: { ticketId: 77, image: imageValue },
-            },
+            params: { name, arguments: arguments_ },
           }),
         }),
       );
       return { status: response.status, body: await response.text() };
     };
 
-    const badType = await post(6, "data:text/plain;base64,SGVsbG8=");
-    const oversized = await post(
-      7,
-      `data:image/png;base64,${"A".repeat(14_000_000)}`,
-    );
-    expect(badType.body).toContain("image data URI");
-    expect(oversized.body).toContain("image data URI");
-    expect(badType.body).not.toContain('\\"id\\":1');
-    expect(attachCalls).toBe(0);
+    const cases = [
+      await post(6, "attach_image_to_ticket", {
+        ticketId: 77,
+        image: "data:text/plain;base64,SGVsbG8=",
+      }),
+      await post(7, "attach_image_to_ticket", {
+        ticketId: 77,
+        image: "data:image/png;base64,SGVsbG8=",
+      }),
+      await post(8, "attach_image_to_ticket", {
+        ticketId: 77,
+        image: `data:image/png;base64,${"A".repeat(1_333_340)}`,
+      }),
+      await post(9, "attach_image_to_time_entry", {
+        timeEntryId: 42,
+        image: "data:image/png;base64,SGVsbG8=",
+      }),
+      await post(10, "create_ticket_note", {
+        ticketId: 77,
+        text: "Do not create this note",
+        image: "data:image/png;base64,SGVsbG8=",
+      }),
+    ];
+
+    for (const result of cases) {
+      expect(result.body).toContain("canonical base64 image data URI");
+      expect(result.body).not.toContain('\\"id\\":1');
+    }
+    expect(businessCalls).toBe(0);
   });
 
   it("rejects reversed agreement search dates before a ConnectWise call", async () => {

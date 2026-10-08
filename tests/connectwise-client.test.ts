@@ -5,6 +5,7 @@ import {
   MAX_CONNECTWISE_RESPONSE_CHUNKS,
   MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
+  decodeConnectWiseImageBase64,
 } from "../src/connectwise-client";
 import type { ConnectWiseCredentials } from "../src/connectwise-profile";
 
@@ -3020,7 +3021,7 @@ describe("ConnectWiseClient", () => {
     await expect(
       attachmentClient.attachImageToTimeEntry(42, {
         filename: "image.png",
-        base64: "AAAA",
+        base64: "iVBORw0KGgo=",
         mimeType: "image/png",
       }),
     ).rejects.toThrow("ConnectWise record is not assigned to mapped member");
@@ -3071,7 +3072,7 @@ describe("ConnectWiseClient", () => {
           writeForm === "attachment"
             ? client.attachImageToTimeEntry(42, {
                 filename: "image.png",
-                base64: "AAAA",
+                base64: "iVBORw0KGgo=",
                 mimeType: "image/png",
               })
             : client.uploadImageDocument("TimeEntry", 42, {
@@ -3105,7 +3106,7 @@ describe("ConnectWiseClient", () => {
 
     await client.attachImageToTimeEntry(42, {
       filename: "image.png",
-      base64: "AAAA",
+      base64: "iVBORw0KGgo=",
       mimeType: "image/png",
     });
     await client.uploadImageDocument("TimeEntry", 42, {
@@ -3585,6 +3586,57 @@ describe("ConnectWiseClient", () => {
     expect(requests).toBe(1);
   });
 
+  it("enforces image signatures, canonical base64, and exact decoded-size bounds", () => {
+    const signatures = [
+      ["image/png", [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]],
+      ["image/jpeg", [0xff, 0xd8, 0xff]],
+      ["image/gif", [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]],
+      ["image/gif", [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]],
+      [
+        "image/webp",
+        [
+          0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42,
+          0x50,
+        ],
+      ],
+    ] as const;
+    const binary = (bytes: readonly number[]) => String.fromCharCode(...bytes);
+
+    for (const [mimeType, signature] of signatures) {
+      expect(
+        decodeConnectWiseImageBase64(btoa(binary(signature)), mimeType),
+      ).toEqual(new Uint8Array(signature));
+    }
+
+    for (const nonCanonical of [
+      "iVBORw0KGgo",
+      "iVBORw0KGgo===",
+      "iVBORw0K Ggo=",
+      "iVBORw0KGgp=",
+    ]) {
+      expect(() =>
+        decodeConnectWiseImageBase64(nonCanonical, "image/png"),
+      ).toThrow();
+    }
+
+    const pngSignature = binary(signatures[0][1]);
+    const exactLimit = btoa(
+      pngSignature + "\0".repeat(MAX_IMAGE_UPLOAD_BYTES - pngSignature.length),
+    );
+    expect(decodeConnectWiseImageBase64(exactLimit, "image/png")).toHaveLength(
+      MAX_IMAGE_UPLOAD_BYTES,
+    );
+    expect(() =>
+      decodeConnectWiseImageBase64(
+        btoa(
+          pngSignature +
+            "\0".repeat(MAX_IMAGE_UPLOAD_BYTES - pngSignature.length + 1),
+        ),
+        "image/png",
+      ),
+    ).toThrow("Invalid or oversized image data");
+  });
+
   const imagePayload = {
     filename: "shot.png",
     base64: "iVBORw0KGgo=",
@@ -3666,7 +3718,22 @@ describe("ConnectWiseClient", () => {
         ...imagePayload,
         base64: "not base64!",
       }),
-    ).rejects.toThrow("Invalid image contents");
+    ).rejects.toThrow("Invalid or oversized image data");
+    await expect(
+      client.attachImageToTicket(77, {
+        ...imagePayload,
+        base64: "SGVsbG8=",
+      }),
+    ).rejects.toThrow("does not match the declared MIME type");
+    await expect(
+      client.attachImageToTicket(77, {
+        ...imagePayload,
+        base64: btoa(
+          String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a) +
+            "A".repeat(MAX_IMAGE_UPLOAD_BYTES - 7),
+        ),
+      }),
+    ).rejects.toThrow("Invalid or oversized image data");
     await expect(
       client.attachImageToTimeEntry(42, {
         ...imagePayload,

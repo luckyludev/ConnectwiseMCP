@@ -136,8 +136,21 @@ describe("prepareMcpRequest", () => {
     expect(streamed.cancelled()).toBe(1);
   });
 
-  it("preserves the largest supported model-visible image payload", async () => {
-    const image = `data:image/png;base64,${"A".repeat(13_333_334)}`;
+  it("preserves a canonical image payload at the exact 1 MB limit", async () => {
+    const pngSignature = String.fromCharCode(
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    );
+    const base64 = btoa(
+      pngSignature + "\0".repeat(1_000_000 - pngSignature.length),
+    );
+    const image = `data:image/png;base64,${base64}`;
     const rawBody = JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
