@@ -168,13 +168,19 @@ jobs:
           manifest=connectwise-legacy-rollback-image.json
           checksum=connectwise-legacy-rollback-image.sha256
           sbom=connectwise-legacy-rollback-image.cdx.json
+          compose=connectwise-legacy-rollback-compose.yml
+          git diff --exit-code "$GITHUB_SHA" -- deploy/http-gateway/docker-compose.yml
+          cp deploy/http-gateway/docker-compose.yml "$compose"
+          docker compose --env-file deploy/http-gateway/.env --file "$compose" --project-directory deploy/http-gateway config --format json > /tmp/packaged-rollback-compose.json
+          python deploy/http-gateway/tests/verify_compose_secret_isolation.py /tmp/packaged-rollback-compose.json
           image_id=$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)
           docker save connectwise-legacy-rollback-ci | gzip -n -9 > "$archive"
           archive_sha256=$(sha256sum "$archive" | cut -d ' ' -f 1)
           sbom_sha256=$(sha256sum "$sbom" | cut -d ' ' -f 1)
+          compose_sha256=$(sha256sum "$compose" | cut -d ' ' -f 1)
           printf '%s  %s\n' "$archive_sha256" "$archive" > "$checksum"
-          printf '{"schemaVersion":2,"releaseCommit":"%s","workflowRunId":"%s","imageRepository":"connectwise-legacy-rollback-ci","imageId":"%s","archive":"%s","archiveSha256":"%s","sbom":"%s","sbomSha256":"%s"}\n' \
-            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" "$sbom" "$sbom_sha256" > "$manifest"
+          printf '{"schemaVersion":3,"releaseCommit":"%s","workflowRunId":"%s","imageRepository":"connectwise-legacy-rollback-ci","imageId":"%s","archive":"%s","archiveSha256":"%s","sbom":"%s","sbomSha256":"%s","compose":"%s","composeSha256":"%s"}\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" "$sbom" "$sbom_sha256" "$compose" "$compose_sha256" > "$manifest"
       - name: Verify packaged rollback artifact bindings and checksum
         run: >-
           python deploy/http-gateway/tests/verify_rollback_artifact.py
@@ -199,6 +205,7 @@ jobs:
             connectwise-legacy-rollback-image.sha256
             connectwise-legacy-rollback-image.json
             connectwise-legacy-rollback-image.cdx.json
+            connectwise-legacy-rollback-compose.yml
           if-no-files-found: error
           compression-level: 0
           overwrite: false
@@ -228,3 +235,4 @@ jobs:
             connectwise-legacy-rollback-image.sha256
             connectwise-legacy-rollback-image.json
             connectwise-legacy-rollback-image.cdx.json
+            connectwise-legacy-rollback-compose.yml
