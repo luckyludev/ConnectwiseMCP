@@ -2243,12 +2243,7 @@ export function createConnectWiseClient(
     },
 
     async createScheduleEntry(input): Promise<unknown> {
-      const memberId = credentials.memberId;
-      if (memberId === undefined) {
-        throw new Error(
-          "ConnectWise profile is missing memberId; add it to enable create_schedule_entry",
-        );
-      }
+      const memberId = mappedMemberId("create_schedule_entry");
       const dateStart = toUtcIso(input.dateStart, "dateStart");
       const dateEnd = toUtcIso(input.dateEnd, "dateEnd");
       const objectType = input.objectType ?? 4;
@@ -2282,7 +2277,25 @@ export function createConnectWiseClient(
         positiveId(input.whereId, "where ID");
         payload.where = { id: input.whereId };
       }
-      return requestJson("POST", "/schedule/entries", undefined, payload);
+      const created = await requestJson(
+        "POST",
+        "/schedule/entries",
+        undefined,
+        payload,
+      );
+      if (!created || typeof created !== "object" || Array.isArray(created)) {
+        throw new Error("Invalid ConnectWise created schedule entry response");
+      }
+      const scheduleEntry = created as Record<string, unknown>;
+      if (
+        typeof scheduleEntry.id !== "number" ||
+        !Number.isSafeInteger(scheduleEntry.id) ||
+        scheduleEntry.id <= 0
+      ) {
+        throw new Error("Invalid ConnectWise created schedule entry response");
+      }
+      assertMappedMember(scheduleEntry, memberId);
+      return scheduleEntry;
     },
 
     async updateScheduleEntry(entryId, input): Promise<unknown> {
