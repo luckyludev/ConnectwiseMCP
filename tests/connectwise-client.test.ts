@@ -953,7 +953,7 @@ describe("ConnectWiseClient", () => {
     }
   });
 
-  it("does not retry a ticket-note write after an ambiguous fetch failure", async () => {
+  it("classifies an ambiguous ticket-note fetch failure without retrying", async () => {
     let attempts = 0;
     const client = createConnectWiseClient(credentials, {
       sleep: async () => undefined,
@@ -970,8 +970,120 @@ describe("ConnectWiseClient", () => {
         resolutionNote: false,
         issueNote: false,
       }),
-    ).rejects.toThrow("ConnectWise request unavailable");
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
     expect(attempts).toBe(1);
+  });
+
+  it.each([
+    ["an upstream timeout response", () => new Response(null, { status: 408 })],
+    ["an upstream server error", () => new Response(null, { status: 503 })],
+    ["an empty success response", () => new Response(null)],
+    ["a malformed success response", () => new Response("not json")],
+    [
+      "an oversized success response",
+      () =>
+        new Response("{}", {
+          headers: { "Content-Length": "1000001" },
+        }),
+    ],
+    [
+      "an unreadable success response",
+      () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(new Error("sensitive stream failure"));
+            },
+          }),
+        ),
+    ],
+  ])(
+    "classifies %s after a write as indeterminate",
+    async (_label, response) => {
+      let attempts = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => {
+          attempts += 1;
+          return response();
+        },
+      });
+
+      await expect(
+        client.createTicketNote(123, {
+          text: "Customer called",
+          internalOnly: true,
+          resolutionNote: false,
+          issueNote: false,
+        }),
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+      expect(attempts).toBe(1);
+    },
+  );
+
+  it.each([
+    [400, ConnectWiseRequestError],
+    [429, ConnectWiseRequestError],
+  ])(
+    "preserves an explicit POST rejection with status %i",
+    async (status, type) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => new Response(null, { status }),
+      });
+
+      await expect(
+        client.createTicketNote(123, {
+          text: "Customer called",
+          internalOnly: true,
+          resolutionNote: false,
+          issueNote: false,
+        }),
+      ).rejects.toBeInstanceOf(type);
+    },
+  );
+
+  it("classifies a POST redirect as indeterminate", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => new Response(null, { status: 302 }),
+    });
+
+    await expect(
+      client.createTicketNote(123, {
+        text: "Customer called",
+        internalOnly: true,
+        resolutionNote: false,
+        issueNote: false,
+      }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+  });
+
+  it("classifies a wrong-target ticket-note receipt as indeterminate", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json({ id: 9, ticketId: 124 }),
+    });
+
+    await expect(
+      client.createTicketNote(123, {
+        text: "Customer called",
+        internalOnly: true,
+        resolutionNote: false,
+        issueNote: false,
+      }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+  });
+
+  it("classifies a wrong-target attachment receipt as indeterminate", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json({ id: 9, recordId: 123, recordType: "TimeEntry" }),
+    });
+
+    await expect(
+      client.attachImageToTicket(123, {
+        filename: "router.png",
+        base64: "iVBORw0KGgo=",
+        mimeType: "image/png",
+      }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
   });
 
   it("requests only projected fields for an agreement record", async () => {
@@ -1208,9 +1320,7 @@ describe("ConnectWiseClient", () => {
           effectiveDate: "2026-08-28",
           billableOption: "Billable",
         }),
-      ).rejects.toThrow(
-        "Invalid ConnectWise created agreement addition response",
-      );
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
     },
   );
 
@@ -2429,7 +2539,7 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
-  for (const noteFailure of ["denied", "network"] as const) {
+  for (const noteFailure of ["denied", "network", "invalid"] as const) {
     it(`reports the committed ticket ID when its initial description ${noteFailure} write fails`, async () => {
       const calls: string[] = [];
       const client = createConnectWiseClient(credentials, {
@@ -2447,6 +2557,9 @@ describe("ConnectWiseClient", () => {
           }
           if (noteFailure === "network") {
             throw new Error("secret transport detail");
+          }
+          if (noteFailure === "invalid") {
+            return Response.json({});
           }
           return Response.json(
             { privateKey: "secret response detail" },
@@ -2586,7 +2699,7 @@ describe("ConnectWiseClient", () => {
           ownerId: 212,
           initialDescription: "must not be posted",
         }),
-      ).rejects.toThrow(/created service ticket/);
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
       expect(requests).toHaveLength(1);
       expect(requests[0]).toMatch(/\/service\/tickets$/);
     }
@@ -2655,6 +2768,9 @@ describe("ConnectWiseClient", () => {
       { id: 777 },
       { id: 777, member: { id: "149" } },
       { id: 777, member: { id: 150 } },
+      { id: 777, member: { id: 149 }, objectId: 42 },
+      { id: 777, member: { id: 149 }, type: { id: 5 } },
+      { id: 777, member: { id: 149 }, status: { id: 2 } },
     ];
 
     for (const response of invalidResponses) {
@@ -2671,7 +2787,7 @@ describe("ConnectWiseClient", () => {
           dateStart: "2026-08-31T12:30:00-04:00",
           dateEnd: "2026-08-31T17:00:00-04:00",
         }),
-      ).rejects.toThrow(/created schedule entry|assigned to mapped member/);
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
       expect(requests).toBe(1);
     }
   });
@@ -3549,7 +3665,7 @@ describe("ConnectWiseClient", () => {
         timeStart: "2026-09-01T12:00:00-04:00",
         timeEnd: "2026-09-01T13:00:00-04:00",
       }),
-    ).rejects.toThrow("Invalid ConnectWise time entry response");
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
   });
 
   it.each([
@@ -3571,9 +3687,30 @@ describe("ConnectWiseClient", () => {
           timeStart: "2026-09-01T12:00:00-04:00",
           timeEnd: "2026-09-01T13:00:00-04:00",
         }),
-      ).rejects.toThrow("ConnectWise record is not assigned to mapped member");
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
     },
   );
+
+  it("classifies a wrong charge target in a created time entry as indeterminate", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) =>
+        String(input).includes("/time/sheets")
+          ? Response.json([])
+          : Response.json({
+              id: 123,
+              member: { id: 149 },
+              chargeToId: 7,
+            }),
+    });
+
+    await expect(
+      client.createTimeEntry({
+        timeStart: "2026-09-01T12:00:00-04:00",
+        timeEnd: "2026-09-01T13:00:00-04:00",
+        chargeToId: 13,
+      }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+  });
 
   it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
     const client = createConnectWiseClient(credentials, {
@@ -3732,6 +3869,98 @@ describe("ConnectWiseClient", () => {
     expect(logs[0]).not.toContain("api-na.myconnectwise.net");
   });
 
+  it.each([
+    {
+      label: "a fetch failure",
+      fetcher: async () => {
+        throw new Error("response lost after upload");
+      },
+    },
+    {
+      label: "an upstream timeout response",
+      fetcher: async () => new Response(null, { status: 408 }),
+    },
+    {
+      label: "an upstream server error",
+      fetcher: async () => new Response(null, { status: 503 }),
+    },
+    {
+      label: "a redirect response",
+      fetcher: async () => new Response(null, { status: 302 }),
+    },
+    {
+      label: "an empty success response",
+      fetcher: async () => new Response(null, { status: 201 }),
+    },
+    {
+      label: "a malformed success response",
+      fetcher: async () => new Response("not json", { status: 201 }),
+    },
+    {
+      label: "an unverified success response",
+      fetcher: async () => Response.json({}, { status: 201 }),
+    },
+    {
+      label: "a wrong-target success response",
+      fetcher: async () =>
+        Response.json(
+          { id: 9, recordId: 78, recordType: "Ticket" },
+          { status: 201 },
+        ),
+    },
+    {
+      label: "an oversized success response",
+      fetcher: async () =>
+        new Response("{}", {
+          status: 201,
+          headers: { "Content-Length": "1000001" },
+        }),
+    },
+    {
+      label: "an unreadable success response",
+      fetcher: async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(new Error("sensitive upload stream failure"));
+            },
+          }),
+          { status: 201 },
+        ),
+    },
+  ] satisfies Array<{ label: string; fetcher: typeof fetch }>)(
+    "classifies an ambiguous image upload caused by $label without retrying",
+    async ({ fetcher }: { fetcher: typeof fetch }) => {
+      let attempts = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input, init) => {
+          attempts += 1;
+          return fetcher(input, init);
+        },
+      });
+      const pngSignature = String.fromCharCode(
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+      );
+
+      await expect(
+        client.uploadImageDocument("Ticket", 77, {
+          fileName: "router.png",
+          mimeType: "image/png",
+          base64: btoa(pngSignature),
+          privateFlag: true,
+        }),
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+      expect(attempts).toBe(1);
+    },
+  );
+
   it("cancels image-upload error bodies without retaining their contents", async () => {
     let cancelled = false;
     const client = createConnectWiseClient(credentials, {
@@ -3835,7 +4064,7 @@ describe("ConnectWiseClient", () => {
     expect(requests).toBe(0);
   });
 
-  it("refuses an image-upload redirect without retrying the POST", async () => {
+  it("classifies an image-upload redirect as indeterminate without retrying the POST", async () => {
     let requests = 0;
     const client = createConnectWiseClient(credentials, {
       fetcher: async () => {
@@ -3864,7 +4093,7 @@ describe("ConnectWiseClient", () => {
         base64: btoa(pngSignature),
         privateFlag: true,
       }),
-    ).rejects.toThrow("redirects are not followed");
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
     expect(requests).toBe(1);
   });
 
