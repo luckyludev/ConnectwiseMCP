@@ -265,6 +265,15 @@ export class ConnectWisePartialServiceTicketCreateError extends Error {
   }
 }
 
+export class ConnectWisePartialTicketNoteWriteError extends Error {
+  constructor(readonly attachmentId: number) {
+    super(
+      "ConnectWise image attachment was created but the ticket note was not confirmed",
+    );
+    this.name = "ConnectWisePartialTicketNoteWriteError";
+  }
+}
+
 class ConnectWiseRedirectError extends Error {
   constructor(status: number) {
     super(
@@ -935,6 +944,9 @@ export function createConnectWiseClient(
           continue;
         }
         emitRequestLog(method, null, startedAtMs, "unavailable");
+        if (method === "POST") {
+          throw new ConnectWiseIndeterminateWriteError();
+        }
         throw new Error("ConnectWise request unavailable");
       }
       if (response.status >= 300 && response.status < 400) {
@@ -945,6 +957,9 @@ export function createConnectWiseClient(
           startedAtMs,
           "redirect_refused",
         );
+        if (method === "POST") {
+          throw new ConnectWiseIndeterminateWriteError();
+        }
         throw new ConnectWiseRedirectError(response.status);
       }
       if (
@@ -959,22 +974,39 @@ export function createConnectWiseClient(
       if (!response.ok) {
         await cancelResponseBody(response);
         emitRequestLog(method, response.status, startedAtMs, "upstream_error");
+        if (
+          method === "POST" &&
+          (response.status === 408 || response.status >= 500)
+        ) {
+          throw new ConnectWiseIndeterminateWriteError();
+        }
         throw new ConnectWiseRequestError(response.status, {
           method,
           path,
         });
       }
       emitRequestLog(method, response.status, startedAtMs, "success");
-      const responseText = await readBoundedResponse(
-        response,
-        maxBodyBytes,
-        overflowMessage,
-      );
-      if (!responseText) return null;
       try {
+        const responseText = await readBoundedResponse(
+          response,
+          maxBodyBytes,
+          overflowMessage,
+        );
+        if (!responseText) {
+          if (method === "POST") {
+            throw new ConnectWiseIndeterminateWriteError();
+          }
+          return null;
+        }
         return JSON.parse(responseText) as unknown;
-      } catch {
-        throw new Error("Invalid ConnectWise response");
+      } catch (error) {
+        if (method === "POST") {
+          throw new ConnectWiseIndeterminateWriteError();
+        }
+        if (error instanceof SyntaxError) {
+          throw new Error("Invalid ConnectWise response");
+        }
+        throw error;
       }
     }
     throw new Error("ConnectWise request unavailable");
@@ -1049,26 +1081,56 @@ export function createConnectWiseClient(
     return record as Record<string, unknown>;
   }
 
+  function verifiedCreatedRecord(record: unknown): Record<string, unknown> {
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      throw new ConnectWiseIndeterminateWriteError();
+    }
+    const created = record as Record<string, unknown>;
+    if (
+      typeof created.id !== "number" ||
+      !Number.isSafeInteger(created.id) ||
+      created.id <= 0
+    ) {
+      throw new ConnectWiseIndeterminateWriteError();
+    }
+    return created;
+  }
+
+  function assertOptionalCreatedValue(
+    record: Record<string, unknown>,
+    field: string,
+    expected: unknown,
+  ): void {
+    if (record[field] !== undefined && record[field] !== expected) {
+      throw new ConnectWiseIndeterminateWriteError();
+    }
+  }
+
+  function assertOptionalCreatedReference(
+    record: Record<string, unknown>,
+    field: string,
+    expectedId: number,
+  ): void {
+    const reference = record[field];
+    if (reference === undefined) return;
+    if (
+      !reference ||
+      typeof reference !== "object" ||
+      Array.isArray(reference) ||
+      (reference as Record<string, unknown>).id !== expectedId
+    ) {
+      throw new ConnectWiseIndeterminateWriteError();
+    }
+  }
+
   function verifiedCreatedServiceTicket(
     record: unknown,
     summary: string,
     references: Readonly<Record<string, number>>,
   ): Record<string, unknown> & { id: number } {
-    if (!record || typeof record !== "object" || Array.isArray(record)) {
-      throw new Error("Invalid ConnectWise created service ticket response");
-    }
-    const ticket = record as Record<string, unknown>;
-    if (
-      typeof ticket.id !== "number" ||
-      !Number.isSafeInteger(ticket.id) ||
-      ticket.id <= 0
-    ) {
-      throw new Error("Invalid ConnectWise created service ticket response");
-    }
+    const ticket = verifiedCreatedRecord(record);
     if (ticket.summary !== summary) {
-      throw new Error(
-        "ConnectWise created service ticket does not match requested summary",
-      );
+      throw new ConnectWiseIndeterminateWriteError();
     }
     for (const [field, expectedId] of Object.entries(references)) {
       const reference = ticket[field];
@@ -1078,9 +1140,7 @@ export function createConnectWiseClient(
         Array.isArray(reference) ||
         (reference as Record<string, unknown>).id !== expectedId
       ) {
-        throw new Error(
-          `ConnectWise created service ticket does not match requested ${field}`,
-        );
+        throw new ConnectWiseIndeterminateWriteError();
       }
     }
     return ticket as Record<string, unknown> & { id: number };
@@ -1091,26 +1151,16 @@ export function createConnectWiseClient(
     agreementId: number,
     productId: number,
   ): Record<string, unknown> {
-    if (!record || typeof record !== "object" || Array.isArray(record)) {
-      throw new Error(
-        "Invalid ConnectWise created agreement addition response",
-      );
-    }
-    const addition = record as Record<string, unknown>;
+    const addition = verifiedCreatedRecord(record);
     const product = addition.product;
     if (
-      typeof addition.id !== "number" ||
-      !Number.isSafeInteger(addition.id) ||
-      addition.id <= 0 ||
       addition.agreementId !== agreementId ||
       !product ||
       typeof product !== "object" ||
       Array.isArray(product) ||
       (product as Record<string, unknown>).id !== productId
     ) {
-      throw new Error(
-        "Invalid ConnectWise created agreement addition response",
-      );
+      throw new ConnectWiseIndeterminateWriteError();
     }
     return addition;
   }
@@ -1466,23 +1516,34 @@ export function createConnectWiseClient(
         issueFlag: input.issueNote,
         detailDescriptionFlag: false,
       };
-      return requestJson(
-        "POST",
-        `/service/tickets/${ticketId}/notes`,
-        undefined,
-        payload,
+      const created = verifiedCreatedRecord(
+        await requestJson(
+          "POST",
+          `/service/tickets/${ticketId}/notes`,
+          undefined,
+          payload,
+        ),
       );
+      assertOptionalCreatedValue(created, "ticketId", ticketId);
+      assertOptionalCreatedReference(created, "ticket", ticketId);
+      return created;
     },
 
     async attachImageToTicket(ticketId, input): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       const payload = attachmentPayload(input);
-      return requestJson(
-        "POST",
-        `/service/tickets/${ticketId}/attachments`,
-        undefined,
-        payload,
+      const created = verifiedCreatedRecord(
+        await requestJson(
+          "POST",
+          `/service/tickets/${ticketId}/attachments`,
+          undefined,
+          payload,
+        ),
       );
+      assertOptionalCreatedValue(created, "recordId", ticketId);
+      assertOptionalCreatedValue(created, "ticketId", ticketId);
+      assertOptionalCreatedValue(created, "recordType", "Ticket");
+      return created;
     },
 
     async attachImageToTimeEntry(timeEntryId, input): Promise<unknown> {
@@ -1492,12 +1553,18 @@ export function createConnectWiseClient(
         timeEntryId,
         "attach_image_to_time_entry",
       );
-      return requestJson(
-        "POST",
-        `/timeentries/${timeEntryId}/attachments`,
-        undefined,
-        payload,
+      const created = verifiedCreatedRecord(
+        await requestJson(
+          "POST",
+          `/timeentries/${timeEntryId}/attachments`,
+          undefined,
+          payload,
+        ),
       );
+      assertOptionalCreatedValue(created, "recordId", timeEntryId);
+      assertOptionalCreatedValue(created, "timeEntryId", timeEntryId);
+      assertOptionalCreatedValue(created, "recordType", "TimeEntry");
+      return created;
     },
 
     async getServiceBoards(): Promise<unknown> {
@@ -1805,7 +1872,7 @@ export function createConnectWiseClient(
         });
       } catch {
         emitRequestLog("POST", null, startedAtMs, "unavailable");
-        throw new Error("ConnectWise request unavailable");
+        throw new ConnectWiseIndeterminateWriteError();
       }
       if (response.status >= 300 && response.status < 400) {
         await cancelResponseBody(response);
@@ -1815,27 +1882,33 @@ export function createConnectWiseClient(
           startedAtMs,
           "redirect_refused",
         );
-        throw new Error(
-          "ConnectWise redirected the request (" +
-            String(response.status) +
-            "); redirects are not followed",
-        );
+        throw new ConnectWiseIndeterminateWriteError();
       }
       if (!response.ok) {
         await cancelResponseBody(response);
         emitRequestLog("POST", response.status, startedAtMs, "upstream_error");
+        if (response.status === 408 || response.status >= 500) {
+          throw new ConnectWiseIndeterminateWriteError();
+        }
         throw new ConnectWiseRequestError(response.status, {
           method: "POST",
           path: "/system/documents",
         });
       }
       emitRequestLog("POST", response.status, startedAtMs, "success");
-      const responseText = await readBoundedResponse(response);
-      if (!responseText) return null;
       try {
-        return JSON.parse(responseText) as unknown;
+        const responseText = await readBoundedResponse(response);
+        if (!responseText) {
+          throw new ConnectWiseIndeterminateWriteError();
+        }
+        const created = verifiedCreatedRecord(
+          JSON.parse(responseText) as unknown,
+        );
+        assertOptionalCreatedValue(created, "recordId", recordId);
+        assertOptionalCreatedValue(created, "recordType", recordType);
+        return created;
       } catch {
-        throw new Error("Invalid ConnectWise response");
+        throw new ConnectWiseIndeterminateWriteError();
       }
     },
 
@@ -2134,18 +2207,20 @@ export function createConnectWiseClient(
         const text = input.initialDescription.trim();
         if (text.length > 0) {
           try {
-            await requestJson(
-              "POST",
-              `/service/tickets/${created.id}/notes`,
-              undefined,
-              {
-                text,
-                detailDescriptionFlag: true,
-                internalAnalysisFlag: false,
-                resolutionFlag: false,
-                issueFlag: false,
-                externalFlag: true,
-              },
+            verifiedCreatedRecord(
+              await requestJson(
+                "POST",
+                `/service/tickets/${created.id}/notes`,
+                undefined,
+                {
+                  text,
+                  detailDescriptionFlag: true,
+                  internalAnalysisFlag: false,
+                  resolutionFlag: false,
+                  issueFlag: false,
+                  externalFlag: true,
+                },
+              ),
             );
           } catch {
             throw new ConnectWisePartialServiceTicketCreateError(created.id);
@@ -2324,24 +2399,23 @@ export function createConnectWiseClient(
         positiveId(input.whereId, "where ID");
         payload.where = { id: input.whereId };
       }
-      const created = await requestJson(
-        "POST",
-        "/schedule/entries",
-        undefined,
-        payload,
+      const scheduleEntry = verifiedCreatedRecord(
+        await requestJson("POST", "/schedule/entries", undefined, payload),
       );
-      if (!created || typeof created !== "object" || Array.isArray(created)) {
-        throw new Error("Invalid ConnectWise created schedule entry response");
+      try {
+        assertMappedMember(scheduleEntry, memberId);
+        if (input.objectId !== undefined) {
+          assertOptionalCreatedValue(scheduleEntry, "objectId", input.objectId);
+        }
+        assertOptionalCreatedReference(scheduleEntry, "type", objectType);
+        assertOptionalCreatedReference(
+          scheduleEntry,
+          "status",
+          input.statusId ?? 1,
+        );
+      } catch {
+        throw new ConnectWiseIndeterminateWriteError();
       }
-      const scheduleEntry = created as Record<string, unknown>;
-      if (
-        typeof scheduleEntry.id !== "number" ||
-        !Number.isSafeInteger(scheduleEntry.id) ||
-        scheduleEntry.id <= 0
-      ) {
-        throw new Error("Invalid ConnectWise created schedule entry response");
-      }
-      assertMappedMember(scheduleEntry, memberId);
       return scheduleEntry;
     },
 
@@ -2542,24 +2616,21 @@ export function createConnectWiseClient(
       if (input.notes !== undefined && input.notes.length > 0) {
         payload.notes = input.notes;
       }
-      const created = await requestJson(
-        "POST",
-        "/time/entries",
-        undefined,
-        payload,
+      const created = verifiedCreatedRecord(
+        await requestJson("POST", "/time/entries", undefined, payload),
       );
-      if (!created || typeof created !== "object" || Array.isArray(created)) {
-        throw new Error("Invalid ConnectWise time entry response");
+      try {
+        assertMappedMember(created, memberId);
+        if (input.ticketId !== undefined) {
+          assertOptionalCreatedReference(created, "ticket", input.ticketId);
+        }
+        const expectedChargeToId = input.chargeToId ?? input.ticketId;
+        if (expectedChargeToId !== undefined) {
+          assertOptionalCreatedValue(created, "chargeToId", expectedChargeToId);
+        }
+      } catch {
+        throw new ConnectWiseIndeterminateWriteError();
       }
-      const createdId = (created as Record<string, unknown>).id;
-      if (
-        typeof createdId !== "number" ||
-        !Number.isSafeInteger(createdId) ||
-        createdId <= 0
-      ) {
-        throw new Error("Invalid ConnectWise time entry response");
-      }
-      assertMappedMember(created, memberId);
       return created;
     },
   };

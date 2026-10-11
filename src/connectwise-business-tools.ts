@@ -6,6 +6,7 @@ import {
   ConnectWiseDownloadError,
   ConnectWiseIndeterminateWriteError,
   ConnectWisePartialServiceTicketCreateError,
+  ConnectWisePartialTicketNoteWriteError,
   ConnectWiseRequestError,
   ConnectWiseUserError,
   MAX_IMAGE_UPLOAD_BYTES,
@@ -242,8 +243,11 @@ function failureMessage(error: unknown): string {
   if (error instanceof ConnectWisePartialServiceTicketCreateError) {
     return `Service ticket ${error.ticketId} was created, but its initial description was not added; do not recreate the ticket`;
   }
+  if (error instanceof ConnectWisePartialTicketNoteWriteError) {
+    return `Image attachment ${error.attachmentId} was created, but the ticket note was not confirmed; inspect the ticket before retrying`;
+  }
   if (error instanceof ConnectWiseIndeterminateWriteError) {
-    return "ConnectWise update outcome is unknown; verify the record before retrying";
+    return "ConnectWise write outcome is unknown; verify the record before retrying";
   }
   if (error instanceof ConnectWiseRequestError) {
     if (error.status === 401 || error.status === 403) {
@@ -964,6 +968,8 @@ export function registerConnectWiseBusinessTools(
         "create_ticket_note",
         async (client) => {
           let imageRef = "";
+          let attachmentId: number | undefined;
+          let attachmentUrl: unknown;
           if (imageValue !== undefined) {
             const payload = imageFromDataUri(imageValue);
             const resolvedFilename = attachmentFilename(
@@ -977,31 +983,42 @@ export function registerConnectWiseBusinessTools(
                 mimeType: payload.mimeType,
               }),
             );
-            if (id(attached?.id) === undefined) {
-              throw new Error("Invalid ConnectWise write response");
+            attachmentId = id(attached?.id);
+            if (attachmentId === undefined) {
+              throw new ConnectWiseIndeterminateWriteError();
             }
-            imageRef = inlineImageTag(attached?.url);
+            attachmentUrl = attached?.url;
           }
-          const created = object(
-            await client.createTicketNote(ticketId, {
-              text: noteText + imageRef,
+          try {
+            if (attachmentId !== undefined) {
+              imageRef = inlineImageTag(attachmentUrl);
+            }
+            const created = object(
+              await client.createTicketNote(ticketId, {
+                text: noteText + imageRef,
+                internalOnly,
+                resolutionNote,
+                issueNote,
+              }),
+            );
+            const createdId = id(created?.id);
+            if (createdId === undefined) {
+              throw new ConnectWiseIndeterminateWriteError();
+            }
+            return compact({
+              id: createdId,
+              ticketId,
               internalOnly,
               resolutionNote,
               issueNote,
-            }),
-          );
-          const createdId = id(created?.id);
-          if (createdId === undefined) {
-            throw new Error("Invalid ConnectWise write response");
+              ...(imageValue !== undefined ? { imageAttached: true } : {}),
+            });
+          } catch (error) {
+            if (attachmentId !== undefined) {
+              throw new ConnectWisePartialTicketNoteWriteError(attachmentId);
+            }
+            throw error;
           }
-          return compact({
-            id: createdId,
-            ticketId,
-            internalOnly,
-            resolutionNote,
-            issueNote,
-            ...(imageValue !== undefined ? { imageAttached: true } : {}),
-          });
         },
         dependencies,
       ),

@@ -2973,6 +2973,63 @@ describe("authenticated MCP transport", () => {
     expect(text).not.toContain("privateKey");
   });
 
+  it("reports an ambiguous service-ticket create without retrying", async () => {
+    let postAttempts = 0;
+    const fetcher: typeof fetch = async (input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      if (method === "POST" && String(input).endsWith("/service/tickets")) {
+        postAttempts += 1;
+        throw new Error("response lost after commit");
+      }
+      return Response.json({});
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
+        },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "create_service_ticket",
+            arguments: {
+              companyId: 250,
+              summary: "Daily Server Backup Audit",
+            },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+
+    expect(text).toContain(
+      "ConnectWise write outcome is unknown; verify the record before retrying",
+    );
+    expect(text).not.toContain("response lost after commit");
+    expect(postAttempts).toBe(1);
+  });
+
   it("create_service_ticket identifies a committed ticket when its initial description fails", async () => {
     const calls: string[] = [];
     const fetcher: typeof fetch = async (input) => {
@@ -3630,6 +3687,76 @@ describe("authenticated MCP transport", () => {
     expect(body).toContain('\\"id\\":92');
     expect(body).toContain('imageAttached\\":true');
   });
+
+  it.each([
+    {
+      label: "the following ticket-note write fails",
+      attachment: { id: 71, url: "https://example.invalid/document/71" },
+      expectedNoteAttempts: 1,
+    },
+    {
+      label: "the returned attachment URL is unusable",
+      attachment: { id: 71 },
+      expectedNoteAttempts: 0,
+    },
+  ])(
+    "reports a committed image attachment when $label",
+    async ({ attachment, expectedNoteAttempts }) => {
+      let noteAttempts = 0;
+      const handler = createMcpHandler(
+        () =>
+          createMcpServer(env, {
+            createBusinessClient: () =>
+              businessClient({
+                async attachImageToTicket() {
+                  return attachment;
+                },
+                async createTicketNote() {
+                  noteAttempts += 1;
+                  throw new ConnectWiseRequestError(400);
+                },
+              }),
+          }),
+        {
+          route: "/mcp",
+          corsOptions: false,
+          authContext: {
+            props: authProps("LUIS", ["mcp:read", "mcp:write"]),
+          },
+        },
+      );
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 6,
+            method: "tools/call",
+            params: {
+              name: "create_ticket_note",
+              arguments: {
+                ticketId: 77,
+                text: "See the screenshot below.",
+                image: tinyPngDataUri,
+              },
+            },
+          }),
+        }),
+      );
+      const body = await response.text();
+
+      expect(body).toContain(
+        "Image attachment 71 was created, but the ticket note was not confirmed; inspect the ticket before retrying",
+      );
+      expect(noteAttempts).toBe(expectedNoteAttempts);
+    },
+  );
 
   it("rejects invalid, mismatched, and oversized images for every chat-image path before any ConnectWise call", async () => {
     let businessCalls = 0;
