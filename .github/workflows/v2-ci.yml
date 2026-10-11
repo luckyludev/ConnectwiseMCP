@@ -84,6 +84,13 @@ jobs:
           overwrite: false
           include-hidden-files: false
           retention-days: 90
+      - name: Exercise production artifact path on pull requests
+        if: github.event_name == 'pull_request'
+        env:
+          PRODUCTION_RELEASE_SHA: ${{ github.sha }}
+        run: |
+          npm run build:production
+          node scripts/staging-bundle-integrity.mjs dry-run production
       - name: Exercise verified production dry-run path
         if: github.event_name != 'pull_request'
         env:

@@ -30,7 +30,7 @@ npx wrangler whoami
 npx wrangler kv namespace list
 ```
 
-`npm run check` runs typechecking, tests, formatting, a moderate-or-higher npm audit, and explicit top-level and staging dry-runs. The staging dry-run validates only the local bundle and selected configuration path; it does not authenticate, inspect remote variables, validate their presence or values, or publish a Worker. `--keep-vars` protects remote variables when the same command is later run without `--dry-run`. Never run dependency installation, lifecycle scripts, tests, or builds in the credential-bearing process.
+`npm run check` runs typechecking, tests, formatting, a moderate-or-higher npm audit, and explicit top-level and staging dry-runs. Pull-request CI additionally builds the production artifact and consumes it through the target-specific integrity wrapper without deployment or canonical-main ancestry claims. Only canonical `main` runs use the guarded production release path and retain release evidence. The staging dry-run validates only the local bundle and selected configuration path; it does not authenticate, inspect remote variables, validate their presence or values, or publish a Worker. `--keep-vars` protects remote variables when the same command is later run without `--dry-run`. Never run dependency installation, lifecycle scripts, tests, or builds in the credential-bearing deployment process.
 
 Record account/operator and release evidence in an approved secure operations record. Do not put sensitive command output in Git.
 

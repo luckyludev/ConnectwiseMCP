@@ -478,6 +478,9 @@ describe("staging deployment configuration", () => {
     const stagingDryRunOffset = workflow.indexOf(
       "      - name: Exercise verified staging deployment path",
     );
+    const productionPullRequestOffset = workflow.indexOf(
+      "      - name: Exercise production artifact path on pull requests",
+    );
     const productionDryRunOffset = workflow.indexOf(
       "      - name: Exercise verified production dry-run path",
     );
@@ -489,11 +492,16 @@ describe("staging deployment configuration", () => {
       stagingDryRunOffset,
       nextStepOffset === -1 ? undefined : nextStepOffset,
     );
+    const productionPullRequestStep = workflow.slice(
+      productionPullRequestOffset,
+      productionDryRunOffset,
+    );
     const productionDryRunStep = workflow.slice(productionDryRunOffset);
 
     expect(checkOffset).toBeGreaterThan(-1);
     expect(stagingDryRunOffset).toBeGreaterThan(checkOffset);
-    expect(productionDryRunOffset).toBeGreaterThan(stagingDryRunOffset);
+    expect(productionPullRequestOffset).toBeGreaterThan(stagingDryRunOffset);
+    expect(productionDryRunOffset).toBeGreaterThan(productionPullRequestOffset);
     expect(stagingDryRunStep).toContain(
       "STAGING_RELEASE_SHA: ${{ github.sha }}",
     );
@@ -501,6 +509,20 @@ describe("staging deployment configuration", () => {
       "run: node scripts/staging-bundle-integrity.mjs dry-run",
     );
     expect(stagingDryRunStep).not.toContain(
+      "staging-bundle-integrity.mjs deploy",
+    );
+    expect(productionPullRequestStep).toContain(
+      "if: github.event_name == 'pull_request'",
+    );
+    expect(productionPullRequestStep).toContain(
+      "PRODUCTION_RELEASE_SHA: ${{ github.sha }}",
+    );
+    expect(productionPullRequestStep).toMatch(
+      /npm run build:production\n\s+node scripts\/staging-bundle-integrity\.mjs dry-run production/u,
+    );
+    expect(productionPullRequestStep).not.toContain("git remote set-url");
+    expect(productionPullRequestStep).not.toContain("dry-run:production");
+    expect(productionPullRequestStep).not.toContain(
       "staging-bundle-integrity.mjs deploy",
     );
     expect(productionDryRunStep).toContain(
