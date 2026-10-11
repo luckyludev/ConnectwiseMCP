@@ -41,6 +41,15 @@ type BusinessToolDependencies = {
 
 type AuthProps = Partial<EntraAccessTokenProps> | undefined;
 
+function hasAuthenticatedProfile(
+  props: AuthProps,
+): props is NonNullable<AuthProps> & { profileAlias: string } {
+  return (
+    typeof props?.profileAlias === "string" &&
+    /^[A-Z][A-Z0-9_]{0,31}$/.test(props.profileAlias)
+  );
+}
+
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -298,7 +307,7 @@ async function runAuthorizedTool(
       content: [{ type: "text", text: "Insufficient scope" }],
     };
   }
-  if (!props.profileAlias) {
+  if (!hasAuthenticatedProfile(props)) {
     emitToolAudit(
       {
         props,
@@ -668,8 +677,12 @@ export function registerConnectWiseBusinessTools(
       mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
     },
     async (uri) => {
-      if (!hasMcpScopes(getProps(), ["mcp:read"])) {
+      const props = getProps();
+      if (!hasMcpScopes(props, ["mcp:read"])) {
         throw new Error("Insufficient scope");
+      }
+      if (!hasAuthenticatedProfile(props)) {
+        throw new Error("Authenticated profile unavailable");
       }
       return {
         contents: [
