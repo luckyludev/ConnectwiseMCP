@@ -629,7 +629,9 @@ describe("staging deployment configuration", () => {
       'npm sbom --sbom-format=cyclonedx > "${{ runner.temp }}/connectwise-v2-release.cdx.json"',
     );
     expect(sbomStep).toContain("sbom.bomFormat!=='CycloneDX'");
-    expect(sbomStep).toContain("sbom.metadata.component.name=lock.name");
+    expect(sbomStep).toContain(
+      'node scripts/normalize-v2-sbom.mjs "${{ runner.temp }}/connectwise-v2-release.cdx.json" package-lock.json',
+    );
     expect(stageStagingStep).toContain(canonicalRunCondition);
     expect(stageStagingStep).toContain(
       'mkdir -p "${{ runner.temp }}/release-evidence/staging"',

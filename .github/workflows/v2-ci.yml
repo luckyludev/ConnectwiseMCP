@@ -60,7 +60,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         run: |
           npm sbom --sbom-format=cyclonedx > "${{ runner.temp }}/connectwise-v2-release.cdx.json"
-          node -e "const fs=require('node:fs'); const sbomPath=process.argv[1]; const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const sbom=JSON.parse(fs.readFileSync(sbomPath,'utf8')); if(!sbom.metadata?.component||typeof lock.name!=='string'||lock.name.length===0) process.exit(1); sbom.metadata.component.name=lock.name; fs.writeFileSync(sbomPath, JSON.stringify(sbom,null,2)+'\\n', {encoding:'utf8',mode:0o600});" "${{ runner.temp }}/connectwise-v2-release.cdx.json"
+          node scripts/normalize-v2-sbom.mjs "${{ runner.temp }}/connectwise-v2-release.cdx.json" package-lock.json
           node -e "const fs=require('node:fs'); const sbom=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if(sbom.bomFormat!=='CycloneDX'||!Array.isArray(sbom.components)||sbom.components.length===0) process.exit(1)" "${{ runner.temp }}/connectwise-v2-release.cdx.json"
       - name: Stage verified staging release evidence
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
