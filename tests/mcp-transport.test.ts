@@ -1653,7 +1653,13 @@ describe("authenticated MCP transport", () => {
         route: "/mcp",
         corsOptions: false,
         authContext: {
-          props: authProps("LUIS", ["mcp:write"]),
+          props: {
+            tenantId,
+            objectId: objectIds.LUIS,
+            groups: [groupId],
+            roles: [],
+            scopes: ["mcp:write"],
+          },
         },
       },
     );
@@ -1683,6 +1689,71 @@ describe("authenticated MCP transport", () => {
     expect(bindingReads).toBe(0);
     expect(clientCreations).toBe(0);
   });
+
+  it.each([undefined, "invalid-profile"])(
+    "rejects attachment resource reads with unavailable profile %s",
+    async (profileAlias) => {
+      let bindingReads = 0;
+      let clientCreations = 0;
+      const guardedEnv = new Proxy(
+        {},
+        {
+          get() {
+            bindingReads += 1;
+            throw new Error("profile binding must not be read");
+          },
+        },
+      );
+      const handler = createMcpHandler(
+        () =>
+          createMcpServer(guardedEnv, {
+            createBusinessClient: () => {
+              clientCreations += 1;
+              return businessClient();
+            },
+          }),
+        {
+          route: "/mcp",
+          corsOptions: false,
+          authContext: {
+            props: {
+              tenantId,
+              objectId: objectIds.LUIS,
+              groups: [groupId],
+              roles: [],
+              scopes: ["mcp:read"],
+              ...(profileAlias === undefined ? {} : { profileAlias }),
+            },
+          },
+        },
+      );
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 24,
+            method: "resources/read",
+            params: {
+              uri: "ui://connectwise/attachment-uploader.html",
+            },
+          }),
+        }),
+      );
+      const body = await response.text();
+      expect(body).toContain("Authenticated profile unavailable");
+      expect(body).not.toContain("Drop or paste an image here");
+      expect(body).not.toContain("upload_connectwise_image");
+      expect(bindingReads).toBe(0);
+      expect(clientCreations).toBe(0);
+    },
+  );
 
   it("isolates concurrent profile contexts from hostile headers and arguments", async () => {
     const selectedCompanies: string[] = [];
