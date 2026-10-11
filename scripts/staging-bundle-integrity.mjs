@@ -51,6 +51,8 @@ const BUNDLE_PATH = "dist/index.js";
 const CONFIG_PATH = "wrangler.jsonc";
 const RUNTIME_PATH = "node_modules";
 const MANIFEST_PATH = `dist/${target}-bundle-manifest.json`;
+const INVENTORY_PATH = `dist/${target}-runtime-inventory.json`;
+const LOCK_PATH = "package-lock.json";
 const releaseVariable =
   target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
 const bundleDigestVariable =
@@ -201,7 +203,11 @@ function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function deploymentRuntimeDigest(destinationRoot, copiedDirectories = []) {
+function deploymentRuntimeDigest(
+  destinationRoot,
+  copiedDirectories = [],
+  inventoryRecords,
+) {
   const reject = destinationRoot
     ? (message) => {
         throw new Error(message);
@@ -232,6 +238,7 @@ function deploymentRuntimeDigest(destinationRoot, copiedDirectories = []) {
     updateField(fields.length);
     for (const field of fields) updateField(field);
     entryCount += 1;
+    if (inventoryRecords) inventoryRecords.push(fields);
   };
   const visit = (path, logicalPath, destination) => {
     if (destination) {
@@ -324,6 +331,40 @@ function deploymentRuntimeDigest(destinationRoot, copiedDirectories = []) {
   };
 }
 
+function safelyReplaceFile(path, content, label) {
+  if (existsSync(path)) {
+    const existing = lstatSync(path);
+    if (
+      !existing.isFile() ||
+      existing.isSymbolicLink() ||
+      existing.nlink !== 1
+    ) {
+      fail(`${label} must be a regular, non-symlink, single-link file.`);
+    }
+  }
+  const temporaryPath = `${path}.tmp-${process.pid}-${randomBytes(16).toString("hex")}`;
+  let descriptor;
+  try {
+    descriptor = openSync(
+      temporaryPath,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    writeFileSync(descriptor, content);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    renameSync(temporaryPath, path);
+  } catch {
+    if (descriptor !== undefined) closeSync(descriptor);
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+    fail(`${label} could not be written safely.`);
+  }
+}
+
 function verifyPrivateCopy(path, expectedBytes, label) {
   const before = lstatSync(path);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
@@ -351,22 +392,24 @@ function createManifest() {
     CONFIG_PATH,
     `The ${target} Wrangler configuration`,
   );
+  const lock = readRegularFile(LOCK_PATH, `The ${target} package lock`);
   requireReleaseConfig(config, releaseCommit);
-  const runtime = deploymentRuntimeDigest();
-  if (existsSync(MANIFEST_PATH)) {
-    const existing = lstatSync(MANIFEST_PATH);
-    if (
-      !existing.isFile() ||
-      existing.isSymbolicLink() ||
-      existing.nlink !== 1
-    ) {
-      fail(
-        `The ${target} bundle manifest must be a regular, non-symlink, single-link file.`,
-      );
-    }
-  }
+  const records = [];
+  const runtime = deploymentRuntimeDigest(undefined, [], records);
+  const inventoryBytes = Buffer.from(
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        target,
+        runtimePath: RUNTIME_PATH,
+        records,
+      },
+      null,
+      2,
+    )}\n`,
+  );
   const manifest = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     target,
     releaseCommit,
     bundlePath: BUNDLE_PATH,
@@ -375,31 +418,26 @@ function createManifest() {
     configPath: CONFIG_PATH,
     configSha256: sha256(config),
     configSize: config.length,
+    lockPath: LOCK_PATH,
+    lockSha256: sha256(lock),
+    lockSize: lock.length,
     runtimePath: RUNTIME_PATH,
     runtimeSha256: runtime.sha256,
     runtimeFileCount: runtime.fileCount,
+    runtimeInventoryPath: INVENTORY_PATH,
+    runtimeInventorySha256: sha256(inventoryBytes),
+    runtimeInventorySize: inventoryBytes.length,
   };
-  const temporaryManifest = `${MANIFEST_PATH}.tmp-${process.pid}`;
-  let descriptor;
-  try {
-    descriptor = openSync(
-      temporaryManifest,
-      constants.O_WRONLY |
-        constants.O_CREAT |
-        constants.O_EXCL |
-        constants.O_NOFOLLOW,
-      0o600,
-    );
-    writeFileSync(descriptor, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    fsyncSync(descriptor);
-    closeSync(descriptor);
-    descriptor = undefined;
-    renameSync(temporaryManifest, MANIFEST_PATH);
-  } catch {
-    if (descriptor !== undefined) closeSync(descriptor);
-    if (existsSync(temporaryManifest)) unlinkSync(temporaryManifest);
-    fail(`The ${target} bundle manifest could not be written safely.`);
-  }
+  safelyReplaceFile(
+    INVENTORY_PATH,
+    inventoryBytes,
+    `The ${target} runtime inventory`,
+  );
+  safelyReplaceFile(
+    MANIFEST_PATH,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    `The ${target} bundle manifest`,
+  );
   process.stdout.write(
     `Recorded ${target} bundle ${manifest.sha256}, configuration ${manifest.configSha256}, and deployment runtime ${manifest.runtimeSha256} for ${manifest.releaseCommit}.\n`,
   );
@@ -443,8 +481,14 @@ function verifyManifest() {
     "configPath",
     "configSha256",
     "configSize",
+    "lockPath",
+    "lockSha256",
+    "lockSize",
     "releaseCommit",
     "runtimeFileCount",
+    "runtimeInventoryPath",
+    "runtimeInventorySha256",
+    "runtimeInventorySize",
     "runtimePath",
     "runtimeSha256",
     "schemaVersion",
@@ -458,19 +502,27 @@ function verifyManifest() {
     Array.isArray(manifest) ||
     JSON.stringify(Object.keys(manifest).sort()) !==
       JSON.stringify(expectedKeys) ||
-    manifest.schemaVersion !== 4 ||
+    manifest.schemaVersion !== 5 ||
     manifest.target !== target ||
     manifest.bundlePath !== BUNDLE_PATH ||
     manifest.configPath !== CONFIG_PATH ||
+    manifest.lockPath !== LOCK_PATH ||
     manifest.runtimePath !== RUNTIME_PATH ||
+    manifest.runtimeInventoryPath !== INVENTORY_PATH ||
     !/^[0-9a-f]{40}$/u.test(manifest.releaseCommit ?? "") ||
     !/^[0-9a-f]{64}$/u.test(manifest.sha256 ?? "") ||
     !/^[0-9a-f]{64}$/u.test(manifest.configSha256 ?? "") ||
+    !/^[0-9a-f]{64}$/u.test(manifest.lockSha256 ?? "") ||
     !/^[0-9a-f]{64}$/u.test(manifest.runtimeSha256 ?? "") ||
+    !/^[0-9a-f]{64}$/u.test(manifest.runtimeInventorySha256 ?? "") ||
     !Number.isSafeInteger(manifest.size) ||
     manifest.size < 0 ||
     !Number.isSafeInteger(manifest.configSize) ||
     manifest.configSize < 0 ||
+    !Number.isSafeInteger(manifest.lockSize) ||
+    manifest.lockSize < 0 ||
+    !Number.isSafeInteger(manifest.runtimeInventorySize) ||
+    manifest.runtimeInventorySize < 1 ||
     !Number.isSafeInteger(manifest.runtimeFileCount) ||
     manifest.runtimeFileCount < 1
   ) {
@@ -507,10 +559,54 @@ function verifyManifest() {
     );
   }
   if (action !== "deploy") requireReleaseConfig(config, approvedRelease);
-  const runtime = deploymentRuntimeDigest();
+  const lock = readRegularFile(LOCK_PATH, `The ${target} package lock`);
+  if (
+    lock.length !== manifest.lockSize ||
+    sha256(lock) !== manifest.lockSha256
+  ) {
+    fail(`The ${target} package lock does not match its release manifest.`);
+  }
+  const inventory = readRegularFile(
+    INVENTORY_PATH,
+    `The ${target} runtime inventory`,
+  );
+  if (
+    inventory.length !== manifest.runtimeInventorySize ||
+    sha256(inventory) !== manifest.runtimeInventorySha256
+  ) {
+    fail(
+      `The ${target} runtime inventory does not match its release manifest.`,
+    );
+  }
+  let inventoryDocument;
+  try {
+    inventoryDocument = JSON.parse(inventory.toString("utf8"));
+  } catch {
+    fail(`The ${target} runtime inventory is not valid JSON.`);
+  }
+  const inventoryKeys = ["records", "runtimePath", "schemaVersion", "target"];
+  if (
+    inventoryDocument === null ||
+    typeof inventoryDocument !== "object" ||
+    Array.isArray(inventoryDocument) ||
+    JSON.stringify(Object.keys(inventoryDocument).sort()) !==
+      JSON.stringify(inventoryKeys) ||
+    inventoryDocument.schemaVersion !== 1 ||
+    inventoryDocument.target !== target ||
+    inventoryDocument.runtimePath !== RUNTIME_PATH ||
+    !Array.isArray(inventoryDocument.records) ||
+    !inventory.equals(
+      Buffer.from(`${JSON.stringify(inventoryDocument, null, 2)}\n`),
+    )
+  ) {
+    fail(`The ${target} runtime inventory has an invalid schema.`);
+  }
+  const runtimeRecords = [];
+  const runtime = deploymentRuntimeDigest(undefined, [], runtimeRecords);
   if (
     runtime.sha256 !== manifest.runtimeSha256 ||
-    runtime.fileCount !== manifest.runtimeFileCount
+    runtime.fileCount !== manifest.runtimeFileCount ||
+    JSON.stringify(runtimeRecords) !== JSON.stringify(inventoryDocument.records)
   ) {
     fail(
       `The ${target} deployment runtime does not match its release manifest.`,
