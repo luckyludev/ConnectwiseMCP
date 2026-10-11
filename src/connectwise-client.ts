@@ -1,6 +1,7 @@
 import type { ConnectWiseCredentials } from "./connectwise-profile";
 
 const MAX_RESPONSE_BYTES = 1_000_000;
+const MAX_SCHEDULE_OR_TIME_ENTRY_DURATION_MS = 24 * 60 * 60 * 1_000;
 export const MAX_CONNECTWISE_RESPONSE_CHUNKS = 4_096;
 export const MAX_IMAGE_UPLOAD_BYTES = 1_000_000;
 export const CONNECTWISE_IMAGE_MIME_TYPES = [
@@ -513,6 +514,7 @@ const SERVICE_TICKET_UPDATE_SOURCE_FIELDS = "id";
 const SCHEDULE_ENTRY_UPDATE_RESULT_FIELDS =
   "id,member,status,dateStart,dateEnd,doneFlag,name,where,allowScheduleConflictsFlag";
 const SCHEDULE_ENTRY_OWNERSHIP_FIELDS = "id,member";
+const SCHEDULE_ENTRY_UPDATE_SOURCE_FIELDS = "id,member,dateStart,dateEnd";
 // `_info` preserves the created/updated metadata exposed by the ticket projector.
 const SERVICE_TICKET_READ_FIELDS =
   "id,summary,company,board,status,priority,type,owner,contact,closedFlag,closedDate,dateResolved,_info";
@@ -860,6 +862,20 @@ function toUtcIso(value: string, label: string): string {
   // CW rejects fractional seconds on schedule/time entries; normalize to
   // second precision (new Date(ms).toISOString() yields .000Z).
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function assertBoundedEntryInterval(
+  start: string,
+  end: string,
+  label: "schedule" | "time entry",
+): void {
+  const durationMs = Date.parse(end) - Date.parse(start);
+  if (durationMs <= 0) {
+    throw new Error(`${label} end must be after start`);
+  }
+  if (durationMs > MAX_SCHEDULE_OR_TIME_ENTRY_DURATION_MS) {
+    throw new Error(`${label} duration must not exceed 24 hours`);
+  }
 }
 
 export function createConnectWiseClient(
@@ -2364,6 +2380,7 @@ export function createConnectWiseClient(
       const memberId = mappedMemberId("create_schedule_entry");
       const dateStart = toUtcIso(input.dateStart, "dateStart");
       const dateEnd = toUtcIso(input.dateEnd, "dateEnd");
+      assertBoundedEntryInterval(dateStart, dateEnd, "schedule");
       const objectType = input.objectType ?? 4;
       if (input.objectId !== undefined) positiveId(input.objectId, "object ID");
       if (input.statusId !== undefined) {
@@ -2419,10 +2436,11 @@ export function createConnectWiseClient(
       positiveId(entryId, "schedule entry ID");
       const memberId = mappedMemberId("update_schedule_entry");
       // Verify ownership with a minimal read, then PATCH only requested fields.
+      // The current interval is also needed to validate one-sided date changes.
       // A replacement PUT can blank every unpassed field on established records.
       const existing = verifiedRecordIdentity(
         await requestJson("GET", `/schedule/entries/${entryId}`, {
-          fields: SCHEDULE_ENTRY_OWNERSHIP_FIELDS,
+          fields: SCHEDULE_ENTRY_UPDATE_SOURCE_FIELDS,
         }),
         entryId,
         "schedule entry",
@@ -2434,15 +2452,27 @@ export function createConnectWiseClient(
         value: unknown;
       }> = [];
       const desired: Record<string, unknown> = {};
+      const updatesInterval =
+        input.dateStart !== undefined || input.dateEnd !== undefined;
       const replace = (path: string, value: unknown) => {
         operations.push({ op: "replace", path, value });
         desired[path] = value;
       };
-      if (input.dateStart !== undefined) {
-        replace("dateStart", toUtcIso(input.dateStart, "dateStart"));
-      }
-      if (input.dateEnd !== undefined) {
-        replace("dateEnd", toUtcIso(input.dateEnd, "dateEnd"));
+      if (updatesInterval) {
+        const dateStart =
+          input.dateStart !== undefined
+            ? toUtcIso(input.dateStart, "dateStart")
+            : toUtcIso(existing.dateStart as string, "stored dateStart");
+        const dateEnd =
+          input.dateEnd !== undefined
+            ? toUtcIso(input.dateEnd, "dateEnd")
+            : toUtcIso(existing.dateEnd as string, "stored dateEnd");
+        assertBoundedEntryInterval(dateStart, dateEnd, "schedule");
+        // Write the validated pair together. Sending only one endpoint would let
+        // concurrent one-sided updates combine into an interval never validated
+        // by either caller.
+        replace("dateStart", dateStart);
+        replace("dateEnd", dateEnd);
       }
       if (input.statusId !== undefined) {
         positiveId(input.statusId, "status ID");
@@ -2477,10 +2507,9 @@ export function createConnectWiseClient(
             : undefined;
         };
         const confirmed =
-          (input.dateStart === undefined ||
-            verified.dateStart === desired.dateStart) &&
-          (input.dateEnd === undefined ||
-            verified.dateEnd === desired.dateEnd) &&
+          (!updatesInterval ||
+            (verified.dateStart === desired.dateStart &&
+              verified.dateEnd === desired.dateEnd)) &&
           (input.statusId === undefined ||
             referenceId("status") === input.statusId) &&
           (input.doneFlag === undefined ||
@@ -2577,6 +2606,7 @@ export function createConnectWiseClient(
       }
       const timeStart = toUtcIso(input.timeStart, "timeStart");
       const timeEnd = toUtcIso(input.timeEnd, "timeEnd");
+      assertBoundedEntryInterval(timeStart, timeEnd, "time entry");
       if (input.ticketId !== undefined) positiveId(input.ticketId, "ticket ID");
       if (input.chargeToId !== undefined) {
         positiveId(input.chargeToId, "chargeTo ID");

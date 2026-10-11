@@ -1893,7 +1893,7 @@ export function registerConnectWiseBusinessTools(
     "create_schedule_entry",
     {
       description:
-        "Create a schedule entry on the mapped profile member's calendar. The member is always selected server-side from the authenticated user's profile. dateStart/dateEnd must be ISO 8601 WITH an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00); bare local or bare UTC times are rejected and converted to UTC server-side, so what lands on the calendar is always unambiguous. objectId is the ticket/record the entry attaches to and is required for service entries (objectType 4). allowConflicts defaults to false and sends allowScheduleConflictsFlag only when true. whereId sets the location (e.g. on-site vs Remote); omit to use the member's default. Returns the created entry with its stored UTC times.",
+        "Create a schedule entry on the mapped profile member's calendar. The member is always selected server-side from the authenticated user's profile. dateStart/dateEnd must be ISO 8601 WITH an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00); bare local or bare UTC times are rejected and converted to UTC server-side, so what lands on the calendar is always unambiguous. The end must be after the start and the interval must not exceed 24 hours. objectId is the ticket/record the entry attaches to and is required for service entries (objectType 4). allowConflicts defaults to false and sends allowScheduleConflictsFlag only when true. whereId sets the location (e.g. on-site vs Remote); omit to use the member's default. Returns the created entry with its stored UTC times.",
       inputSchema: {
         dateStart: z.string(),
         dateEnd: z.string(),
@@ -1944,7 +1944,7 @@ export function registerConnectWiseBusinessTools(
     "update_schedule_entry",
     {
       description:
-        "Update an existing schedule entry. The client verifies that the entry belongs to the mapped profile member, then sends explicit PATCH operations only for fields you pass, so unpassed fields survive. At least one update field is required. dateStart/dateEnd require an explicit timezone offset like create_schedule_entry. Returns the updated entry.",
+        "Update an existing schedule entry. The client verifies that the entry belongs to the mapped profile member, then sends explicit PATCH operations so unpassed non-date fields survive. When either dateStart or dateEnd is changed, the client validates and writes the complete interval together to prevent concurrent partial updates from creating an unvalidated range. At least one update field is required. dateStart/dateEnd require an explicit timezone offset like create_schedule_entry; the resulting end must be after the start and the interval must not exceed 24 hours. Returns the updated entry.",
       inputSchema: scheduleEntryUpdateInput,
       annotations: destructiveWriteAnnotations,
     },
@@ -2000,7 +2000,7 @@ export function registerConnectWiseBusinessTools(
     "create_time_entry",
     {
       description:
-        "Create a time entry for the member fixed in the authenticated user's server-side ConnectWise profile. timeStart/timeEnd must be ISO 8601 WITH an explicit timezone offset (converted to UTC server-side). If a timesheet is pending approval the write is refused with a clear instruction to recall/approve it first. Known charge mappings: Unprofitable chargeTo 13/workType 25/DoNotBill; Vacation chargeTo 2/workType 7/NoCharge; Sick chargeTo 7/workType 6/NoCharge. Returns the created entry.",
+        "Create a time entry for the member fixed in the authenticated user's server-side ConnectWise profile. timeStart/timeEnd must be ISO 8601 WITH an explicit timezone offset (converted to UTC server-side); the end must be after the start and the interval must not exceed 24 hours. If a timesheet is pending approval the write is refused with a clear instruction to recall/approve it first. Known charge mappings: Unprofitable chargeTo 13/workType 25/DoNotBill; Vacation chargeTo 2/workType 7/NoCharge; Sick chargeTo 7/workType 6/NoCharge. Returns the created entry.",
       inputSchema: {
         timeStart: z.string(),
         timeEnd: z.string(),
