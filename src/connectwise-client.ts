@@ -2499,7 +2499,7 @@ export function createConnectWiseClient(
         }
         return verified;
       };
-      const reconcile = async (originalError: unknown) => {
+      const reconcile = async () => {
         try {
           return confirmUpdate(
             await requestJson("GET", `/schedule/entries/${entryId}`, {
@@ -2507,7 +2507,7 @@ export function createConnectWiseClient(
             }),
           );
         } catch {
-          throw originalError;
+          throw new ConnectWiseIndeterminateWriteError();
         }
       };
 
@@ -2520,17 +2520,30 @@ export function createConnectWiseClient(
           operations,
         );
       } catch (error) {
-        // The request may have reached ConnectWise even if the response could
-        // not be read. Confirm the stored state before reporting a failure that
-        // could induce an unsafe retry.
-        return reconcile(error);
+        if (error instanceof ConnectWiseRedirectError) {
+          // Redirects are refused before a response body is accepted.
+          throw error;
+        }
+        if (
+          error instanceof ConnectWiseRequestError &&
+          error.status !== 408 &&
+          error.status < 500
+        ) {
+          // Ordinary 4xx responses are explicit upstream rejections. A timeout
+          // or 5xx can arrive after an intermediary accepted the PATCH.
+          throw error;
+        }
+        // The request may have reached ConnectWise even if its response could
+        // not be read. Confirm stored state before reporting an indeterminate
+        // outcome that callers must not retry blindly.
+        return reconcile();
       }
       try {
         return confirmUpdate(response);
-      } catch (error) {
-        // A 2xx PUT can still carry an empty, malformed, stale, or misrouted
+      } catch {
+        // A 2xx PATCH can still carry an empty, malformed, stale, or misrouted
         // body. Re-read the requested record and verify the requested changes.
-        return reconcile(error);
+        return reconcile();
       }
     },
 
