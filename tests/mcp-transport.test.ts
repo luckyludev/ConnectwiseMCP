@@ -2843,6 +2843,69 @@ describe("authenticated MCP transport", () => {
     ]);
   });
 
+  it("reports and audits an ambiguous schedule deletion without retrying", async () => {
+    const methods: string[] = [];
+    const auditMessages: string[] = [];
+    const fetcher: typeof fetch = async (_input, init) => {
+      const method = (init as { method?: string } | undefined)?.method ?? "GET";
+      methods.push(method);
+      if (method === "GET") {
+        return Response.json({ id: 247134, member: { id: 149 } });
+      }
+      throw new Error("response lost after commit");
+    };
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          audit: { logger: (message) => auditMessages.push(message) },
+          createBusinessClient: (credentials) =>
+            createConnectWiseClient(credentials, { fetcher }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: {
+          props: authProps("LUIS", ["mcp:read", "mcp:write"]),
+        },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "delete_schedule_entry",
+            arguments: { entryId: 247134 },
+          },
+        }),
+      }),
+    );
+    const text = await response.text();
+
+    expect(text).toContain(
+      "ConnectWise write outcome is unknown; verify the record before retrying",
+    );
+    expect(text).not.toContain("response lost after commit");
+    expect(methods).toEqual(["GET", "DELETE"]);
+    expect(auditMessages).toHaveLength(1);
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      profileAlias: "LUIS",
+      tool: "delete_schedule_entry",
+      outcome: "failure",
+      reason: "write_outcome_unknown",
+    });
+    expect(auditMessages[0]).not.toContain("response lost after commit");
+  });
+
   it("create_time_entry uses the mapped profile member on the wire", async () => {
     const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
     const fetcher: typeof fetch = async (input, init) => {

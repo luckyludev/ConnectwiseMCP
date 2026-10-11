@@ -353,7 +353,9 @@ async function runAuthorizedTool(
           error instanceof ConnectWiseRequestError &&
           (error.status === 401 || error.status === 403)
             ? "connectwise_denied"
-            : "operation_failed",
+            : error instanceof ConnectWiseIndeterminateWriteError
+              ? "write_outcome_unknown"
+              : "operation_failed",
         startedAtMs,
       },
       dependencies.audit,

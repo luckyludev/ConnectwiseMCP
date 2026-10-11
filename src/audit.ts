@@ -5,6 +5,7 @@ const toolAuditReasons = [
   "profile_unavailable",
   "lookup_failed",
   "connectwise_denied",
+  "write_outcome_unknown",
   "operation_failed",
   "invalid_arguments",
 ] as const;

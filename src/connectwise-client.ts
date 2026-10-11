@@ -944,7 +944,7 @@ export function createConnectWiseClient(
           continue;
         }
         emitRequestLog(method, null, startedAtMs, "unavailable");
-        if (method === "POST") {
+        if (method === "POST" || method === "DELETE") {
           throw new ConnectWiseIndeterminateWriteError();
         }
         throw new Error("ConnectWise request unavailable");
@@ -957,7 +957,7 @@ export function createConnectWiseClient(
           startedAtMs,
           "redirect_refused",
         );
-        if (method === "POST") {
+        if (method === "POST" || method === "DELETE") {
           throw new ConnectWiseIndeterminateWriteError();
         }
         throw new ConnectWiseRedirectError(response.status);
@@ -975,7 +975,7 @@ export function createConnectWiseClient(
         await cancelResponseBody(response);
         emitRequestLog(method, response.status, startedAtMs, "upstream_error");
         if (
-          method === "POST" &&
+          (method === "POST" || method === "DELETE") &&
           (response.status === 408 || response.status >= 500)
         ) {
           throw new ConnectWiseIndeterminateWriteError();

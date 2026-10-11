@@ -3461,6 +3461,49 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
+  it.each([
+    ["a lost response", () => Promise.reject(new Error("response lost"))],
+    [
+      "an upstream timeout",
+      () => Promise.resolve(new Response(null, { status: 408 })),
+    ],
+    [
+      "an upstream server error",
+      () => Promise.resolve(new Response(null, { status: 503 })),
+    ],
+    [
+      "an upstream redirect",
+      () =>
+        Promise.resolve(
+          new Response(null, {
+            status: 307,
+            headers: { Location: "https://hostile.example/" },
+          }),
+        ),
+    ],
+  ])(
+    "classifies %s after DELETE as an indeterminate write",
+    async (_name, deleteResult) => {
+      const methods: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          const method =
+            (init as { method?: string } | undefined)?.method ?? "GET";
+          methods.push(method);
+          if (method === "GET") {
+            return Response.json({ id: 247134, member: { id: 149 } });
+          }
+          return deleteResult();
+        },
+      });
+
+      await expect(client.deleteScheduleEntry(247134)).rejects.toBeInstanceOf(
+        ConnectWiseIndeterminateWriteError,
+      );
+      expect(methods).toEqual(["GET", "DELETE"]);
+    },
+  );
+
   it("refuses to delete schedule entries with missing or mismatched ownership", async () => {
     for (const member of [undefined, { id: 150 }]) {
       const methods: string[] = [];
