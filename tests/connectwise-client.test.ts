@@ -3300,6 +3300,80 @@ describe("ConnectWiseClient", () => {
     expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
+  it.each([400, 403, 429])(
+    "preserves an explicit schedule PATCH rejection with status %i",
+    async (status) => {
+      const methods: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          const method =
+            (init as { method?: string } | undefined)?.method ?? "GET";
+          methods.push(method);
+          if (method === "PATCH") return new Response(null, { status });
+          return Response.json({ id: 9, member: { id: 149 }, doneFlag: false });
+        },
+      });
+
+      await expect(
+        client.updateScheduleEntry(9, { doneFlag: true }),
+      ).rejects.toMatchObject({ status });
+      expect(methods).toEqual(["GET", "PATCH"]);
+    },
+  );
+
+  it.each([408, 500])(
+    "classifies an unconfirmed ambiguous schedule PATCH status %i as indeterminate",
+    async (status) => {
+      let getCount = 0;
+      const methods: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          const method =
+            (init as { method?: string } | undefined)?.method ?? "GET";
+          methods.push(method);
+          if (method === "PATCH") return new Response(null, { status });
+          getCount += 1;
+          return Response.json({
+            id: 9,
+            member: { id: 149 },
+            doneFlag: false,
+          });
+        },
+      });
+
+      await expect(
+        client.updateScheduleEntry(9, { doneFlag: true }),
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+      expect(getCount).toBe(2);
+      expect(methods).toEqual(["GET", "PATCH", "GET"]);
+    },
+  );
+
+  it("classifies an unconfirmed schedule PATCH transport failure as indeterminate", async () => {
+    let getCount = 0;
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PATCH") throw new TypeError("connection reset");
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          member: { id: 149 },
+          doneFlag: false,
+        });
+      },
+    });
+
+    await expect(
+      client.updateScheduleEntry(9, { doneFlag: true }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    expect(getCount).toBe(2);
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
+  });
+
   it("rejects an unconfirmed schedule update after reconciliation", async () => {
     let getCount = 0;
     const methods: string[] = [];
@@ -3320,7 +3394,7 @@ describe("ConnectWiseClient", () => {
 
     await expect(
       client.updateScheduleEntry(9, { doneFlag: true }),
-    ).rejects.toThrow("ConnectWise schedule entry does not match requested ID");
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
     expect(getCount).toBe(2);
     expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
@@ -3347,7 +3421,7 @@ describe("ConnectWiseClient", () => {
 
     await expect(
       client.updateScheduleEntry(9, { doneFlag: true }),
-    ).rejects.toThrow("ConnectWise record is not assigned to mapped member");
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
     expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
