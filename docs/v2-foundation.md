@@ -19,7 +19,7 @@
 - Bounded document handling: downloads stop at 8 MB. Every image-upload path accepts only PNG, JPEG, GIF, or WebP, stops at 1 MB of decoded content, requires canonical base64, and verifies the declared MIME signature before any ConnectWise request. The app-only `upload_connectwise_image` path additionally verifies file extensions, never fetches caller-supplied URLs, and uses a fixed multipart `POST /system/documents` for Ticket or TimeEntry records. The model-visible direct-attachment tools use fixed Ticket or TimeEntry attachment routes and remain subject to staging acceptance before production enablement.
 - A self-contained MCP App supported by Claude provides paste, drag/drop, and file selection. It resizes large raster images locally before invoking the app-only upload tool; an optional ticket note is a separate write so partial success is reported accurately.
 - Structured best-effort audit events for every MCP tool with allowlisted identity, tool, outcome, correlation, and latency fields; tool inputs, credentials, tokens, URLs, headers, upstream bodies, and exception text are never included.
-- Blocking tests, typecheck, formatting, npm audit, and Wrangler dry-run bundle in CI.
+- Blocking tests, typecheck, formatting, npm audit, and Wrangler dry-run bundles in CI. Pull requests build and consume both staging and production artifacts locally; only canonical `main` runs perform production ancestry verification and retain release evidence.
 
 ## Configuration
 
