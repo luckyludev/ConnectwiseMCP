@@ -2758,6 +2758,43 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow(/objectId is required/);
   });
 
+  it.each([
+    [
+      "zero-length",
+      "2026-08-31T12:30:00-04:00",
+      "2026-08-31T16:30:00Z",
+      /schedule end must be after start/,
+    ],
+    [
+      "reversed",
+      "2026-08-31T17:00:00-04:00",
+      "2026-08-31T12:30:00-04:00",
+      /schedule end must be after start/,
+    ],
+    [
+      "longer than 24 hours",
+      "2026-08-31T12:30:00-04:00",
+      "2026-09-01T16:30:01-04:00",
+      /schedule duration must not exceed 24 hours/,
+    ],
+  ])(
+    "rejects a %s schedule interval before a write",
+    async (_case, dateStart, dateEnd, message) => {
+      let requests = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json({});
+        },
+      });
+
+      await expect(
+        client.createScheduleEntry({ objectId: 9, dateStart, dateEnd }),
+      ).rejects.toThrow(message);
+      expect(requests).toBe(0);
+    },
+  );
+
   it("rejects malformed or foreign created schedule entries", async () => {
     const invalidResponses: unknown[] = [
       null,
@@ -3202,7 +3239,7 @@ describe("ConnectWiseClient", () => {
             id: 9,
             member: { id: 149 },
             dateStart: "2026-08-31T16:30:00Z",
-            dateEnd: "2026-08-31T21:00:00Z",
+            dateEnd: "2026-09-01T21:00:00Z",
             status: { id: 1 },
             name: "Keep me",
             doneFlag: false,
@@ -3216,6 +3253,7 @@ describe("ConnectWiseClient", () => {
           id: 9,
           member: { id: 149 },
           dateStart: "2026-09-01T16:00:00Z",
+          dateEnd: "2026-09-01T21:00:00Z",
           allowScheduleConflictsFlag: false,
         });
       },
@@ -3226,7 +3264,9 @@ describe("ConnectWiseClient", () => {
       allowConflicts: false,
     });
     const get = calls.find((c) => c.method === "GET")!;
-    expect(new URL(get.url).searchParams.get("fields")).toBe("id,member");
+    expect(new URL(get.url).searchParams.get("fields")).toBe(
+      "id,member,dateStart,dateEnd",
+    );
     const patch = calls.find((c) => c.method === "PATCH")!;
     expect(patch).toBeDefined();
     expect(patch.body).toEqual([
@@ -3237,11 +3277,57 @@ describe("ConnectWiseClient", () => {
       },
       {
         op: "replace",
+        path: "dateEnd",
+        value: "2026-09-01T21:00:00Z",
+      },
+      {
+        op: "replace",
         path: "allowScheduleConflictsFlag",
         value: false,
       },
     ]);
   });
+
+  it.each([
+    [
+      "an end before the stored start",
+      { dateEnd: "2026-09-01T11:00:00-04:00" },
+      /schedule end must be after start/,
+    ],
+    [
+      "a start after the stored end",
+      { dateStart: "2026-09-01T15:00:00-04:00" },
+      /schedule end must be after start/,
+    ],
+    [
+      "an interval longer than 24 hours",
+      { dateEnd: "2026-09-02T12:00:01-04:00" },
+      /schedule duration must not exceed 24 hours/,
+    ],
+  ])(
+    "rejects a one-sided schedule update with %s",
+    async (_case, update, message) => {
+      const methods: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          methods.push(
+            (init as { method?: string } | undefined)?.method ?? "GET",
+          );
+          return Response.json({
+            id: 9,
+            member: { id: 149 },
+            dateStart: "2026-09-01T16:00:00Z",
+            dateEnd: "2026-09-01T18:00:00Z",
+          });
+        },
+      });
+
+      await expect(client.updateScheduleEntry(9, update)).rejects.toThrow(
+        message,
+      );
+      expect(methods).toEqual(["GET"]);
+    },
+  );
 
   it.each([
     null,
@@ -3756,6 +3842,43 @@ describe("ConnectWiseClient", () => {
       "ConnectWise record is not assigned to mapped member",
     );
   });
+
+  it.each([
+    [
+      "zero-length",
+      "2026-09-01T12:00:00-04:00",
+      "2026-09-01T16:00:00Z",
+      /time entry end must be after start/,
+    ],
+    [
+      "reversed",
+      "2026-09-01T13:00:00-04:00",
+      "2026-09-01T12:00:00-04:00",
+      /time entry end must be after start/,
+    ],
+    [
+      "longer than 24 hours",
+      "2026-09-01T12:00:00-04:00",
+      "2026-09-02T12:00:01-04:00",
+      /time entry duration must not exceed 24 hours/,
+    ],
+  ])(
+    "rejects a %s time-entry interval before any request",
+    async (_case, timeStart, timeEnd, message) => {
+      let requests = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json([]);
+        },
+      });
+
+      await expect(
+        client.createTimeEntry({ timeStart, timeEnd }),
+      ).rejects.toThrow(message);
+      expect(requests).toBe(0);
+    },
+  );
 
   it("rejects createTimeEntry when a timesheet is pending approval", async () => {
     let capturedSheetUrl = "";

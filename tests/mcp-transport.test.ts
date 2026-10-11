@@ -2711,7 +2711,7 @@ describe("authenticated MCP transport", () => {
     expect(requests).toBe(0);
   });
 
-  it("update_schedule_entry merges over GET and preserves unpassed fields", async () => {
+  it("update_schedule_entry writes a validated interval pair and preserves other fields", async () => {
     const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
     const fetcher: typeof fetch = async (input, init) => {
       const method = (init as { method?: string } | undefined)?.method ?? "GET";
@@ -2737,6 +2737,7 @@ describe("authenticated MCP transport", () => {
       return Response.json({
         id: 9,
         member: { id: 149 },
+        dateStart: "2026-08-31T12:30:00Z",
         dateEnd: "2026-08-31T22:00:00Z",
         privateKey: "UPSTREAM_PRIVATE_VALUE",
       });
@@ -2782,6 +2783,11 @@ describe("authenticated MCP transport", () => {
     const patch = bodies.find((b) => b.method === "PATCH")!;
     expect(patch).toBeDefined();
     expect(patch.body).toEqual([
+      {
+        op: "replace",
+        path: "dateStart",
+        value: "2026-08-31T12:30:00Z",
+      },
       {
         op: "replace",
         path: "dateEnd",
