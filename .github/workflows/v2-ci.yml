@@ -60,6 +60,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         run: |
           npm sbom --sbom-format=cyclonedx > "${{ runner.temp }}/connectwise-v2-release.cdx.json"
+          node -e "const fs=require('node:fs'); const sbomPath=process.argv[1]; const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const sbom=JSON.parse(fs.readFileSync(sbomPath,'utf8')); if(!sbom.metadata?.component||typeof lock.name!=='string'||lock.name.length===0) process.exit(1); sbom.metadata.component.name=lock.name; fs.writeFileSync(sbomPath, JSON.stringify(sbom,null,2)+'\\n', {encoding:'utf8',mode:0o600});" "${{ runner.temp }}/connectwise-v2-release.cdx.json"
           node -e "const fs=require('node:fs'); const sbom=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if(sbom.bomFormat!=='CycloneDX'||!Array.isArray(sbom.components)||sbom.components.length===0) process.exit(1)" "${{ runner.temp }}/connectwise-v2-release.cdx.json"
       - name: Stage verified staging release evidence
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
@@ -67,9 +68,11 @@ jobs:
           mkdir -p "${{ runner.temp }}/release-evidence/staging"
           cp dist/index.js "${{ runner.temp }}/release-evidence/staging/index.js"
           cp dist/staging-bundle-manifest.json "${{ runner.temp }}/release-evidence/staging/staging-bundle-manifest.json"
+          cp dist/staging-runtime-inventory.json "${{ runner.temp }}/release-evidence/staging/staging-runtime-inventory.json"
           cp wrangler.jsonc "${{ runner.temp }}/release-evidence/staging/wrangler.jsonc"
           cp package-lock.json "${{ runner.temp }}/release-evidence/staging/package-lock.json"
           cp "${{ runner.temp }}/connectwise-v2-release.cdx.json" "${{ runner.temp }}/release-evidence/staging/connectwise-v2-staging.cdx.json"
+          node scripts/verify-v2-release-evidence.mjs "${{ runner.temp }}/release-evidence/staging" staging "${{ github.sha }}"
       - name: Retain verified staging release evidence
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -94,9 +97,11 @@ jobs:
           mkdir -p "${{ runner.temp }}/release-evidence/production"
           cp dist/index.js "${{ runner.temp }}/release-evidence/production/index.js"
           cp dist/production-bundle-manifest.json "${{ runner.temp }}/release-evidence/production/production-bundle-manifest.json"
+          cp dist/production-runtime-inventory.json "${{ runner.temp }}/release-evidence/production/production-runtime-inventory.json"
           cp wrangler.jsonc "${{ runner.temp }}/release-evidence/production/wrangler.jsonc"
           cp package-lock.json "${{ runner.temp }}/release-evidence/production/package-lock.json"
           cp "${{ runner.temp }}/connectwise-v2-release.cdx.json" "${{ runner.temp }}/release-evidence/production/connectwise-v2-production.cdx.json"
+          node scripts/verify-v2-release-evidence.mjs "${{ runner.temp }}/release-evidence/production" production "${{ github.sha }}"
       - name: Retain verified production release evidence
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -135,6 +140,7 @@ jobs:
           subject-path: |
             release-evidence/staging/index.js
             release-evidence/staging/staging-bundle-manifest.json
+            release-evidence/staging/staging-runtime-inventory.json
             release-evidence/staging/wrangler.jsonc
             release-evidence/staging/package-lock.json
             release-evidence/staging/connectwise-v2-staging.cdx.json
@@ -144,6 +150,7 @@ jobs:
           subject-path: |
             release-evidence/production/index.js
             release-evidence/production/production-bundle-manifest.json
+            release-evidence/production/production-runtime-inventory.json
             release-evidence/production/wrangler.jsonc
             release-evidence/production/package-lock.json
             release-evidence/production/connectwise-v2-production.cdx.json

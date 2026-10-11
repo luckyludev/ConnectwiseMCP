@@ -36,6 +36,7 @@ async function createCheckout() {
   const cwd = await mkdtemp(join(tmpdir(), "cw-staging-bundle-"));
   await mkdir(join(cwd, "dist"));
   await writeFile(join(cwd, "release.txt"), "reviewed\n");
+  await writeFile(join(cwd, "package-lock.json"), "{}\n");
   await writeFile(join(cwd, "dist", "index.js"), "export default {};\n");
   await writeFile(
     join(cwd, "wrangler.jsonc"),
@@ -52,7 +53,7 @@ async function createCheckout() {
   git(cwd, ["init", "--quiet"]);
   git(cwd, ["config", "user.name", "Staging Bundle Test"]);
   git(cwd, ["config", "user.email", "staging-bundle@example.invalid"]);
-  git(cwd, ["add", "release.txt", "wrangler.jsonc"]);
+  git(cwd, ["add", "release.txt", "package-lock.json", "wrangler.jsonc"]);
   git(cwd, ["commit", "--quiet", "-m", "reviewed release"]);
   return { cwd, head: git(cwd, ["rev-parse", "HEAD"]) };
 }
@@ -168,6 +169,37 @@ describe("staging bundle integrity", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(
         "The staging bundle does not match its release manifest.",
+      );
+    });
+  });
+
+  it("rejects a runtime inventory modified after manifest creation", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      expect(run(cwd, "create").status).toBe(0);
+      await writeFile(
+        join(cwd, "dist", "staging-runtime-inventory.json"),
+        "{}\n",
+      );
+
+      const result = run(cwd, "verify", head);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging runtime inventory does not match its release manifest.",
+      );
+    });
+  });
+
+  it("rejects a package lock modified after manifest creation", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      expect(run(cwd, "create").status).toBe(0);
+      await writeFile(join(cwd, "package-lock.json"), '{"tampered":true}\n');
+
+      const result = run(cwd, "verify", head);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging package lock does not match its release manifest.",
       );
     });
   });
@@ -578,7 +610,7 @@ describe("production bundle integrity", () => {
 
       expect(created.status, created.stderr).toBe(0);
       expect(verified.status, verified.stderr).toBe(0);
-      expect(manifest.schemaVersion).toBe(4);
+      expect(manifest.schemaVersion).toBe(5);
       expect(manifest.target).toBe("production");
       expect(manifest.releaseCommit).toBe(head);
       expect(manifest.bundlePath).toBe("dist/index.js");

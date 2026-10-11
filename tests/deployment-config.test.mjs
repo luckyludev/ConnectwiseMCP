@@ -629,6 +629,7 @@ describe("staging deployment configuration", () => {
       'npm sbom --sbom-format=cyclonedx > "${{ runner.temp }}/connectwise-v2-release.cdx.json"',
     );
     expect(sbomStep).toContain("sbom.bomFormat!=='CycloneDX'");
+    expect(sbomStep).toContain("sbom.metadata.component.name=lock.name");
     expect(stageStagingStep).toContain(canonicalRunCondition);
     expect(stageStagingStep).toContain(
       'mkdir -p "${{ runner.temp }}/release-evidence/staging"',
@@ -674,6 +675,7 @@ describe("staging deployment configuration", () => {
       const evidenceFiles = [
         "index.js",
         manifest,
+        `${target}-runtime-inventory.json`,
         "wrangler.jsonc",
         "package-lock.json",
         sbom,
@@ -692,6 +694,11 @@ describe("staging deployment configuration", () => {
       for (const file of evidenceFiles) {
         expect(attestStep).toContain(`release-evidence/${target}/${file}`);
       }
+      const stageStep =
+        target === "staging" ? stageStagingStep : stageProductionStep;
+      expect(stageStep).toContain(
+        `node scripts/verify-v2-release-evidence.mjs "\${{ runner.temp }}/release-evidence/${target}" ${target} "\${{ github.sha }}"`,
+      );
     }
     expect(stagingHowto).toContain(
       "`v2-staging-release-<release-commit>` and `v2-production-release-<release-commit>` evidence artifacts for 90 days",
