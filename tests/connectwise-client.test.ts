@@ -3098,26 +3098,36 @@ describe("ConnectWiseClient", () => {
     expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
-  it("does not reconcile a refused service ticket update redirect", async () => {
-    const methods: string[] = [];
+  it("reconciles a refused service ticket update redirect without following it", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    let getCount = 0;
     const client = createConnectWiseClient(credentials, {
-      fetcher: async (_input, init) => {
+      fetcher: async (input, init) => {
         const method =
           (init as { method?: string } | undefined)?.method ?? "GET";
-        methods.push(method);
-        return method === "PATCH"
-          ? new Response(null, {
-              status: 307,
-              headers: { Location: "https://other.example/ticket" },
-            })
-          : Response.json({ id: 9 });
+        const url = String(input);
+        calls.push({ method, url });
+        if (method === "PATCH") {
+          return new Response(null, {
+            status: 307,
+            headers: { Location: "https://other.example/ticket" },
+          });
+        }
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          summary: getCount === 1 ? "Original" : "Updated",
+        });
       },
     });
 
     await expect(
       client.updateServiceTicket(9, { summary: "Updated" }),
-    ).rejects.toThrow("redirected the request (307)");
-    expect(methods).toEqual(["GET", "PATCH"]);
+    ).resolves.toMatchObject({ id: 9, summary: "Updated" });
+    expect(calls.map(({ method }) => method)).toEqual(["GET", "PATCH", "GET"]);
+    expect(
+      calls.every(({ url }) => !url.startsWith("https://other.example")),
+    ).toBe(true);
   });
 
   it("confirms every service ticket update field", async () => {
@@ -3348,6 +3358,40 @@ describe("ConnectWiseClient", () => {
       expect(methods).toEqual(["GET", "PATCH", "GET"]);
     },
   );
+
+  it("classifies an unconfirmed schedule PATCH redirect as indeterminate without following it", async () => {
+    let getCount = 0;
+    const calls: Array<{ method: string; url: string }> = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        const url = String(input);
+        calls.push({ method, url });
+        if (method === "PATCH") {
+          return new Response(null, {
+            status: 307,
+            headers: { Location: "https://hostile.example/schedule" },
+          });
+        }
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          member: { id: 149 },
+          doneFlag: false,
+        });
+      },
+    });
+
+    await expect(
+      client.updateScheduleEntry(9, { doneFlag: true }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    expect(getCount).toBe(2);
+    expect(calls.map(({ method }) => method)).toEqual(["GET", "PATCH", "GET"]);
+    expect(
+      calls.every(({ url }) => !url.startsWith("https://hostile.example")),
+    ).toBe(true);
+  });
 
   it("classifies an unconfirmed schedule PATCH transport failure as indeterminate", async () => {
     let getCount = 0;
