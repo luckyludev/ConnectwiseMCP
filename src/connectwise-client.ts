@@ -1843,6 +1843,7 @@ export function createConnectWiseClient(
       const url = new URL(
         `${credentials.apiBaseUrl}/system/documents/${documentId}/download`,
       );
+      const startedAtMs = Date.now();
       let response: Response;
       try {
         response = await fetcher(url, {
@@ -1856,19 +1857,29 @@ export function createConnectWiseClient(
           signal: AbortSignal.timeout(30_000),
         });
       } catch {
+        emitRequestLog("GET", null, startedAtMs, "unavailable");
         throw new Error("ConnectWise request unavailable");
       }
       if (response.status >= 300 && response.status < 400) {
         await cancelResponseBody(response);
+        emitRequestLog("GET", response.status, startedAtMs, "redirect_refused");
         throw new Error(
           `ConnectWise redirected the download (${response.status}); redirects are not followed`,
         );
       }
       if (!response.ok) {
         await cancelResponseBody(response);
+        emitRequestLog("GET", response.status, startedAtMs, "upstream_error");
         throw new ConnectWiseDownloadError(response.status);
       }
-      const bytes = await readBoundedBytes(response, MAX_DOWNLOAD_BYTES);
+      let bytes: Uint8Array;
+      try {
+        bytes = await readBoundedBytes(response, MAX_DOWNLOAD_BYTES);
+      } catch (error) {
+        emitRequestLog("GET", response.status, startedAtMs, "upstream_error");
+        throw error;
+      }
+      emitRequestLog("GET", response.status, startedAtMs, "success");
       return {
         base64: bytesToBase64(bytes),
         mimeType: downloadMimeType(response.headers.get("Content-Type")),
