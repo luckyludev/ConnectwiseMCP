@@ -977,6 +977,10 @@ describe("ConnectWiseClient", () => {
   it.each([
     ["an upstream timeout response", () => new Response(null, { status: 408 })],
     ["an upstream server error", () => new Response(null, { status: 503 })],
+    [
+      "an accepted asynchronous response",
+      () => Response.json({ id: 9, ticketId: 123 }, { status: 202 }),
+    ],
     ["an empty success response", () => new Response(null)],
     ["a malformed success response", () => new Response("not json")],
     [
@@ -3063,6 +3067,31 @@ describe("ConnectWiseClient", () => {
     expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
+  it("reconciles an accepted asynchronous service ticket update response", async () => {
+    const methods: string[] = [];
+    let getCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "PATCH") {
+          return Response.json({ id: 9, summary: "Updated" }, { status: 202 });
+        }
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          summary: getCount === 1 ? "Original" : "Still original",
+        });
+      },
+    });
+
+    await expect(
+      client.updateServiceTicket(9, { summary: "Updated" }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    expect(methods).toEqual(["GET", "PATCH", "GET"]);
+  });
+
   it("rejects a service ticket update that cannot be confirmed", async () => {
     const methods: string[] = [];
     let getCount = 0;
@@ -4278,6 +4307,14 @@ describe("ConnectWiseClient", () => {
     {
       label: "a redirect response",
       fetcher: async () => new Response(null, { status: 302 }),
+    },
+    {
+      label: "an accepted asynchronous response",
+      fetcher: async () =>
+        Response.json(
+          { id: 901, recordId: 77, recordType: "Ticket" },
+          { status: 202 },
+        ),
     },
     {
       label: "an empty success response",
