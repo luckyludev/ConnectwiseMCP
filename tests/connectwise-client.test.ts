@@ -4265,6 +4265,7 @@ describe("ConnectWiseClient", () => {
       byteLength: 3,
     });
 
+    const oversizedLogs: string[] = [];
     const oversized = createConnectWiseClient(credentials, {
       fetcher: async () =>
         new Response(
@@ -4276,10 +4277,18 @@ describe("ConnectWiseClient", () => {
           }),
           { status: 200 },
         ),
+      log: (message) => oversizedLogs.push(message),
     });
     await expect(oversized.downloadDocument(400)).rejects.toThrow(
       "ConnectWise download too large",
     );
+    expect(oversizedLogs).toHaveLength(1);
+    expect(JSON.parse(oversizedLogs[0]!)).toMatchObject({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      outcome: "upstream_error",
+    });
 
     let cancelled = false;
     const declaredOversized = createConnectWiseClient(credentials, {
@@ -4300,6 +4309,123 @@ describe("ConnectWiseClient", () => {
       "ConnectWise download too large",
     );
     expect(cancelled).toBe(true);
+  });
+
+  it("emits one allowlisted request log for a successful document download", async () => {
+    const logs: string[] = [];
+    const documentId = 987654321;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        new Response("ABC", {
+          status: 200,
+          headers: { "Content-Type": "application/pdf" },
+        }),
+      log: (message) => logs.push(message),
+    });
+
+    await expect(client.downloadDocument(documentId)).resolves.toMatchObject({
+      byteLength: 3,
+      mimeType: "application/pdf",
+    });
+
+    expect(logs).toHaveLength(1);
+    const requestLog = JSON.parse(logs[0]!) as Record<string, unknown>;
+    expect(Object.keys(requestLog).sort()).toEqual([
+      "event",
+      "latencyMs",
+      "method",
+      "outcome",
+      "status",
+    ]);
+    expect(requestLog).toMatchObject({
+      event: "cw_request",
+      method: "GET",
+      outcome: "success",
+      status: 200,
+    });
+    expect(logs[0]).not.toContain(String(documentId));
+    expect(logs[0]).not.toContain("application/pdf");
+    expect(logs[0]).not.toContain("api-na.myconnectwise.net");
+    expect(logs[0]).not.toContain(credentials.companyId);
+    expect(logs[0]).not.toContain(credentials.publicKey);
+    expect(logs[0]).not.toContain(credentials.privateKey);
+    expect(logs[0]).not.toContain(credentials.clientId);
+    expect(logs[0]).not.toContain("ABC");
+  });
+
+  it.each([
+    {
+      label: "an unavailable request",
+      fetcher: async () => {
+        throw new Error("sensitive fetch failure");
+      },
+      expectedMessage: "ConnectWise request unavailable",
+      status: null,
+      outcome: "unavailable",
+    },
+    {
+      label: "a refused redirect",
+      fetcher: async () => new Response(null, { status: 302 }),
+      expectedMessage:
+        "ConnectWise redirected the download (302); redirects are not followed",
+      status: 302,
+      outcome: "redirect_refused",
+    },
+    {
+      label: "an upstream error",
+      fetcher: async () => new Response("sensitive body", { status: 403 }),
+      expectedMessage: "ConnectWise download failed (403)",
+      status: 403,
+      outcome: "upstream_error",
+    },
+  ])(
+    "emits an allowlisted request log for $label",
+    async ({ fetcher, expectedMessage, status, outcome }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher,
+        log: (message) => logs.push(message),
+      });
+
+      await expect(client.downloadDocument(400)).rejects.toThrow(
+        expectedMessage,
+      );
+
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status,
+        latencyMs: expect.any(Number),
+        outcome,
+      });
+      expect(logs[0]).not.toContain("sensitive");
+      expect(logs[0]).not.toContain("/system/documents");
+    },
+  );
+
+  it("keeps document download logging best-effort", async () => {
+    const successful = createConnectWiseClient(credentials, {
+      fetcher: async () => new Response("ABC"),
+      log: () => {
+        throw new Error("logger unavailable");
+      },
+    });
+    await expect(successful.downloadDocument(400)).resolves.toMatchObject({
+      byteLength: 3,
+    });
+
+    const unavailable = createConnectWiseClient(credentials, {
+      fetcher: async () => {
+        throw new Error("fetch unavailable");
+      },
+      log: () => {
+        throw new Error("logger unavailable");
+      },
+    });
+    await expect(unavailable.downloadDocument(400)).rejects.toThrow(
+      "ConnectWise request unavailable",
+    );
   });
 
   it("bounds fragmented document downloads by stream chunk count", async () => {
