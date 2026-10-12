@@ -4146,6 +4146,8 @@ describe("ConnectWiseClient", () => {
     const created = {
       id: 123,
       member: { id: 149, name: "mapped-member" },
+      timeStart: "2026-09-01T16:00:00Z",
+      timeEnd: "2026-09-01T17:00:00Z",
       notes: "completed work",
     };
     const client = createConnectWiseClient(credentials, {
@@ -4195,6 +4197,44 @@ describe("ConnectWiseClient", () => {
   ])(
     "rejects created time entries outside the mapped member: %j",
     async (created) => {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input) =>
+          String(input).includes("/time/sheets")
+            ? Response.json([])
+            : Response.json(created, { status: 201 }),
+      });
+
+      await expect(
+        client.createTimeEntry({
+          timeStart: "2026-09-01T12:00:00-04:00",
+          timeEnd: "2026-09-01T13:00:00-04:00",
+        }),
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    },
+  );
+
+  it.each([
+    [
+      "start",
+      {
+        id: 123,
+        member: { id: 149 },
+        timeStart: "2026-09-01T16:00:01Z",
+        timeEnd: "2026-09-01T17:00:00Z",
+      },
+    ],
+    [
+      "end",
+      {
+        id: 123,
+        member: { id: 149 },
+        timeStart: "2026-09-01T16:00:00Z",
+        timeEnd: "2026-09-01T17:00:01Z",
+      },
+    ],
+  ])(
+    "classifies a mismatched created time-entry %s as indeterminate",
+    async (_field, created) => {
       const client = createConnectWiseClient(credentials, {
         fetcher: async (input) =>
           String(input).includes("/time/sheets")
