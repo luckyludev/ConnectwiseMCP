@@ -80,10 +80,10 @@ const credentialsSchema = z
 
 export type ConnectWiseCredentials = z.infer<typeof credentialsSchema>;
 
-export function resolveIdentityBoundConnectWiseCredentials(
+export function resolveIdentityBoundProfileAlias(
   env: object,
   props: IdentityBoundProfileProps,
-): ConnectWiseCredentials {
+): string {
   if (
     typeof props.tenantId !== "string" ||
     !props.tenantId ||
@@ -122,7 +122,15 @@ export function resolveIdentityBoundConnectWiseCredentials(
     throw new Error("Authenticated ConnectWise profile binding changed");
   }
 
-  return resolveConnectWiseCredentials(env, resolved.profileAlias);
+  return resolved.profileAlias;
+}
+
+export function resolveIdentityBoundConnectWiseCredentials(
+  env: object,
+  props: IdentityBoundProfileProps,
+): ConnectWiseCredentials {
+  const profileAlias = resolveIdentityBoundProfileAlias(env, props);
+  return resolveConnectWiseCredentials(env, profileAlias);
 }
 
 export function resolveConnectWiseCredentials(
