@@ -80,6 +80,7 @@ export type ConnectWiseClient = {
   getServiceTicketStatus(ticketId: number): Promise<unknown>;
   getTicketNotes(ticketId: number, pageSize: number): Promise<unknown>;
   getTicketAttachments(ticketId: number, pageSize: number): Promise<unknown>;
+  getTicketAttachment(ticketId: number, documentId: number): Promise<unknown>;
   getTicketTasks(ticketId: number, pageSize: number): Promise<unknown>;
   getTicketTimeEntries(ticketId: number, pageSize: number): Promise<unknown>;
   createTicketNote(
@@ -549,6 +550,7 @@ const SERVICE_TICKET_NOTE_RELATIONSHIP_FIELDS = `${SERVICE_TICKET_NOTE_COLLECTIO
 const TICKET_ATTACHMENT_COLLECTION_FIELDS =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
 const TICKET_ATTACHMENT_RELATIONSHIP_FIELDS = `${TICKET_ATTACHMENT_COLLECTION_FIELDS},recordType,recordId`;
+const TICKET_ATTACHMENT_AUTHORIZATION_FIELDS = "id,recordType,recordId";
 const TICKET_TASK_COLLECTION_FIELDS = "id,summary,priority,notes";
 const TICKET_TASK_RELATIONSHIP_FIELDS = `${TICKET_TASK_COLLECTION_FIELDS},ticketId`;
 const SERVICE_BOARD_COLLECTION_FIELDS = "id,name";
@@ -1481,6 +1483,25 @@ export function createConnectWiseClient(
         pageSize,
       );
       return verifiedDocumentList(attachments, "Ticket", ticketId);
+    },
+
+    async getTicketAttachment(
+      ticketId: number,
+      documentId: number,
+    ): Promise<unknown> {
+      positiveId(ticketId, "service ticket ID");
+      positiveId(documentId, "document ID");
+      const document = await requestJson(
+        "GET",
+        `/system/documents/${documentId}`,
+        { fields: TICKET_ATTACHMENT_AUTHORIZATION_FIELDS },
+      );
+      const verifiedDocument = verifiedRecordIdentity(
+        document,
+        documentId,
+        "document",
+      );
+      return verifiedDocumentList([verifiedDocument], "Ticket", ticketId)[0];
     },
 
     async getTicketTasks(ticketId: number, pageSize: number): Promise<unknown> {

@@ -1728,7 +1728,7 @@ export function registerConnectWiseBusinessTools(
     "download_ticket_attachment",
     {
       description:
-        "Download an attachment belonging to a specified service ticket as base64 (8 MB maximum). The attachment must appear in the ticket's bounded attachment list.",
+        "Download an attachment belonging to a specified service ticket as base64 (8 MB maximum). The attachment relationship is verified by exact document ID before download.",
       inputSchema: { ticketId: positiveId, documentId: positiveId },
       annotations: readAnnotations,
     },
@@ -1738,18 +1738,18 @@ export function registerConnectWiseBusinessTools(
         env,
         "download_ticket_attachment",
         async (client) => {
-          const attachments = list(
-            await client.getTicketAttachments(ticketId, 50),
-            50,
-          );
-          const belongsToTicket = attachments.some((value) => {
-            const candidate = object(value);
-            return candidate?.id === documentId;
-          });
-          if (!belongsToTicket) {
-            return { message: "Attachment not found for ticket" };
+          try {
+            await client.getTicketAttachment(ticketId, documentId);
+          } catch {
+            throw new Error("Ticket attachment authorization failed");
           }
-          return client.downloadDocument(documentId);
+          const download = await client.downloadDocument(documentId);
+          try {
+            await client.getTicketAttachment(ticketId, documentId);
+          } catch {
+            throw new Error("Ticket attachment authorization failed");
+          }
+          return download;
         },
         dependencies,
       ),

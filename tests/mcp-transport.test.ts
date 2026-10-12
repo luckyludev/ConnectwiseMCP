@@ -124,6 +124,7 @@ function businessClient(
     getServiceTicketStatus: unused,
     getTicketNotes: unused,
     getTicketAttachments: unused,
+    getTicketAttachment: unused,
     getTicketTasks: unused,
     getTicketTimeEntries: unused,
     createTicketNote: unused,
@@ -2225,17 +2226,28 @@ describe("authenticated MCP transport", () => {
     }
   });
 
-  it("downloads only an attachment associated with the specified ticket", async () => {
-    const attachmentLookups: Array<{ ticketId: number; pageSize: number }> = [];
+  it("downloads only after exact ticket attachment authorization", async () => {
+    const authorizationLookups: Array<{
+      ticketId: number;
+      documentId: number;
+    }> = [];
     const downloads: number[] = [];
     const handler = createMcpHandler(
       () =>
         createMcpServer(env, {
           createBusinessClient: () =>
             businessClient({
-              async getTicketAttachments(ticketId, pageSize) {
-                attachmentLookups.push({ ticketId, pageSize });
-                return [{ id: 400 }, { id: "400" }, { id: 401 }];
+              async getTicketAttachment(ticketId, documentId) {
+                authorizationLookups.push({ ticketId, documentId });
+                if (documentId === 403) {
+                  throw new ConnectWiseRequestError(404);
+                }
+                if (documentId !== 400) {
+                  throw new Error(
+                    "ConnectWise document is not associated with requested record",
+                  );
+                }
+                return { id: documentId };
               },
               async downloadDocument(documentId) {
                 downloads.push(documentId);
@@ -2282,17 +2294,91 @@ describe("authenticated MCP transport", () => {
     const allowedBody = await allowed.text();
     expect(allowedBody).toContain('\\"base64\\":\\"QUJD\\"');
     expect(allowedBody).toContain('\\"mimeType\\":\\"application/pdf\\"');
-    expect(attachmentLookups).toEqual([{ ticketId: 123, pageSize: 50 }]);
+    expect(authorizationLookups).toEqual([
+      { ticketId: 123, documentId: 400 },
+      { ticketId: 123, documentId: 400 },
+    ]);
     expect(downloads).toEqual([400]);
 
     const denied = await callTool(55, 402);
     const deniedBody = await denied.text();
-    expect(deniedBody).toContain("Attachment not found for ticket");
-    expect(attachmentLookups).toEqual([
-      { ticketId: 123, pageSize: 50 },
-      { ticketId: 123, pageSize: 50 },
+    expect(deniedBody).toContain("ConnectWise operation failed");
+    expect(deniedBody).not.toContain("associated with requested record");
+    expect(deniedBody).not.toContain("/system/documents");
+
+    const absent = await callTool(56, 403);
+    const absentBody = await absent.text();
+    expect(absentBody).toContain("ConnectWise operation failed");
+    expect(absentBody).not.toContain("ConnectWise record not found");
+    expect(authorizationLookups).toEqual([
+      { ticketId: 123, documentId: 400 },
+      { ticketId: 123, documentId: 400 },
+      { ticketId: 123, documentId: 402 },
+      { ticketId: 123, documentId: 403 },
     ]);
     expect(downloads).toEqual([400]);
+  });
+
+  it("discards downloaded bytes when the attachment relationship changes", async () => {
+    let authorizationChecks = 0;
+    let downloads = 0;
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          createBusinessClient: () =>
+            businessClient({
+              async getTicketAttachment() {
+                authorizationChecks += 1;
+                if (authorizationChecks > 1) {
+                  throw new Error(
+                    "ConnectWise document is not associated with requested record",
+                  );
+                }
+                return { id: 400 };
+              },
+              async downloadDocument() {
+                downloads += 1;
+                return {
+                  base64: "c2Vuc2l0aXZlLWJ5dGVz",
+                  mimeType: "application/pdf",
+                  byteLength: 15,
+                };
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: authProps("LUIS") },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 56,
+          method: "tools/call",
+          params: {
+            name: "download_ticket_attachment",
+            arguments: { ticketId: 123, documentId: 400 },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+
+    expect(authorizationChecks).toBe(2);
+    expect(downloads).toBe(1);
+    expect(body).not.toContain("c2Vuc2l0aXZlLWJ5dGVz");
+    expect(body).not.toContain("associated with requested record");
   });
 
   it("searches companies and contacts with bounded projections", async () => {

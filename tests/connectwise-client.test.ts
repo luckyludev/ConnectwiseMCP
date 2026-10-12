@@ -219,6 +219,55 @@ describe("ConnectWiseClient", () => {
     }
   });
 
+  it("authorizes one ticket attachment by exact document identity", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        capturedUrl = String(input);
+        capturedInit = init;
+        return Response.json({
+          id: 400,
+          recordType: "Ticket",
+          recordId: 123,
+        });
+      },
+    });
+
+    await expect(client.getTicketAttachment(123, 400)).resolves.toEqual({
+      id: 400,
+    });
+    const url = new URL(capturedUrl);
+    expect(`${url.origin}${url.pathname}`).toBe(
+      "https://api-na.myconnectwise.net/v4_6_release/apis/3.0/system/documents/400",
+    );
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      fields: "id,recordType,recordId",
+    });
+    expect(capturedInit?.method).toBe("GET");
+  });
+
+  it("rejects wrong-target or malformed exact attachment responses", async () => {
+    for (const document of [
+      null,
+      [],
+      {},
+      { id: "400", recordType: "Ticket", recordId: 123 },
+      { id: 401, recordType: "Ticket", recordId: 123 },
+      { id: 400, recordType: "Ticket", recordId: 124 },
+      { id: 400, recordType: "Project", recordId: 123 },
+      { id: 400, recordType: "Ticket" },
+    ]) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(document),
+      });
+
+      await expect(client.getTicketAttachment(123, 400)).rejects.toThrow(
+        /ConnectWise (document does not match requested ID|document is not associated with requested record)/,
+      );
+    }
+  });
+
   it("verifies and strips document relationships from catalog results", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
