@@ -2588,6 +2588,45 @@ describe("ConnectWiseClient", () => {
     });
   }
 
+  it("reports a partial create when the initial description receipt names another ticket", async () => {
+    for (const noteReceipt of [
+      { id: 9001, ticketId: 7002 },
+      { id: 9001, ticket: { id: 7002 } },
+    ]) {
+      const calls: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input) => {
+          const url = String(input);
+          calls.push(url);
+          if (url.endsWith("/service/tickets")) {
+            return Response.json({
+              id: 7001,
+              summary: "Daily Server Backup Audit",
+              company: { id: 250 },
+              board: { id: 32 },
+              status: { id: 547 },
+            });
+          }
+          return Response.json(noteReceipt);
+        },
+      });
+
+      const request = client.createServiceTicket({
+        companyId: 250,
+        summary: "Daily Server Backup Audit",
+        initialDescription: "Verified description",
+      });
+      await expect(request).rejects.toBeInstanceOf(
+        ConnectWisePartialServiceTicketCreateError,
+      );
+      await expect(request).rejects.toMatchObject({ ticketId: 7001 });
+      expect(calls.map((url) => new URL(url).pathname)).toEqual([
+        "/v4_6_release/apis/3.0/service/tickets",
+        "/v4_6_release/apis/3.0/service/tickets/7001/notes",
+      ]);
+    }
+  });
+
   it("rejects malformed or misrouted created service tickets without adding a note", async () => {
     const invalidResponses: unknown[] = [
       null,

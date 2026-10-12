@@ -2242,7 +2242,7 @@ export function createConnectWiseClient(
         const text = input.initialDescription.trim();
         if (text.length > 0) {
           try {
-            verifiedCreatedRecord(
+            const createdNote = verifiedCreatedRecord(
               await requestJson(
                 "POST",
                 `/service/tickets/${created.id}/notes`,
@@ -2257,6 +2257,8 @@ export function createConnectWiseClient(
                 },
               ),
             );
+            assertOptionalCreatedValue(createdNote, "ticketId", created.id);
+            assertOptionalCreatedReference(createdNote, "ticket", created.id);
           } catch {
             throw new ConnectWisePartialServiceTicketCreateError(created.id);
           }
