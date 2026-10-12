@@ -586,14 +586,47 @@ describe("ConnectWiseClient", () => {
     expect(cancelled).toBe(true);
   });
 
-  it("sanitizes malformed successful response bodies", async () => {
+  it("audits malformed successful response bodies as upstream errors", async () => {
+    const logs: string[] = [];
+    const sensitiveBody = "sensitive malformed response";
     const client = createConnectWiseClient(credentials, {
-      fetcher: async () => new Response("sensitive malformed response"),
+      fetcher: async () => new Response(sensitiveBody),
+      log: (line) => logs.push(line),
     });
 
     await expect(client.getServiceTicket(123)).rejects.toThrow(
       "Invalid ConnectWise response",
     );
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "upstream_error",
+    });
+    expect(logs[0]).not.toContain(sensitiveBody);
+    expect(logs[0]).not.toContain(credentials.privateKey);
+  });
+
+  it("audits empty successful response bodies as upstream errors", async () => {
+    const logs: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => new Response(null, { status: 200 }),
+      log: (line) => logs.push(line),
+    });
+
+    await expect(client.getServiceTicket(123)).rejects.toThrow(
+      "Invalid ConnectWise response",
+    );
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "upstream_error",
+    });
   });
 
   it("uses a bounded timeout and sanitizes abort failures", async () => {
@@ -619,17 +652,59 @@ describe("ConnectWiseClient", () => {
     expect(attempts).toBe(2);
   });
 
-  it("rejects an oversized response body", async () => {
+  it("audits oversized response bodies as upstream errors", async () => {
+    const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
         new Response(JSON.stringify({ data: "x".repeat(1_000_001) }), {
           status: 200,
         }),
+      log: (line) => logs.push(line),
     });
 
     await expect(client.getServiceTicket(123)).rejects.toThrow(
       "ConnectWise response too large",
     );
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "upstream_error",
+    });
+    expect(logs[0]).not.toContain("xxx");
+    expect(logs[0]).not.toContain(credentials.privateKey);
+  });
+
+  it("audits unreadable successful response streams as upstream errors", async () => {
+    const logs: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(new Error("sensitive stream failure"));
+            },
+          }),
+          { status: 200 },
+        ),
+      log: (line) => logs.push(line),
+    });
+
+    await expect(client.getServiceTicket(123)).rejects.toThrow(
+      "ConnectWise response unavailable",
+    );
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "upstream_error",
+    });
+    expect(logs[0]).not.toContain("sensitive stream failure");
+    expect(logs[0]).not.toContain(credentials.privateKey);
   });
 
   it("cancels a declared-oversized response body", async () => {
@@ -3351,6 +3426,48 @@ describe("ConnectWiseClient", () => {
     expect(methods).toEqual(["GET", "PATCH", "GET"]);
   });
 
+  it("audits an empty successful PATCH response as indeterminate", async () => {
+    const logs: string[] = [];
+    let getCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        if (method === "PATCH") return new Response(null, { status: 200 });
+        getCount += 1;
+        return Response.json({
+          id: 9,
+          summary: getCount === 1 ? "Original" : "Updated",
+        });
+      },
+      log: (line) => logs.push(line),
+    });
+
+    await expect(
+      client.updateServiceTicket(9, { summary: "Updated" }),
+    ).resolves.toMatchObject({ id: 9, summary: "Updated" });
+    expect(
+      logs.map((line) => {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        return {
+          event: event.event,
+          method: event.method,
+          status: event.status,
+          outcome: event.outcome,
+        };
+      }),
+    ).toEqual([
+      { event: "cw_request", method: "GET", status: 200, outcome: "success" },
+      {
+        event: "cw_request",
+        method: "PATCH",
+        status: 200,
+        outcome: "indeterminate",
+      },
+      { event: "cw_request", method: "GET", status: 200, outcome: "success" },
+    ]);
+  });
+
   it("updates a schedule entry via an ownership read and explicit patch", async () => {
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
     const client = createConnectWiseClient(credentials, {
@@ -4646,11 +4763,13 @@ describe("ConnectWiseClient", () => {
     "classifies an ambiguous image upload caused by $label without retrying",
     async ({ fetcher }: { fetcher: typeof fetch }) => {
       let attempts = 0;
+      const logs: string[] = [];
       const client = createConnectWiseClient(credentials, {
         fetcher: async (input, init) => {
           attempts += 1;
           return fetcher(input, init);
         },
+        log: (line) => logs.push(line),
       });
       const pngSignature = String.fromCharCode(
         0x89,
@@ -4672,6 +4791,22 @@ describe("ConnectWiseClient", () => {
         }),
       ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
       expect(attempts).toBe(1);
+      expect(logs).toHaveLength(1);
+      const requestLog = JSON.parse(logs[0]!) as Record<string, unknown>;
+      expect(Object.keys(requestLog).sort()).toEqual([
+        "event",
+        "latencyMs",
+        "method",
+        "outcome",
+        "status",
+      ]);
+      expect(requestLog).toMatchObject({
+        event: "cw_request",
+        method: "POST",
+      });
+      expect(requestLog.outcome).not.toBe("success");
+      expect(logs[0]).not.toContain("router.png");
+      expect(logs[0]).not.toContain(credentials.privateKey);
     },
   );
 
