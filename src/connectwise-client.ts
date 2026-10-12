@@ -2711,6 +2711,8 @@ export function createConnectWiseClient(
       );
       try {
         assertMappedMember(created, memberId);
+        assertOptionalCreatedValue(created, "timeStart", timeStart);
+        assertOptionalCreatedValue(created, "timeEnd", timeEnd);
         if (input.ticketId !== undefined) {
           assertOptionalCreatedReference(created, "ticket", input.ticketId);
         }
