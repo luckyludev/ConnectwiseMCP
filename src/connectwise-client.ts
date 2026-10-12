@@ -900,7 +900,12 @@ export function createConnectWiseClient(
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     status: number | null,
     startedAtMs: number,
-    outcome: "success" | "unavailable" | "redirect_refused" | "upstream_error",
+    outcome:
+      | "success"
+      | "unavailable"
+      | "redirect_refused"
+      | "upstream_error"
+      | "indeterminate",
   ): void {
     try {
       log(
@@ -1000,6 +1005,11 @@ export function createConnectWiseClient(
           method,
           path,
         });
+      }
+      if (method === "DELETE" && response.status === 202) {
+        await cancelResponseBody(response);
+        emitRequestLog(method, response.status, startedAtMs, "indeterminate");
+        throw new ConnectWiseIndeterminateWriteError();
       }
       emitRequestLog(method, response.status, startedAtMs, "success");
       if (method === "DELETE") {

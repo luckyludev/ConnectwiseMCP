@@ -3657,6 +3657,47 @@ describe("ConnectWiseClient", () => {
     expect(cancelled).toBe(true);
   });
 
+  it("classifies an accepted asynchronous DELETE as indeterminate", async () => {
+    let cancelled = false;
+    const logs: string[] = [];
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      log: (message) => logs.push(message),
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "GET") {
+          return Response.json({ id: 247134, member: { id: 149 } });
+        }
+        return new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 202 },
+        );
+      },
+    });
+
+    await expect(client.deleteScheduleEntry(247134)).rejects.toBeInstanceOf(
+      ConnectWiseIndeterminateWriteError,
+    );
+    expect(methods).toEqual(["GET", "DELETE"]);
+    expect(cancelled).toBe(true);
+    const requestLogs = logs
+      .filter((line) => line.includes('"event":"cw_request"'))
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(requestLogs).toHaveLength(2);
+    expect(requestLogs[1]).toMatchObject({
+      event: "cw_request",
+      method: "DELETE",
+      outcome: "indeterminate",
+      status: 202,
+    });
+  });
+
   it.each([
     ["a lost response", () => Promise.reject(new Error("response lost"))],
     [
