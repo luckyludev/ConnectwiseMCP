@@ -1006,7 +1006,7 @@ export function createConnectWiseClient(
           path,
         });
       }
-      if (method === "DELETE" && response.status === 202) {
+      if (method !== "GET" && response.status === 202) {
         await cancelResponseBody(response);
         emitRequestLog(method, response.status, startedAtMs, "indeterminate");
         throw new ConnectWiseIndeterminateWriteError();
@@ -1924,6 +1924,11 @@ export function createConnectWiseClient(
           method: "POST",
           path: "/system/documents",
         });
+      }
+      if (response.status === 202) {
+        await cancelResponseBody(response);
+        emitRequestLog("POST", response.status, startedAtMs, "indeterminate");
+        throw new ConnectWiseIndeterminateWriteError();
       }
       emitRequestLog("POST", response.status, startedAtMs, "success");
       try {
