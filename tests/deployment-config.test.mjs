@@ -57,6 +57,34 @@ describe("dependency maintenance configuration", () => {
     expect(legacyWorkflow).toContain("node-version: 24.11.0");
   });
 
+  it("pins every CI job to the reviewed Ubuntu runner image", async () => {
+    const workflows = await Promise.all(
+      ["v2-ci.yml", "legacy-oauth-ci.yml"].map((file) =>
+        readFile(
+          new URL(`../.github/workflows/${file}`, import.meta.url),
+          "utf8",
+        ),
+      ),
+    );
+
+    for (const workflow of workflows) {
+      expect(workflow).not.toContain("ubuntu-latest");
+      const jobsSource = workflow.slice(workflow.indexOf("\njobs:\n") + 7);
+      const jobs = [...jobsSource.matchAll(/^  ([A-Za-z0-9_-]+):\n/gmu)];
+      expect(jobs.length).toBeGreaterThan(0);
+      for (const [index, job] of jobs.entries()) {
+        const nextOffset = jobs[index + 1]?.index;
+        const jobSource = jobsSource.slice(
+          job.index,
+          nextOffset === undefined ? undefined : nextOffset,
+        );
+        expect(jobSource.match(/^    runs-on: .+$/gmu)).toEqual([
+          "    runs-on: ubuntu-24.04",
+        ]);
+      }
+    }
+  });
+
   it("keeps the legacy rollback lock above the multidict security floor", async () => {
     const [input, lock] = await Promise.all([
       readFile(
@@ -341,7 +369,7 @@ describe("legacy rollback image security", () => {
     expect(attestOffset).toBeGreaterThan(downloadOffset);
     expect(workflow).toMatch(/^permissions:\n  contents: read$/mu);
     expect(attestJob).toMatch(
-      /^  attest:\n    needs: verify\n    if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\)\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      id-token: write\n      attestations: write$/mu,
+      /^  attest:\n    needs: verify\n    if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\)\n    runs-on: ubuntu-24\.04\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      id-token: write\n      attestations: write$/mu,
     );
     expect(workflow).toContain(
       "uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
@@ -695,7 +723,7 @@ describe("staging deployment configuration", () => {
     expect(workflow.split(downloadAction)).toHaveLength(3);
     expect(workflow.split(attestAction)).toHaveLength(3);
     expect(workflow).toMatch(
-      /^  attest:\n    needs: verify\n    if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\)\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      id-token: write\n      attestations: write$/mu,
+      /^  attest:\n    needs: verify\n    if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\)\n    runs-on: ubuntu-24\.04\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      id-token: write\n      attestations: write$/mu,
     );
 
     for (const target of ["staging", "production"]) {
