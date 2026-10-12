@@ -40,21 +40,13 @@ describe("whoami", () => {
     const auditMessages: string[] = [];
     const times = [5_000, 5_002];
     expect(
-      whoamiResult(
-        {
-          tenantId,
-          objectId,
-          profileAlias: "LUIS",
-          scopes: ["mcp:read"],
+      whoamiResult(authProps(), authorizationEnv, {
+        audit: {
+          logger: (message) => auditMessages.push(message),
+          now: () => times.shift()!,
+          createCorrelationId: () => correlationId,
         },
-        {
-          audit: {
-            logger: (message) => auditMessages.push(message),
-            now: () => times.shift()!,
-            createCorrelationId: () => correlationId,
-          },
-        },
-      ),
+      }),
     ).toMatchObject({
       content: [
         { type: "text", text: JSON.stringify({ profileAlias: "LUIS" }) },
@@ -73,21 +65,13 @@ describe("whoami", () => {
 
   it("does not let a failing audit clock alter the result", () => {
     expect(
-      whoamiResult(
-        {
-          tenantId,
-          objectId,
-          profileAlias: "LUIS",
-          scopes: ["mcp:read"],
-        },
-        {
-          audit: {
-            now: () => {
-              throw new Error("audit clock unavailable");
-            },
+      whoamiResult(authProps(), authorizationEnv, {
+        audit: {
+          now: () => {
+            throw new Error("audit clock unavailable");
           },
         },
-      ),
+      }),
     ).toMatchObject({
       content: [
         { type: "text", text: JSON.stringify({ profileAlias: "LUIS" }) },
@@ -101,7 +85,14 @@ describe("whoami", () => {
 
     expect(
       whoamiResult(
-        { tenantId, objectId, scopes: ["mcp:read"] },
+        {
+          tenantId,
+          objectId,
+          groups: [groupId],
+          roles: [],
+          scopes: ["mcp:read"],
+        },
+        authorizationEnv,
         {
           audit: {
             logger: (message) => auditMessages.push(message),
@@ -130,10 +121,16 @@ describe("whoami", () => {
       const auditMessages: string[] = [];
       const times = [6_000, 6_001];
       const props = scopes
-        ? { tenantId, objectId, profileAlias: "LUIS", scopes }
-        : { tenantId, objectId, profileAlias: "LUIS" };
+        ? { ...authProps(), scopes }
+        : {
+            tenantId,
+            objectId,
+            profileAlias: "LUIS" as const,
+            groups: [groupId],
+            roles: [],
+          };
       expect(
-        whoamiResult(props, {
+        whoamiResult(props, authorizationEnv, {
           audit: {
             logger: (message) => auditMessages.push(message),
             now: () => times.shift()!,
@@ -156,6 +153,90 @@ describe("whoami", () => {
       expect(auditMessages[0]!).not.toContain("scopes");
     },
   );
+
+  it.each([
+    {
+      name: "removed mapping",
+      env: {
+        ...authorizationEnv,
+        IDENTITY_PROFILE_MAP: "{}",
+      },
+    },
+    {
+      name: "remapped identity",
+      env: {
+        ...authorizationEnv,
+        IDENTITY_PROFILE_MAP: JSON.stringify({
+          [`${tenantId}:${objectId}`]: "MAYA",
+        }),
+      },
+    },
+    {
+      name: "removed authorization",
+      env: {
+        ...authorizationEnv,
+        ALLOWED_GROUP_IDS: "[]",
+        ALLOWED_APP_ROLES: JSON.stringify(["ConnectWise.Read"]),
+      },
+    },
+  ])(
+    "rejects a stale token after $name without reading a profile secret",
+    ({ env }) => {
+      const reads: string[] = [];
+      const auditMessages: string[] = [];
+      const guardedEnv = new Proxy(
+        { ...env, CW_PROFILE_LUIS: "must-not-be-read" },
+        {
+          get(target, property, receiver) {
+            reads.push(String(property));
+            return Reflect.get(target, property, receiver);
+          },
+        },
+      );
+
+      expect(
+        whoamiResult(authProps(), guardedEnv, {
+          audit: { logger: (message) => auditMessages.push(message) },
+        }),
+      ).toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: "Authenticated profile unavailable" }],
+      });
+      expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+        tenantId,
+        objectId,
+        profileAlias: "LUIS",
+        tool: "whoami",
+        outcome: "denied",
+        reason: "profile_unavailable",
+      });
+      expect(reads).toEqual([
+        "ENTRA_TENANT_ID",
+        "IDENTITY_PROFILE_MAP",
+        "ALLOWED_GROUP_IDS",
+        "ALLOWED_APP_ROLES",
+      ]);
+      expect(reads.every((binding) => !binding.startsWith("CW_PROFILE_"))).toBe(
+        true,
+      );
+    },
+  );
+
+  it("checks mcp:read before authorization configuration", () => {
+    const reads: string[] = [];
+    const env = new Proxy(authorizationEnv, {
+      get(target, property, receiver) {
+        reads.push(String(property));
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    expect(whoamiResult({ ...authProps(), scopes: [] }, env)).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "Insufficient scope" }],
+    });
+    expect(reads).toEqual([]);
+  });
 });
 
 describe("get_service_ticket", () => {

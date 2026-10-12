@@ -7,6 +7,7 @@ import {
 } from "./connectwise-client";
 import {
   resolveIdentityBoundConnectWiseCredentials,
+  resolveIdentityBoundProfileAlias,
   type ConnectWiseCredentials,
 } from "./connectwise-profile";
 import type { EntraAccessTokenProps } from "./auth-handler";
@@ -26,6 +27,7 @@ export type AuditedToolDependencies = {
 
 export function whoamiResult(
   props: Partial<EntraAccessTokenProps> | undefined,
+  env: object,
   dependencies: AuditedToolDependencies = {},
 ): CallToolResult {
   const startedAtMs = getAuditStartTime(dependencies.audit);
@@ -45,7 +47,27 @@ export function whoamiResult(
       content: [{ type: "text", text: "Insufficient scope" }],
     };
   }
-  if (!props.profileAlias) {
+  try {
+    const profileAlias = resolveIdentityBoundProfileAlias(env, props ?? {});
+    emitToolAudit(
+      {
+        props,
+        tool: "whoami",
+        outcome: "success",
+        reason: "ok",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ profileAlias }),
+        },
+      ],
+    };
+  } catch {
     emitToolAudit(
       {
         props,
@@ -61,24 +83,6 @@ export function whoamiResult(
       content: [{ type: "text", text: "Authenticated profile unavailable" }],
     };
   }
-  emitToolAudit(
-    {
-      props,
-      tool: "whoami",
-      outcome: "success",
-      reason: "ok",
-      startedAtMs,
-    },
-    dependencies.audit,
-  );
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify({ profileAlias: props.profileAlias }),
-      },
-    ],
-  };
 }
 
 const serviceTicketSchema = z.object({
@@ -212,7 +216,7 @@ export function createMcpServer(
     },
     async (_args): Promise<CallToolResult> => {
       const props = authProps;
-      return whoamiResult(props, dependencies);
+      return whoamiResult(props, env, dependencies);
     },
   );
 
