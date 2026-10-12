@@ -451,20 +451,26 @@ describe("legacy rollback image security", () => {
 });
 
 describe("staging deployment configuration", () => {
-  it("scopes foundation secret examples to staging", async () => {
-    const foundation = await readFile(
-      new URL("../docs/v2-foundation.md", import.meta.url),
-      "utf8",
+  it("uses the lock-installed Wrangler for staging secret entry", async () => {
+    const documents = await Promise.all(
+      ["v2-foundation.md", "cloudflare-workers-staging-howto.md"].map((file) =>
+        readFile(new URL(`../docs/${file}`, import.meta.url), "utf8"),
+      ),
     );
-    const secretCommands = foundation
-      .split("\n")
-      .filter((line) => line.startsWith("npx wrangler secret put "));
+    const secretCommandPrefix =
+      "node node_modules/wrangler/bin/wrangler.js secret put ";
 
-    expect(secretCommands).toHaveLength(4);
-    for (const command of secretCommands) {
-      expect(command).toMatch(/ --env staging$/u);
+    for (const document of documents) {
+      const secretCommands = document
+        .split("\n")
+        .filter((line) => line.includes("secret put"));
+      expect(secretCommands).toHaveLength(4);
+      for (const command of secretCommands) {
+        expect(command.startsWith(secretCommandPrefix)).toBe(true);
+        expect(command).toMatch(/ --env staging$/u);
+      }
     }
-    expect(foundation).toContain(
+    expect(documents[0]).toContain(
       "Production secret entry requires the separate approved production procedure",
     );
   });

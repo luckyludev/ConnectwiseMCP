@@ -135,10 +135,10 @@ Do not add names, email addresses, ticket identifiers, raw URLs with paths, loca
 Only an authorized operator should enter secrets using Wrangler’s secure prompt or an approved Cloudflare secret-management workflow. Never put a secret value on the command line or in a redirected shell pipeline.
 
 ```bash
-npx wrangler secret put ENTRA_CLIENT_SECRET --env staging
-npx wrangler secret put OAUTH_STATE_SECRET --env staging
-npx wrangler secret put IDENTITY_PROFILE_MAP --env staging
-npx wrangler secret put CW_PROFILE_<ALIAS> --env staging
+node node_modules/wrangler/bin/wrangler.js secret put ENTRA_CLIENT_SECRET --env staging
+node node_modules/wrangler/bin/wrangler.js secret put OAUTH_STATE_SECRET --env staging
+node node_modules/wrangler/bin/wrangler.js secret put IDENTITY_PROFILE_MAP --env staging
+node node_modules/wrangler/bin/wrangler.js secret put CW_PROFILE_LUIS --env staging
 ```
 
 Required controls:

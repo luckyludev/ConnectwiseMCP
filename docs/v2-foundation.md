@@ -35,11 +35,11 @@ Set non-secret variables in `wrangler.jsonc` or environment-specific Wrangler co
 Provision these as Worker secrets; do not place values in Git, `.dev.vars`, command arguments, or ordinary request headers. The following example is staging-only and deliberately names the environment so it cannot mutate the top-level production Worker. Production secret entry requires the separate approved production procedure and its explicit approval boundary.
 
 ```bash
-npx wrangler secret put ENTRA_CLIENT_SECRET --env staging
-npx wrangler secret put OAUTH_STATE_SECRET --env staging
-npx wrangler secret put IDENTITY_PROFILE_MAP --env staging
+node node_modules/wrangler/bin/wrangler.js secret put ENTRA_CLIENT_SECRET --env staging
+node node_modules/wrangler/bin/wrangler.js secret put OAUTH_STATE_SECRET --env staging
+node node_modules/wrangler/bin/wrangler.js secret put IDENTITY_PROFILE_MAP --env staging
 # Repeat once per configured alias, for example:
-npx wrangler secret put CW_PROFILE_LUIS --env staging
+node node_modules/wrangler/bin/wrangler.js secret put CW_PROFILE_LUIS --env staging
 ```
 
 `OAUTH_STATE_SECRET` must contain at least 32 random bytes. `IDENTITY_PROFILE_MAP` is JSON such as:
