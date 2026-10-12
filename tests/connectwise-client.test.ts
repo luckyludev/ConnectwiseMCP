@@ -2763,6 +2763,7 @@ describe("ConnectWiseClient", () => {
           id: 777,
           member: { id: 149 },
           dateStart: "2026-08-31T16:30:00Z",
+          dateEnd: "2026-08-31T21:00:00Z",
         });
       },
     });
@@ -2849,6 +2850,16 @@ describe("ConnectWiseClient", () => {
       { id: 777, member: { id: "149" } },
       { id: 777, member: { id: 150 } },
       { id: 777, member: { id: 149 }, objectId: 42 },
+      {
+        id: 777,
+        member: { id: 149 },
+        dateStart: "2026-08-31T16:30:01Z",
+      },
+      {
+        id: 777,
+        member: { id: 149 },
+        dateEnd: "2026-08-31T21:00:01Z",
+      },
       { id: 777, member: { id: 149 }, type: { id: 5 } },
       { id: 777, member: { id: 149 }, status: { id: 2 } },
     ];
