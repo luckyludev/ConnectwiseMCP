@@ -51,7 +51,14 @@ async function readBoundedResponse(
   let chunkCount = 0;
   let text = "";
   while (true) {
-    const { done, value } = await reader.read();
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch {
+      await cancelReader(reader);
+      throw new Error("ConnectWise response unavailable");
+    }
+    const { done, value } = chunk;
     if (done) break;
     chunkCount += 1;
     if (chunkCount > MAX_CONNECTWISE_RESPONSE_CHUNKS) {
@@ -1013,25 +1020,53 @@ export function createConnectWiseClient(
         emitRequestLog(method, response.status, startedAtMs, "indeterminate");
         throw new ConnectWiseIndeterminateWriteError();
       }
-      emitRequestLog(method, response.status, startedAtMs, "success");
       if (method === "DELETE") {
         await cancelResponseBody(response);
+        emitRequestLog(method, response.status, startedAtMs, "success");
         return null;
       }
+      let responseText: string;
       try {
-        const responseText = await readBoundedResponse(
+        responseText = await readBoundedResponse(
           response,
           maxBodyBytes,
           overflowMessage,
         );
-        if (!responseText) {
-          if (method === "POST") {
-            throw new ConnectWiseIndeterminateWriteError();
-          }
-          return null;
-        }
-        return JSON.parse(responseText) as unknown;
       } catch (error) {
+        emitRequestLog(
+          method,
+          response.status,
+          startedAtMs,
+          method === "GET" ? "upstream_error" : "indeterminate",
+        );
+        if (method === "POST") {
+          throw new ConnectWiseIndeterminateWriteError();
+        }
+        throw error;
+      }
+      if (!responseText) {
+        emitRequestLog(
+          method,
+          response.status,
+          startedAtMs,
+          method === "GET" ? "upstream_error" : "indeterminate",
+        );
+        if (method === "POST") {
+          throw new ConnectWiseIndeterminateWriteError();
+        }
+        throw new Error("Invalid ConnectWise response");
+      }
+      try {
+        const parsed = JSON.parse(responseText) as unknown;
+        emitRequestLog(method, response.status, startedAtMs, "success");
+        return parsed;
+      } catch (error) {
+        emitRequestLog(
+          method,
+          response.status,
+          startedAtMs,
+          method === "GET" ? "upstream_error" : "indeterminate",
+        );
         if (method === "POST") {
           throw new ConnectWiseIndeterminateWriteError();
         }
@@ -1962,7 +1997,6 @@ export function createConnectWiseClient(
         emitRequestLog("POST", response.status, startedAtMs, "indeterminate");
         throw new ConnectWiseIndeterminateWriteError();
       }
-      emitRequestLog("POST", response.status, startedAtMs, "success");
       try {
         const responseText = await readBoundedResponse(response);
         if (!responseText) {
@@ -1973,8 +2007,10 @@ export function createConnectWiseClient(
         );
         assertOptionalCreatedValue(created, "recordId", recordId);
         assertOptionalCreatedValue(created, "recordType", recordType);
+        emitRequestLog("POST", response.status, startedAtMs, "success");
         return created;
       } catch {
+        emitRequestLog("POST", response.status, startedAtMs, "indeterminate");
         throw new ConnectWiseIndeterminateWriteError();
       }
     },
