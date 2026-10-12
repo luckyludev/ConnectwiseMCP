@@ -4,6 +4,7 @@ import {
   ConnectWisePartialServiceTicketCreateError,
   ConnectWiseRequestError,
   MAX_CONNECTWISE_RESPONSE_CHUNKS,
+  MAX_DOWNLOAD_BYTES,
   MAX_IMAGE_UPLOAD_BYTES,
   createConnectWiseClient,
   decodeConnectWiseImageBase64,
@@ -4269,7 +4270,7 @@ describe("ConnectWiseClient", () => {
         new Response(
           new ReadableStream({
             start(controller) {
-              controller.enqueue(new Uint8Array(8_000_001));
+              controller.enqueue(new Uint8Array(MAX_DOWNLOAD_BYTES + 1));
               controller.close();
             },
           }),
@@ -4279,6 +4280,26 @@ describe("ConnectWiseClient", () => {
     await expect(oversized.downloadDocument(400)).rejects.toThrow(
       "ConnectWise download too large",
     );
+
+    let cancelled = false;
+    const declaredOversized = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Length": String(MAX_DOWNLOAD_BYTES + 1) },
+          },
+        ),
+    });
+    await expect(declaredOversized.downloadDocument(400)).rejects.toThrow(
+      "ConnectWise download too large",
+    );
+    expect(cancelled).toBe(true);
   });
 
   it("bounds fragmented document downloads by stream chunk count", async () => {

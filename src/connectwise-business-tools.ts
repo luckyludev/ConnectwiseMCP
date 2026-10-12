@@ -33,6 +33,29 @@ const ATTACHMENT_UPLOADER_RESOURCE_URI =
   "ui://connectwise/attachment-uploader.html";
 const ATTACHMENT_UPLOADER_MIME_TYPE = "text/html;profile=mcp-app";
 
+export const MAX_TOOL_OUTPUT_BYTES = 8_100_000;
+
+function exceedsUtf8ByteLimit(value: string, maxBytes: number): boolean {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit <= 0x7f) bytes += 1;
+    else if (codeUnit <= 0x7ff) bytes += 2;
+    else if (
+      codeUnit >= 0xd800 &&
+      codeUnit <= 0xdbff &&
+      index + 1 < value.length &&
+      value.charCodeAt(index + 1) >= 0xdc00 &&
+      value.charCodeAt(index + 1) <= 0xdfff
+    ) {
+      bytes += 4;
+      index += 1;
+    } else bytes += 3;
+    if (bytes > maxBytes) return true;
+  }
+  return false;
+}
+
 type BusinessToolDependencies = {
   audit?: ToolAuditDependencies;
   createClient?: (credentials: ConnectWiseCredentials) => ConnectWiseClient;
@@ -244,8 +267,15 @@ export function summarizeAgreementAdditions(values: Record<string, unknown>[]) {
   };
 }
 
-function output(value: unknown): CallToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(value) }] };
+export function boundedToolOutput(
+  value: unknown,
+  maxBytes = MAX_TOOL_OUTPUT_BYTES,
+): CallToolResult {
+  const text = JSON.stringify(value);
+  if (typeof text !== "string" || exceedsUtf8ByteLimit(text, maxBytes)) {
+    throw new Error("MCP tool output too large");
+  }
+  return { content: [{ type: "text", text }] };
 }
 
 function failureMessage(error: unknown): string {
@@ -328,6 +358,7 @@ async function runAuthorizedTool(
       ...props,
       profileAlias: props.profileAlias,
     });
+    const toolOutput = boundedToolOutput(result);
     emitToolAudit(
       {
         props,
@@ -338,7 +369,7 @@ async function runAuthorizedTool(
       },
       dependencies.audit,
     );
-    return output(result);
+    return toolOutput;
   } catch (error) {
     emitToolAudit(
       {
@@ -1728,7 +1759,7 @@ export function registerConnectWiseBusinessTools(
     "download_ticket_attachment",
     {
       description:
-        "Download an attachment belonging to a specified service ticket as base64 (8 MB maximum). The attachment relationship is verified by exact document ID before download.",
+        "Download an attachment belonging to a specified service ticket as base64 (6 MB maximum). The attachment relationship is verified by exact document ID before download.",
       inputSchema: { ticketId: positiveId, documentId: positiveId },
       annotations: readAnnotations,
     },

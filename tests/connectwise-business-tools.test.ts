@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_TOOL_OUTPUT_BYTES,
+  boundedToolOutput,
   projectAgreementAddition,
   summarizeAgreementAdditions,
 } from "../src/connectwise-business-tools";
+import { MAX_DOWNLOAD_BYTES } from "../src/connectwise-client";
 
 describe("agreement addition projection", () => {
   const upstreamAddition = {
@@ -42,5 +45,23 @@ describe("agreement addition projection", () => {
         { extPrice: 12, extCost: 7 },
       ]),
     ).toEqual({ count: 2, totalExtendedPrice: 87, totalCost: 36 });
+  });
+});
+
+describe("bounded tool output", () => {
+  it("accepts the byte limit and rejects one byte above it", () => {
+    expect(boundedToolOutput("é", 4)).toEqual({
+      content: [{ type: "text", text: '"é"' }],
+    });
+    expect(() => boundedToolOutput("é", 3)).toThrow(
+      "MCP tool output too large",
+    );
+  });
+
+  it("keeps the maximum attachment payload within the output budget", () => {
+    const maximumBase64Bytes = 4 * Math.ceil(MAX_DOWNLOAD_BYTES / 3);
+    const metadataAllowance = MAX_TOOL_OUTPUT_BYTES - maximumBase64Bytes;
+
+    expect(metadataAllowance).toBeGreaterThanOrEqual(100_000);
   });
 });

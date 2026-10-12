@@ -1,6 +1,7 @@
 import { createMcpHandler as createProductionMcpHandler } from "../src/mcp-handler";
 import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/mcp-server";
+import { MAX_TOOL_OUTPUT_BYTES } from "../src/connectwise-business-tools";
 import { TOOL_ACCESS } from "../src/tool-access";
 import {
   ConnectWiseRequestError,
@@ -2379,6 +2380,68 @@ describe("authenticated MCP transport", () => {
     expect(downloads).toBe(1);
     expect(body).not.toContain("c2Vuc2l0aXZlLWJ5dGVz");
     expect(body).not.toContain("associated with requested record");
+  });
+
+  it("rejects oversized attachment output without returning or auditing it", async () => {
+    const auditMessages: string[] = [];
+    const marker = "SENSITIVE_OUTPUT_MARKER";
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(env, {
+          audit: { logger: (message) => auditMessages.push(message) },
+          createBusinessClient: () =>
+            businessClient({
+              async getTicketAttachment(_ticketId, documentId) {
+                return { id: documentId };
+              },
+              async downloadDocument() {
+                return {
+                  base64: "A".repeat(MAX_TOOL_OUTPUT_BYTES) + marker,
+                  mimeType: "application/pdf",
+                  byteLength: MAX_TOOL_OUTPUT_BYTES,
+                };
+              },
+            }),
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: authProps("LUIS") },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 57,
+          method: "tools/call",
+          params: {
+            name: "download_ticket_attachment",
+            arguments: { ticketId: 123, documentId: 400 },
+          },
+        }),
+      }),
+    );
+    const body = await response.text();
+
+    expect(body).toContain("ConnectWise operation failed");
+    expect(body).not.toContain(marker);
+    expect(auditMessages).toHaveLength(1);
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      tool: "download_ticket_attachment",
+      outcome: "failure",
+      reason: "operation_failed",
+    });
+    expect(auditMessages[0]).not.toContain(marker);
+    expect(auditMessages[0]).not.toContain("MCP tool output too large");
   });
 
   it("searches companies and contacts with bounded projections", async () => {
