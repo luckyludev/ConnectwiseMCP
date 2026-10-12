@@ -292,7 +292,7 @@ export class ConnectWiseDownloadError extends Error {
   }
 }
 
-const MAX_DOWNLOAD_BYTES = 8_000_000;
+export const MAX_DOWNLOAD_BYTES = 6_000_000;
 
 async function readBoundedBytes(
   response: Response,
