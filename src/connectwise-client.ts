@@ -2438,6 +2438,8 @@ export function createConnectWiseClient(
       );
       try {
         assertMappedMember(scheduleEntry, memberId);
+        assertOptionalCreatedValue(scheduleEntry, "dateStart", dateStart);
+        assertOptionalCreatedValue(scheduleEntry, "dateEnd", dateEnd);
         if (input.objectId !== undefined) {
           assertOptionalCreatedValue(scheduleEntry, "objectId", input.objectId);
         }
