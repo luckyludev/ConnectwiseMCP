@@ -1002,6 +1002,10 @@ export function createConnectWiseClient(
         });
       }
       emitRequestLog(method, response.status, startedAtMs, "success");
+      if (method === "DELETE") {
+        await cancelResponseBody(response);
+        return null;
+      }
       try {
         const responseText = await readBoundedResponse(
           response,

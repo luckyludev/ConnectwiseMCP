@@ -3592,6 +3592,72 @@ describe("ConnectWiseClient", () => {
   });
 
   it.each([
+    ["malformed", () => new Response("{", { status: 200 })],
+    [
+      "oversized",
+      () =>
+        new Response("x", {
+          status: 200,
+          headers: { "Content-Length": "1000001" },
+        }),
+    ],
+    [
+      "unreadable",
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error("body must not be read"));
+            },
+          }),
+          { status: 200 },
+        ),
+    ],
+  ])(
+    "accepts a successful DELETE with a %s response body without retrying",
+    async (_name, deleteResponse) => {
+      const methods: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          const method =
+            (init as { method?: string } | undefined)?.method ?? "GET";
+          methods.push(method);
+          return method === "GET"
+            ? Response.json({ id: 247134, member: { id: 149 } })
+            : deleteResponse();
+        },
+      });
+
+      await client.deleteScheduleEntry(247134);
+      expect(methods).toEqual(["GET", "DELETE"]);
+    },
+  );
+
+  it("cancels an unused successful DELETE response body", async () => {
+    let cancelled = false;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        if (method === "GET") {
+          return Response.json({ id: 247134, member: { id: 149 } });
+        }
+        return new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    await client.deleteScheduleEntry(247134);
+    expect(cancelled).toBe(true);
+  });
+
+  it.each([
     ["a lost response", () => Promise.reject(new Error("response lost"))],
     [
       "an upstream timeout",
