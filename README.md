@@ -19,11 +19,11 @@ ConnectWise MCP server migrating from the legacy Docker/FastAPI gateway to a sec
 │   └── http-gateway/         # Supported rollback image and HTTP gateway
 ├── docs/
 │   ├── README.md             # Docs index
-│   ├── chatgpt-connector.md  # ChatGPT connector setup
-│   ├── claude-setup.md       # Claude MCP setup
-│   ├── azure-ad-checklist.md # Azure AD setup checklist
-│   ├── troubleshooting.md    # Common issues and checks
-│   └── n8n-setup.md           # n8n setup
+│   ├── chatgpt-connector.md  # ChatGPT V2 boundary and rollback reference
+│   ├── claude-setup.md       # Claude V2 and localhost setup
+│   ├── azure-ad-checklist.md # Legacy Azure AD checklist
+│   ├── troubleshooting.md    # Legacy gateway checks
+│   └── n8n-setup.md          # n8n support status
 └── README.md
 ```
 
@@ -210,14 +210,16 @@ Call a tool:
 }
 ```
 
-## OAuth + client guides
+## Client support and operator references
 
-- ChatGPT: `docs/chatgpt-connector.md`
-- Claude: `docs/claude-setup.md`
-- n8n: `docs/n8n-setup.md`
-- Copilot Studio + Azure: `docs/copilot-studio-azure.md`
-- Azure AD checklist: `docs/azure-ad-checklist.md`
-- Troubleshooting: `docs/troubleshooting.md`
+- ChatGPT V2 boundary and rollback reference: `docs/chatgpt-connector.md`
+- Claude V2 and localhost-development setup: `docs/claude-setup.md`
+- n8n support status: `docs/n8n-setup.md`
+- Copilot Studio support status: `docs/copilot-studio-azure.md`
+- Legacy Azure AD checklist: `docs/azure-ad-checklist.md`
+- Legacy troubleshooting: `docs/troubleshooting.md`
+
+These pages do not authorize an independent legacy deployment. Production onboarding remains gated by the V2 staging checklist; emergency rollback follows `docs/cutover-rollback-runbook.md`.
 
 ## Security notes
 

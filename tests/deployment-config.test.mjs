@@ -241,6 +241,60 @@ describe("legacy rollback deployment surface", () => {
     );
   });
 
+  it("keeps legacy client guides inside the controlled rollback boundary", async () => {
+    const guidePaths = [
+      "claude-setup.md",
+      "chatgpt-connector.md",
+      "n8n-setup.md",
+      "copilot-studio-azure.md",
+    ];
+    const guides = await Promise.all(
+      guidePaths.map(async (path) => ({
+        path,
+        content: await readFile(
+          new URL(`../docs/${path}`, import.meta.url),
+          "utf8",
+        ),
+      })),
+    );
+
+    for (const { path, content } of guides) {
+      expect(content, path).toContain("cutover-rollback-runbook.md");
+      expect(content, path).toContain("verified canonical `main` artifact");
+      expect(content, path).not.toContain("connectwisemcp.funcshun.com");
+      expect(content, path).not.toContain("CLOUDFLARE_TUNNEL_TOKEN");
+      expect(content, path).not.toMatch(/docker compose up -d --build\s*$/mu);
+      expect(content, path).not.toMatch(/docker\s+(?:build|push)\b/u);
+      for (const command of content.matchAll(/docker compose up[^\n]*/gu)) {
+        expect(command[0], path).toMatch(/(?:^|\s)mcp-gateway(?:\s|$)/u);
+      }
+      for (const url of content.matchAll(
+        /https?:\/\/[^\s`)]+\/(?:sse|mcp)\b/gu,
+      )) {
+        expect(url[0], path).toMatch(
+          /^http:\/\/127\.0\.0\.1(?::\d+)?\/(?:sse|mcp)\b/u,
+        );
+      }
+    }
+
+    const claudeGuide = guides.find(({ path }) => path === "claude-setup.md");
+    expect(claudeGuide?.content).toContain(
+      "docker compose up -d --build mcp-gateway",
+    );
+    expect(claudeGuide?.content).toContain(
+      "Do not attach a tunnel or public route",
+    );
+
+    for (const path of [
+      "chatgpt-connector.md",
+      "n8n-setup.md",
+      "copilot-studio-azure.md",
+    ]) {
+      const guide = guides.find((entry) => entry.path === path);
+      expect(guide?.content, path).not.toContain("docker compose up");
+    }
+  });
+
   it("keeps local legacy credential artifacts out of version control", () => {
     for (const path of [
       "deploy/cwm-mcp/credentials.json",
