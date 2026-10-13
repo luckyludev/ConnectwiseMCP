@@ -1,77 +1,15 @@
-# n8n Setup (MCP via HTTP Gateway) — legacy rollback gateway
+# n8n Setup
 
-> **Legacy-only:** this guide uses the Docker/FastAPI JSON-RPC gateway and its static bearer-token flow. It is not compatible with, or an onboarding guide for, Cloudflare Worker V2. In particular, its generic API-discovery example is intentionally excluded from V2; see [the V2 migration classification](legacy-read-surface-classification.md).
+## Cloudflare Worker V2
 
-This guide shows how to call the ConnectwiseMCP HTTP gateway from n8n.
+Direct n8n onboarding is not currently approved. Worker V2 requires interactive Microsoft Entra authorization, immutable `tid` + `oid` profile mapping, and the `mcp:read` scope before profile-secret access. Do not emulate this boundary with a static credential, shared API member, caller-selected profile, or generic ConnectWise endpoint.
 
-## Prerequisites
+The supported read boundary is documented in the [migration classification](legacy-read-surface-classification.md). Any future n8n integration must pass the [V2 staging acceptance checklist](v2-staging-acceptance-checklist.md) and use an explicitly approved identity and OAuth flow.
 
-- Gateway running (see `README.md` Docker setup)
-- `MCP_STATIC_TOKEN` set in `deploy/http-gateway/.env`
-- Gateway public URL: `https://connectwisemcp.funcshun.com`
+## Legacy rollback gateway
 
-## Option A: HTTP Request node (simple)
+The Docker/FastAPI JSON-RPC gateway and its static bearer flow are retained only for controlled emergency rollback. They are not a standing n8n integration path. Do not expose the gateway publicly, attach a tunnel, or configure an n8n credential against it from this guide.
 
-1. Add **HTTP Request** node.
-2. Method: **POST**
-3. URL: `https://connectwisemcp.funcshun.com/mcp`
-4. Authentication: **None**
-5. Headers:
-   - `Authorization: Bearer YOUR_TOKEN`
-   - `Content-Type: application/json`
+During an approved rollback, an authorized operator must use the verified canonical `main` artifact and the [cutover and rollback runbook](cutover-rollback-runbook.md). The operator will provide the time-bounded endpoint, credential handling requirements, and perimeter controls if n8n access is part of the approved incident plan.
 
-6. Body (JSON):
-
-```
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/list",
-  "params": {}
-}
-```
-
-Run the node to list MCP tools.
-
-### Example: call a tool
-
-Replace `method` with `tools/call` and set `params`:
-
-```
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "method": "tools/call",
-  "params": {
-    "name": "search_api_endpoints",
-    "arguments": {
-      "query": "tickets",
-      "max_results": 5
-    }
-  }
-}
-```
-
-## Known-good n8n config
-
-- **Node:** HTTP Request
-- **Method:** POST
-- **URL:** `https://connectwisemcp.funcshun.com/mcp`
-- **Headers:**
-  - `Authorization: Bearer YOUR_TOKEN`
-  - `Content-Type: application/json`
-- **Body (JSON):** `tools/list` or `tools/call`
-
-## Option B: n8n credentials (reusable)
-
-Create a **Generic Credential** (or use HTTP Request with header injection) that stores:
-
-- `Authorization: Bearer YOUR_TOKEN`
-
-Then attach it to any HTTP Request node that calls the MCP gateway.
-
-## Notes
-
-- The MCP endpoint is `/mcp` for JSON-RPC calls.
-- If you need streaming, use `/sse` and an SSE-capable node/plugin.
-- Use `tools/list` first to confirm the tool names exposed by your server.
+Never store ConnectWise, Entra, Cloudflare, signing, or rollback bearer credentials in workflow exports, source control, logs, or issue reports.

@@ -14,105 +14,21 @@ Follow the non-secret [V2 staging acceptance checklist](v2-staging-acceptance-ch
 
 ## Legacy rollback gateway
 
-> This remaining section configures the Docker/FastAPI rollback gateway, including its static bearer-token option. It is not the V2 deployment path.
+The Docker/FastAPI gateway is retained only as a controlled, time-bounded rollback path. Do not attach a tunnel or public route, and do not use locally built images for rollback. An authorized operator must activate it from the verified canonical `main` artifact by following the [cutover and rollback runbook](cutover-rollback-runbook.md). Client onboarding occurs only after that procedure establishes the approved endpoint and perimeter controls.
 
-This guide connects Claude to the ConnectwiseMCP HTTP gateway.
+## Local legacy development
 
-## Prerequisites
+Local development may use the gateway on `127.0.0.1`; it is not a production or rollback deployment.
 
-- Gateway running (see `README.md` Docker setup)
-- `MCP_STATIC_TOKEN` set in `deploy/http-gateway/.env`
-- Public URL: `https://connectwisemcp.funcshun.com`
+1. Copy `deploy/http-gateway/.env.example` to `deploy/http-gateway/.env` and set strong local values for `MCP_STATIC_TOKEN`, `JWT_SECRET_KEY`, and the required `CONNECTWISE_*` variables.
+2. Keep `SERVER_URL` and `MCP_RESOURCE_URL` set to `http://127.0.0.1:8000`.
+3. Start only the local gateway service:
 
-## Local macOS install (Homebrew + Docker)
+   ```bash
+   cd deploy/http-gateway
+   docker compose up -d --build mcp-gateway
+   ```
 
-Use this if you want Claude to connect to a local MCP server on `127.0.0.1`.
+4. Verify `http://127.0.0.1:8000/health` and add `http://127.0.0.1:8000/sse` to a local Claude client with the local static token.
 
-### 1) Install Homebrew + tooling
-
-```
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install git
-brew install --cask docker
-```
-
-Open **Docker Desktop** once and wait for it to finish starting.
-
-### 2) Clone the repo
-
-```
-git clone https://github.com/luckyludev/ConnectwiseMCP.git
-cd ConnectwiseMCP
-```
-
-### 3) Configure local env
-
-```
-cp deploy/http-gateway/.env.example deploy/http-gateway/.env
-```
-
-Edit `deploy/http-gateway/.env` and set:
-
-- `MCP_STATIC_TOKEN` (strong random token)
-- `JWT_SECRET_KEY` (strong random secret)
-- `CONNECTWISE_*` values
-- `SERVER_URL=http://127.0.0.1:8000`
-- `MCP_RESOURCE_URL=http://127.0.0.1:8000`
-
-### 4) Start the local gateway (Docker)
-
-```
-cd deploy/http-gateway
-docker compose up -d --build mcp-gateway
-```
-
-Verify:
-
-```
-curl http://127.0.0.1:8000/health
-```
-
-> If you want the Cloudflare tunnel too, set `CLOUDFLARE_TUNNEL_TOKEN` and run `docker compose up -d --build` without the service name.
-
-### 5) Add the local MCP server in Claude
-
-In Claude → **Settings** → **Integrations / MCP**:
-
-- **Name:** `ConnectwiseMCP (Local)`
-- **Server URL:** `http://127.0.0.1:8000/sse`
-- **Auth:** Bearer token
-- **Token:** your `MCP_STATIC_TOKEN`
-
-## Option A: Token auth (fastest)
-
-1. Open Claude → **Settings** → **Integrations / MCP** (wording may vary).
-2. Add a new MCP server:
-   - **Name:** `ConnectwiseMCP`
-   - **Server URL:** `https://connectwisemcp.funcshun.com/sse`
-   - **Auth:** Bearer token
-   - **Token:** your `MCP_STATIC_TOKEN`
-3. Save, then test with a prompt like:
-   - “List the last 5 open ConnectWise tickets.”
-
-## Option B: OAuth (Azure AD)
-
-If you enabled OAuth on the gateway:
-
-1. In Claude, add MCP server:
-   - **Server URL:** `https://connectwisemcp.funcshun.com/sse`
-   - **Auth:** OAuth
-   - Leave Client ID/Secret blank (dynamic registration)
-2. Complete the Azure AD login prompt.
-
-## Known-good Claude connector config
-
-- **Name:** `ConnectwiseMCP`
-- **Server URL:** `https://connectwisemcp.funcshun.com/sse`
-- **Auth:** OAuth (or Bearer token)
-- **Token:** (only required for Bearer token)
-
-## Notes
-
-- For OAuth, ensure your Azure AD app includes:
-  - `https://connectwisemcp.funcshun.com/oauth/callback`
-- If you see `invalid_token`, verify `SERVER_URL` and `MCP_RESOURCE_URL` match the public URL.
+Never commit the environment file or copy credentials, tokens, or registration responses into logs or issue reports.
