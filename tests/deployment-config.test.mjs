@@ -444,7 +444,7 @@ describe("legacy rollback image security", () => {
       'test "$(docker image inspect --format \'{{.Id}}\' connectwise-legacy-rollback-ci)" = "$image_id"',
     );
     expect(attestJob).toContain(
-      "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+      "uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2",
     );
     expect(attestJob).toContain(
       "name: legacy-rollback-image-${{ github.sha }}",
@@ -458,7 +458,7 @@ describe("legacy rollback image security", () => {
     expect(attestStep.endsWith(subjectBlock)).toBe(true);
     expect(attestStep.match(/subject-path: \|/gu)).toHaveLength(1);
     expect(retainStep).toContain(
-      "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+      "uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
     );
     expect(retainStep).toContain(
       "if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')",
@@ -631,9 +631,9 @@ describe("staging deployment configuration", () => {
     const canonicalRunCondition =
       "if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')";
     const uploadAction =
-      "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1";
+      "uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2";
     const downloadAction =
-      "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1";
+      "uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2";
     const attestAction =
       "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2";
 
