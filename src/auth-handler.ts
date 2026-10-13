@@ -666,6 +666,10 @@ export function createTokenExchangeCallback(
     if (options.grantType !== "refresh_token") return;
 
     try {
+      // Reapply the stored grant's local identity and authorization policy before
+      // reading either refresh credential or making an authenticated request.
+      // The post-refresh check below remains necessary for fresh Entra claims.
+      reauthorizeGrantProfile(props, env);
       const tokenSet = await refreshEntraTokens(
         {
           tenantId: env.ENTRA_TENANT_ID,
