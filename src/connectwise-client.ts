@@ -1006,6 +1006,7 @@ export function createConnectWiseClient(
         attempt + 1 < maxAttempts
       ) {
         await cancelResponseBody(response);
+        emitRequestLog(method, response.status, startedAtMs, "upstream_error");
         await sleep(100);
         continue;
       }

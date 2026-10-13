@@ -785,34 +785,60 @@ describe("ConnectWiseClient", () => {
     expect(cancelled).toBe(true);
   });
 
-  it("retries one safe transient response with a bounded delay", async () => {
-    let attempts = 0;
-    const delays: number[] = [];
-    const client = createConnectWiseClient(credentials, {
-      fetcher: async () => {
-        attempts += 1;
-        if (attempts === 1) return new Response(null, { status: 503 });
-        return new Response(JSON.stringify({ id: 123, summary: "Recovered" }), {
+  it.each([429, 502, 503, 504])(
+    "audits a retried %s response before a successful safe retry",
+    async (transientStatus) => {
+      let attempts = 0;
+      const delays: number[] = [];
+      const logs: string[] = [];
+      const sensitiveMarker = "sensitive-upstream-retry-body";
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            return new Response(sensitiveMarker, { status: transientStatus });
+          }
+          return new Response(
+            JSON.stringify({ id: 123, summary: "Recovered" }),
+            { status: 200 },
+          );
+        },
+        sleep: async (milliseconds) => {
+          delays.push(milliseconds);
+        },
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.getServiceTicket(123)).resolves.toEqual({
+        id: 123,
+        summary: "Recovered",
+      });
+      expect(attempts).toBe(2);
+      expect(delays).toEqual([100]);
+      expect(logs).toHaveLength(2);
+      expect(logs.join("\n")).not.toContain(sensitiveMarker);
+      expect(logs.map((line) => JSON.parse(line))).toEqual([
+        expect.objectContaining({
+          event: "cw_request",
+          method: "GET",
+          status: transientStatus,
+          outcome: "upstream_error",
+        }),
+        expect.objectContaining({
+          event: "cw_request",
+          method: "GET",
           status: 200,
-        });
-      },
-      sleep: async (milliseconds) => {
-        delays.push(milliseconds);
-      },
-    });
+          outcome: "success",
+        }),
+      ]);
+    },
+  );
 
-    await expect(client.getServiceTicket(123)).resolves.toEqual({
-      id: 123,
-      summary: "Recovered",
-    });
-    expect(attempts).toBe(2);
-    expect(delays).toEqual([100]);
-  });
-
-  it("stops after two transient responses and cancels both bodies", async () => {
+  it("stops after two transient responses, audits both, and cancels both bodies", async () => {
     let attempts = 0;
     let cancellations = 0;
     const delays: number[] = [];
+    const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async () => {
         attempts += 1;
@@ -828,6 +854,7 @@ describe("ConnectWiseClient", () => {
       sleep: async (milliseconds) => {
         delays.push(milliseconds);
       },
+      log: (line) => logs.push(line),
     });
 
     await expect(client.getServiceTicket(123)).rejects.toThrow(
@@ -836,6 +863,20 @@ describe("ConnectWiseClient", () => {
     expect(attempts).toBe(2);
     expect(cancellations).toBe(2);
     expect(delays).toEqual([100]);
+    expect(logs.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        event: "cw_request",
+        method: "GET",
+        status: 503,
+        outcome: "upstream_error",
+      }),
+      expect.objectContaining({
+        event: "cw_request",
+        method: "GET",
+        status: 503,
+        outcome: "upstream_error",
+      }),
+    ]);
   });
 
   it("refuses get_my_member without a profile memberId and makes no request", async () => {
