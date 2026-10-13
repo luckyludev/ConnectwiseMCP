@@ -3818,22 +3818,28 @@ describe("ConnectWiseClient", () => {
     expect(methods).toEqual(["GET"]);
   });
 
-  it("deletes only a schedule entry owned by the mapped member", async () => {
+  it("deletes only a schedule entry owned by the mapped member and confirms removal", async () => {
     const calls: string[] = [];
+    let getCount = 0;
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input, init) => {
         const method =
           (init as { method?: string } | undefined)?.method ?? "GET";
         calls.push(`${method} ${String(input)}`);
-        return method === "GET"
+        if (method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        getCount += 1;
+        return getCount === 1
           ? Response.json({ id: 247134, member: { id: 149 } })
-          : new Response(null, { status: 204 });
+          : new Response(null, { status: 404 });
       },
     });
     await client.deleteScheduleEntry(247134);
     expect(calls).toEqual([
       "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134?fields=id%2Cmember",
       "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
+      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134?fields=id%2Cmember",
     ]);
   });
 
@@ -3863,30 +3869,37 @@ describe("ConnectWiseClient", () => {
     "accepts a successful DELETE with a %s response body without retrying",
     async (_name, deleteResponse) => {
       const methods: string[] = [];
+      let getCount = 0;
       const client = createConnectWiseClient(credentials, {
         fetcher: async (_input, init) => {
           const method =
             (init as { method?: string } | undefined)?.method ?? "GET";
           methods.push(method);
-          return method === "GET"
+          if (method === "DELETE") return deleteResponse();
+          getCount += 1;
+          return getCount === 1
             ? Response.json({ id: 247134, member: { id: 149 } })
-            : deleteResponse();
+            : new Response(null, { status: 404 });
         },
       });
 
       await client.deleteScheduleEntry(247134);
-      expect(methods).toEqual(["GET", "DELETE"]);
+      expect(methods).toEqual(["GET", "DELETE", "GET"]);
     },
   );
 
   it("cancels an unused successful DELETE response body", async () => {
     let cancelled = false;
+    let getCount = 0;
     const client = createConnectWiseClient(credentials, {
       fetcher: async (_input, init) => {
         const method =
           (init as { method?: string } | undefined)?.method ?? "GET";
         if (method === "GET") {
-          return Response.json({ id: 247134, member: { id: 149 } });
+          getCount += 1;
+          return getCount === 1
+            ? Response.json({ id: 247134, member: { id: 149 } })
+            : new Response(null, { status: 404 });
         }
         return new Response(
           new ReadableStream({
@@ -3902,6 +3915,69 @@ describe("ConnectWiseClient", () => {
     await client.deleteScheduleEntry(247134);
     expect(cancelled).toBe(true);
   });
+
+  it("classifies a synchronous DELETE that leaves the entry present as indeterminate", async () => {
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        return method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : Response.json({ id: 247134, member: { id: 149 } });
+      },
+    });
+
+    await expect(client.deleteScheduleEntry(247134)).rejects.toBeInstanceOf(
+      ConnectWiseIndeterminateWriteError,
+    );
+    expect(methods).toEqual(["GET", "DELETE", "GET"]);
+  });
+
+  it.each([
+    ["unavailable", () => Promise.reject(new Error("response lost"))],
+    [
+      "server error",
+      () => Promise.resolve(new Response(null, { status: 503 })),
+    ],
+    [
+      "redirected",
+      () =>
+        Promise.resolve(
+          new Response(null, {
+            status: 307,
+            headers: { Location: "https://hostile.example/" },
+          }),
+        ),
+    ],
+    ["malformed", () => Promise.resolve(Response.json({ id: 247135 }))],
+  ])(
+    "classifies a %s deletion confirmation as indeterminate without repeating DELETE",
+    async (_name, confirmationResult) => {
+      const methods: string[] = [];
+      let getCount = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          const method =
+            (init as { method?: string } | undefined)?.method ?? "GET";
+          methods.push(method);
+          if (method === "DELETE") {
+            return new Response(null, { status: 204 });
+          }
+          getCount += 1;
+          return getCount === 1
+            ? Response.json({ id: 247134, member: { id: 149 } })
+            : confirmationResult();
+        },
+      });
+
+      await expect(client.deleteScheduleEntry(247134)).rejects.toBeInstanceOf(
+        ConnectWiseIndeterminateWriteError,
+      );
+      expect(methods.filter((method) => method === "DELETE")).toHaveLength(1);
+    },
+  );
 
   it("classifies an accepted asynchronous DELETE as indeterminate", async () => {
     let cancelled = false;
