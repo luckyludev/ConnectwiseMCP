@@ -397,7 +397,16 @@ describe("authenticated MCP transport", () => {
       maxImageBytes: 1_000_000,
       allowedMimeTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"],
     });
-    expect(bindingReads).toEqual([]);
+    expect(bindingReads).toEqual([
+      "ENTRA_TENANT_ID",
+      "IDENTITY_PROFILE_MAP",
+      "ALLOWED_GROUP_IDS",
+      "ALLOWED_APP_ROLES",
+    ]);
+    expect(bindingReads).not.toContain("CONNECTWISE_ALLOWED_ORIGINS");
+    expect(
+      bindingReads.every((binding) => !binding.startsWith("CW_PROFILE_")),
+    ).toBe(true);
     expect(clientCreated).toBe(false);
     expect(auditMessages).toHaveLength(1);
     expect(JSON.parse(auditMessages[0]!)).toMatchObject({
@@ -405,6 +414,77 @@ describe("authenticated MCP transport", () => {
       tool: "open_attachment_uploader",
       outcome: "success",
       reason: "ok",
+    });
+  });
+
+  it("rejects the attachment uploader after its identity mapping is revoked", async () => {
+    const auditMessages: string[] = [];
+    const bindingReads: string[] = [];
+    let clientCreated = false;
+    const guardedEnv = new Proxy(
+      { ...env, IDENTITY_PROFILE_MAP: "{}" },
+      {
+        get(target, property, receiver) {
+          bindingReads.push(String(property));
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(guardedEnv, {
+          audit: { logger: (message) => auditMessages.push(message) },
+          createBusinessClient: () => {
+            clientCreated = true;
+            return businessClient();
+          },
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: authProps("LUIS") },
+      },
+    );
+
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name: "open_attachment_uploader", arguments: {} },
+        }),
+      }),
+    );
+    const body = await response.text();
+
+    expect(response.status, body).toBe(200);
+    expect(body).toContain("ConnectWise operation failed");
+    expect(body).not.toContain("allowedMimeTypes");
+    expect(bindingReads).toEqual([
+      "ENTRA_TENANT_ID",
+      "IDENTITY_PROFILE_MAP",
+      "ALLOWED_GROUP_IDS",
+      "ALLOWED_APP_ROLES",
+    ]);
+    expect(bindingReads).not.toContain("CONNECTWISE_ALLOWED_ORIGINS");
+    expect(
+      bindingReads.every((binding) => !binding.startsWith("CW_PROFILE_")),
+    ).toBe(true);
+    expect(clientCreated).toBe(false);
+    expect(auditMessages).toHaveLength(1);
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      profileAlias: "LUIS",
+      tool: "open_attachment_uploader",
+      outcome: "failure",
+      reason: "operation_failed",
     });
   });
 
@@ -1689,6 +1769,67 @@ describe("authenticated MCP transport", () => {
     expect(body).not.toContain("Drop or paste an image here");
     expect(body).not.toContain("upload_connectwise_image");
     expect(bindingReads).toBe(0);
+    expect(clientCreations).toBe(0);
+  });
+
+  it("rejects attachment resource reads after eligibility is revoked", async () => {
+    const bindingReads: string[] = [];
+    let clientCreations = 0;
+    const guardedEnv = new Proxy(
+      { ...env, ALLOWED_GROUP_IDS: "[]" },
+      {
+        get(target, property, receiver) {
+          bindingReads.push(String(property));
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(guardedEnv, {
+          createBusinessClient: () => {
+            clientCreations += 1;
+            return businessClient();
+          },
+        }),
+      {
+        route: "/mcp",
+        corsOptions: false,
+        authContext: { props: authProps("LUIS") },
+      },
+    );
+    const response = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 25,
+          method: "resources/read",
+          params: { uri: "ui://connectwise/attachment-uploader.html" },
+        }),
+      }),
+    );
+    const body = await response.text();
+
+    expect(response.status, body).toBe(200);
+    expect(body).not.toContain("Drop or paste an image here");
+    expect(body).not.toContain("upload_connectwise_image");
+    expect(bindingReads).toEqual([
+      "ENTRA_TENANT_ID",
+      "IDENTITY_PROFILE_MAP",
+      "ALLOWED_GROUP_IDS",
+      "ALLOWED_APP_ROLES",
+    ]);
+    expect(bindingReads).not.toContain("CONNECTWISE_ALLOWED_ORIGINS");
+    expect(
+      bindingReads.every((binding) => !binding.startsWith("CW_PROFILE_")),
+    ).toBe(true);
     expect(clientCreations).toBe(0);
   });
 

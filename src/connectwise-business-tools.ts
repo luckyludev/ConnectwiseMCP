@@ -16,6 +16,7 @@ import {
 } from "./connectwise-client";
 import {
   resolveIdentityBoundConnectWiseCredentials,
+  resolveIdentityBoundProfileAlias,
   type ConnectWiseCredentials,
 } from "./connectwise-profile";
 import type { EntraAccessTokenProps } from "./auth-handler";
@@ -717,6 +718,7 @@ export function registerConnectWiseBusinessTools(
       if (!hasAuthenticatedProfile(props)) {
         throw new Error("Authenticated profile unavailable");
       }
+      resolveIdentityBoundProfileAlias(env, props);
       return {
         contents: [
           {
@@ -756,12 +758,15 @@ export function registerConnectWiseBusinessTools(
       runAuthorizedTool(
         getProps(),
         "open_attachment_uploader",
-        async () => ({
-          recordType,
-          recordId: recordId ?? null,
-          maxImageBytes: MAX_IMAGE_UPLOAD_BYTES,
-          allowedMimeTypes: CONNECTWISE_IMAGE_MIME_TYPES,
-        }),
+        async (authorizedProps) => {
+          resolveIdentityBoundProfileAlias(env, authorizedProps);
+          return {
+            recordType,
+            recordId: recordId ?? null,
+            maxImageBytes: MAX_IMAGE_UPLOAD_BYTES,
+            allowedMimeTypes: CONNECTWISE_IMAGE_MIME_TYPES,
+          };
+        },
         dependencies,
       ),
   );
