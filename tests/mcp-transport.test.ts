@@ -2948,14 +2948,19 @@ describe("authenticated MCP transport", () => {
     expect(text).not.toContain("privateKey");
   });
 
-  it("delete_schedule_entry verifies mapped-member ownership before DELETE", async () => {
+  it("delete_schedule_entry verifies mapped-member ownership and confirms removal", async () => {
     const calls: string[] = [];
+    let getCount = 0;
     const fetcher: typeof fetch = async (input, init) => {
       const method = (init as { method?: string } | undefined)?.method ?? "GET";
       calls.push(`${method} ${String(input)}`);
-      return method === "GET"
+      if (method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      getCount += 1;
+      return getCount === 1
         ? Response.json({ id: 247134, member: { id: 149 } })
-        : new Response(null, { status: 204 });
+        : new Response(null, { status: 404 });
     };
     const handler = createMcpHandler(
       () =>
@@ -2995,19 +3000,24 @@ describe("authenticated MCP transport", () => {
     expect(calls).toEqual([
       "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134?fields=id%2Cmember",
       "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
+      "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134?fields=id%2Cmember",
     ]);
   });
 
-  it("reports and audits an ambiguous schedule deletion without retrying", async () => {
+  it("reports and audits a schedule deletion that remains present", async () => {
     const methods: string[] = [];
     const auditMessages: string[] = [];
     const fetcher: typeof fetch = async (_input, init) => {
       const method = (init as { method?: string } | undefined)?.method ?? "GET";
       methods.push(method);
-      if (method === "GET") {
-        return Response.json({ id: 247134, member: { id: 149 } });
+      if (method === "DELETE") {
+        return new Response(null, { status: 204 });
       }
-      throw new Error("response lost after commit");
+      return Response.json({
+        id: 247134,
+        member: { id: 149 },
+        secret: "must-not-leak",
+      });
     };
     const handler = createMcpHandler(
       () =>
@@ -3049,8 +3059,8 @@ describe("authenticated MCP transport", () => {
     expect(text).toContain(
       "ConnectWise write outcome is unknown; verify the record before retrying",
     );
-    expect(text).not.toContain("response lost after commit");
-    expect(methods).toEqual(["GET", "DELETE"]);
+    expect(text).not.toContain("must-not-leak");
+    expect(methods).toEqual(["GET", "DELETE", "GET"]);
     expect(auditMessages).toHaveLength(1);
     expect(JSON.parse(auditMessages[0]!)).toMatchObject({
       profileAlias: "LUIS",
@@ -3058,7 +3068,7 @@ describe("authenticated MCP transport", () => {
       outcome: "failure",
       reason: "write_outcome_unknown",
     });
-    expect(auditMessages[0]).not.toContain("response lost after commit");
+    expect(auditMessages[0]).not.toContain("must-not-leak");
   });
 
   it("create_time_entry uses the mapped profile member on the wire", async () => {

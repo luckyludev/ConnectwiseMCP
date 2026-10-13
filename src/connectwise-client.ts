@@ -2671,6 +2671,22 @@ export function createConnectWiseClient(
       );
       assertMappedMember(existing, memberId);
       await requestJson("DELETE", `/schedule/entries/${entryId}`);
+      try {
+        await requestJson("GET", `/schedule/entries/${entryId}`, {
+          fields: SCHEDULE_ENTRY_OWNERSHIP_FIELDS,
+        });
+      } catch (error) {
+        if (
+          error instanceof ConnectWiseRequestError &&
+          error.status === 404 &&
+          error.diagnostics?.method === "GET" &&
+          error.diagnostics.path === `/schedule/entries/${entryId}`
+        ) {
+          return;
+        }
+        throw new ConnectWiseIndeterminateWriteError();
+      }
+      throw new ConnectWiseIndeterminateWriteError();
     },
 
     async openScheduleEntriesForObject(objectId): Promise<unknown[]> {
