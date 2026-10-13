@@ -719,6 +719,7 @@ function deployVerifiedBundle(
 
     const wrangler = join(temporaryRuntime, ".bin", "wrangler");
     const arguments_ = [
+      wrangler,
       "deploy",
       temporaryBundle,
       "--no-bundle",
@@ -741,7 +742,7 @@ function deployVerifiedBundle(
       const deploymentEnvironment = { ...process.env };
       delete deploymentEnvironment.NODE_OPTIONS;
       delete deploymentEnvironment.NODE_PATH;
-      result = spawnSync(wrangler, arguments_, {
+      result = spawnSync(process.execPath, arguments_, {
         env: deploymentEnvironment,
         stdio: "inherit",
       });

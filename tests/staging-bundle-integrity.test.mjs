@@ -99,10 +99,12 @@ function runLauncher(cwd, releaseSha, environmentOverrides = {}) {
   const env = { ...process.env };
   delete env.NODE_OPTIONS;
   delete env.NODE_PATH;
+  delete env.DEPLOY_NODE_PATH;
   delete env.STAGING_RELEASE_SHA;
   delete env.STAGING_BUNDLE_SHA256;
   delete env.STAGING_CONFIG_SHA256;
   delete env.STAGING_DEPLOY_RUNTIME_SHA256;
+  env.DEPLOY_NODE_PATH = process.execPath;
   Object.assign(env, environmentOverrides);
   if (releaseSha !== undefined) env.STAGING_RELEASE_SHA = releaseSha;
   return spawnSync(deploymentLauncherPath, [], {
@@ -500,6 +502,77 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
       expect(result.stderr).toContain(
         "Refusing credential-bearing deployment while NODE_PATH is set.",
       );
+    });
+  });
+
+  it("does not resolve Node or Wrangler through an inherited PATH", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const hostileBin = join(cwd, "hostile-bin");
+      const nodeMarker = join(cwd, "path-node-ran");
+      const wranglerMarker = join(cwd, "wrangler-ran");
+      const wrangler = join(cwd, "node_modules", ".bin", "wrangler");
+      await mkdir(hostileBin);
+      await writeFile(
+        join(hostileBin, "node"),
+        `#!/bin/sh\nprintf '%s' "$CLOUDFLARE_API_TOKEN" > ${JSON.stringify(nodeMarker)}\nexit 73\n`,
+      );
+      await chmod(join(hostileBin, "node"), 0o755);
+      await writeFile(
+        wrangler,
+        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(wranglerMarker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
+      );
+      await chmod(wrangler, 0o755);
+      expect(run(cwd, "create").status).toBe(0);
+
+      const result = runLauncher(cwd, head, {
+        ...(await stagingDeploymentDigests(cwd)),
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+        PATH: `${hostileBin}:${process.env.PATH ?? ""}`,
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      await expect(readFile(nodeMarker)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readFile(wranglerMarker, "utf8")).resolves.toBe(
+        "credential-canary",
+      );
+    });
+  });
+
+  it.each([
+    ["missing", ""],
+    ["relative", "node"],
+  ])("rejects a %s approved Node path", async (_label, nodePath) => {
+    await withCheckout(async ({ cwd }) => {
+      const result = runLauncher(cwd, undefined, {
+        DEPLOY_NODE_PATH: nodePath,
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "DEPLOY_NODE_PATH must name the approved absolute Node executable.",
+      );
+    });
+  });
+
+  it("rejects symlinked and non-executable approved Node paths", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const nodeLink = join(cwd, "node-link");
+      const nonExecutable = join(cwd, "node-not-executable");
+      await symlink(process.execPath, nodeLink);
+      await writeFile(nonExecutable, "not executable\n");
+      await chmod(nonExecutable, 0o600);
+
+      for (const nodePath of [nodeLink, nonExecutable]) {
+        const result = runLauncher(cwd, undefined, {
+          DEPLOY_NODE_PATH: nodePath,
+        });
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          "DEPLOY_NODE_PATH must be a regular, non-symlink executable.",
+        );
+      }
     });
   });
 

@@ -958,7 +958,10 @@ describe("staging deployment configuration", () => {
     );
     expect(deploymentLauncher).toContain('if [ "${NODE_PATH+x}" = x ]; then');
     expect(deploymentLauncher).toContain(
-      'exec node scripts/staging-bundle-integrity.mjs deploy "$@"',
+      'if [ -z "${DEPLOY_NODE_PATH:-}" ]; then',
+    );
+    expect(deploymentLauncher).toContain(
+      'exec "$DEPLOY_NODE_PATH" scripts/staging-bundle-integrity.mjs deploy "$@"',
     );
     expect(deploymentLauncherStat.mode & 0o111).not.toBe(0);
     expect(packageJson.scripts?.["prepare:staging"]).toContain("npm ci");
