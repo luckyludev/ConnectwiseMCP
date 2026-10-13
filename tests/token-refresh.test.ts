@@ -143,6 +143,76 @@ describe("Entra token refresh reauthorization", () => {
     },
   );
 
+  it.each([
+    ["removes", "{}"],
+    [
+      "remaps",
+      JSON.stringify({
+        "tenant-a:user-1": "ALICE",
+        "tenant-a:user-2": "LUIS",
+      }),
+    ],
+  ])(
+    "rejects and revokes a refresh grant before secret access when policy %s the identity mapping",
+    async (_action, identityProfileMap) => {
+      let revokedWith: unknown[] | undefined;
+      let fetched = false;
+      const env = {
+        ENTRA_TENANT_ID: "tenant-a",
+        ENTRA_CLIENT_ID: "entra-client",
+        MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        IDENTITY_PROFILE_MAP: identityProfileMap,
+        ALLOWED_GROUP_IDS: JSON.stringify(["group-mcp-users"]),
+        ALLOWED_APP_ROLES: "[]",
+        OAUTH_PROVIDER: {
+          async revokeGrant(...args: unknown[]) {
+            revokedWith = args;
+          },
+        },
+      };
+      Object.defineProperty(env, "ENTRA_CLIENT_SECRET", {
+        get() {
+          throw new Error("refresh exchange accessed Entra client secret");
+        },
+      });
+      const props = {
+        tenantId: "tenant-a",
+        objectId: "user-1",
+        profileAlias: "LUIS",
+        groups: ["group-mcp-users"],
+        roles: [],
+        upstreamExpiresIn: 3600,
+      };
+      Object.defineProperty(props, "upstreamRefreshToken", {
+        get() {
+          throw new Error("refresh exchange accessed upstream refresh token");
+        },
+      });
+
+      await expect(
+        createTokenExchangeCallback(env as unknown as WorkerEnv, {
+          fetcher: async () => {
+            fetched = true;
+            throw new Error("refresh exchange made an upstream request");
+          },
+        })({
+          env: env as unknown as WorkerEnv,
+          grantType: "refresh_token" as never,
+          clientId: "mcp-client",
+          subjectClientId: "mcp-client",
+          resource: "https://mcp.example.com/mcp",
+          userId: "tenant-a:user-1",
+          grantId: "grant-1",
+          scope: ["mcp:read"],
+          requestedScope: ["mcp:read"],
+          props: props as unknown as EntraGrantProps,
+        }),
+      ).rejects.toThrow();
+      expect(fetched).toBe(false);
+      expect(revokedWith).toEqual(["grant-1", "tenant-a:user-1"]);
+    },
+  );
+
   it("fails closed without revoking when authorization-code policy configuration is invalid", async () => {
     let revoked = false;
     const env = authorizationCodeEnv("not-json", async () => {
@@ -277,6 +347,9 @@ describe("Entra token refresh reauthorization", () => {
       ENTRA_CLIENT_ID: "entra-client",
       ENTRA_CLIENT_SECRET: "secret",
       MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      IDENTITY_PROFILE_MAP: JSON.stringify({ "tenant-a:user-1": "LUIS" }),
+      ALLOWED_GROUP_IDS: JSON.stringify(["group-mcp-users"]),
+      ALLOWED_APP_ROLES: "[]",
       OAUTH_PROVIDER: {
         async revokeGrant() {
           revoked = true;
@@ -303,7 +376,7 @@ describe("Entra token refresh reauthorization", () => {
           tenantId: "tenant-a",
           objectId: "user-1",
           profileAlias: "LUIS",
-          groups: [],
+          groups: ["group-mcp-users"],
           roles: [],
           upstreamRefreshToken: "current-refresh-token",
           upstreamExpiresIn: 3600,
@@ -320,6 +393,9 @@ describe("Entra token refresh reauthorization", () => {
       ENTRA_CLIENT_ID: "entra-client",
       ENTRA_CLIENT_SECRET: "secret",
       MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      IDENTITY_PROFILE_MAP: JSON.stringify({ "tenant-a:user-1": "LUIS" }),
+      ALLOWED_GROUP_IDS: JSON.stringify(["group-mcp-users"]),
+      ALLOWED_APP_ROLES: "[]",
       OAUTH_PROVIDER: {
         async revokeGrant(...args: unknown[]) {
           revokedWith = args;
@@ -348,7 +424,7 @@ describe("Entra token refresh reauthorization", () => {
           tenantId: "tenant-a",
           objectId: "user-1",
           profileAlias: "LUIS",
-          groups: [],
+          groups: ["group-mcp-users"],
           roles: [],
           upstreamRefreshToken: "current-refresh-token",
           upstreamExpiresIn: 3600,
