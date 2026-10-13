@@ -36,6 +36,61 @@ Record account/operator and release evidence in an approved secure operations re
 
 Every successful canonical `main` `v2-ci` push, schedule, or manual run retains separate `v2-staging-release-<release-commit>` and `v2-production-release-<release-commit>` evidence artifacts for 90 days. Each contains the exact dry-run bundle, target manifest, reviewed `wrangler.jsonc`, locked npm dependency graph, canonical target-specific runtime inventory, and CycloneDX SBOM produced by that run. The strict schema-v5 manifest binds the bundle, configuration, package lock, and runtime inventory hashes and sizes; the inventory reproduces the manifest's length-prefixed runtime digest without retaining `node_modules`. GitHub attestations bind every retained file to the canonical repository and `.github/workflows/v2-ci.yml`. Before approving a release, verify the run succeeded on the exact full commit, download the target artifact without renaming files, and run `gh attestation verify` on all six files with the canonical repository, signer workflow, `refs/heads/main`, and full source digest constraints. Then run `npm run verify:v2-evidence -- <DOWNLOADED_DIRECTORY> <staging|production> <FULL_RELEASE_COMMIT>` from a reviewed repository checkout. That offline verifier requires no Git metadata, `node_modules`, or network access and fails closed on the file set, file types, release binding, manifest-bound bytes, runtime inventory digest/count, and CycloneDX structure. An expired artifact, failed run, pull-request run, unattested file, renamed/substituted file, failed offline verification, or local rebuild is not release evidence. Retention and attestation provide review evidence only; they do not authorize deployment or permit CI to receive Cloudflare credentials.
 
+### Verify retained V2 release evidence
+
+Use this exact procedure separately for the staging and production artifacts. Set `RELEASE_TARGET` to only `staging` or `production`; use the same successful canonical-main run ID and full commit for both runs:
+
+```bash
+set -euo pipefail
+umask 077
+reviewed_checkout=$PWD
+RELEASE_TARGET='<staging-or-production>'
+FULL_RELEASE_COMMIT='<approved-full-release-commit>'
+SUCCESSFUL_MAIN_RUN_ID='<successful-main-v2-ci-run-id>'
+[[ "$FULL_RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 1
+[[ "$SUCCESSFUL_MAIN_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+case "$RELEASE_TARGET" in
+  staging)
+    manifest=staging-bundle-manifest.json
+    inventory=staging-runtime-inventory.json
+    sbom=connectwise-v2-staging.cdx.json
+    ;;
+  production)
+    manifest=production-bundle-manifest.json
+    inventory=production-runtime-inventory.json
+    sbom=connectwise-v2-production.cdx.json
+    ;;
+  *) exit 1 ;;
+esac
+artifact_dir=$(mktemp -d "/tmp/connectwise-v2-${RELEASE_TARGET}-evidence.XXXXXXXX")
+trap 'rm -rf -- "$artifact_dir"' EXIT
+gh run download "$SUCCESSFUL_MAIN_RUN_ID" \
+  --repo luckyludev/ConnectwiseMCP \
+  --name "v2-${RELEASE_TARGET}-release-${FULL_RELEASE_COMMIT}" \
+  --dir "$artifact_dir"
+for artifact_file in \
+  index.js \
+  "$manifest" \
+  "$inventory" \
+  wrangler.jsonc \
+  package-lock.json \
+  "$sbom"
+do
+  gh attestation verify "$artifact_dir/$artifact_file" \
+    --repo luckyludev/ConnectwiseMCP \
+    --signer-workflow luckyludev/ConnectwiseMCP/.github/workflows/v2-ci.yml \
+    --source-digest "$FULL_RELEASE_COMMIT" \
+    --source-ref refs/heads/main
+done
+(
+  cd "$reviewed_checkout"
+  npm run verify:v2-evidence -- \
+    "$artifact_dir" "$RELEASE_TARGET" "$FULL_RELEASE_COMMIT"
+)
+```
+
+Every attestation must pass before the offline verifier runs. Keep the download in its private temporary directory, record only sanitized result references, and let the exit trap remove the files. A missing file, extra file, target mismatch, provenance mismatch, or offline-verification failure is a release stop condition; do not rename, copy in, regenerate, or edit evidence to make it pass.
+
 ## 2. Inventory and isolate staging OAuth storage
 
 Namespaces are account-scoped, not domain-scoped. Before creating anything, inventory the approved Cloudflare account and the reviewed `env.staging` configuration:

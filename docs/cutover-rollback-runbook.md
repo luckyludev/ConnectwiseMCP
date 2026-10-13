@@ -119,7 +119,7 @@ The image-ID comparison must pass before starting the tunnel or routing any clie
 
 ### Production release artifact gate
 
-Production deployment is an operator-only action after the change record, release approval, staging acceptance, rollback evidence, and change window are all approved. CI and ordinary `npm run check` must never run `npm run deploy:production`; they may only exercise dry-run builds and verified dry-run consumption. Do not provide live Cloudflare credentials to CI for this path.
+Production deployment is an operator-only action after the change record, release approval, staging acceptance, rollback evidence, and change window are all approved. CI and ordinary `npm run check` must never run `npm run deploy:production`; they may only exercise dry-run builds and verified dry-run consumption. Do not provide live Cloudflare credentials to CI for this path. Before approving this gate, use the exact [retained V2 release-evidence verification procedure](cloudflare-workers-staging-howto.md#verify-retained-v2-release-evidence) for both the staging and production artifacts from the selected canonical-main run; retain sanitized references to all twelve successful provenance checks and both offline-verifier results.
 
 From a fresh, dedicated checkout of the approved canonical `origin/main` commit, with no `.env`, `.env.local`, `.env.production`, or `.env.production.local` file, perform the non-deploying preparation exactly as follows. `<FULL_RELEASE_COMMIT>` must be the approved 40-character lowercase commit, not a branch, abbreviated SHA, or mutable tag:
 

@@ -767,6 +767,66 @@ describe("staging deployment configuration", () => {
     expect(stagingHowto).toContain(
       "Retention and attestation provide review evidence only; they do not authorize deployment or permit CI to receive Cloudflare credentials",
     );
+
+    const procedureOffset = stagingHowto.indexOf(
+      "### Verify retained V2 release evidence",
+    );
+    const procedureEnd = stagingHowto.indexOf("\n## 2.", procedureOffset);
+    const procedure = stagingHowto.slice(procedureOffset, procedureEnd);
+    const procedureDownloadOffset = procedure.indexOf("gh run download");
+    const procedureAttestationOffset = procedure.indexOf(
+      "gh attestation verify",
+    );
+    const procedureOfflineOffset = procedure.indexOf(
+      "npm run verify:v2-evidence --",
+    );
+
+    expect(procedureOffset).toBeGreaterThan(-1);
+    expect(procedureEnd).toBeGreaterThan(procedureOffset);
+    expect(procedure).toContain("set -euo pipefail");
+    expect(procedure).toContain("umask 077");
+    expect(procedure).toContain(
+      '[[ "$FULL_RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 1',
+    );
+    expect(procedure).toContain(
+      '[[ "$SUCCESSFUL_MAIN_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1',
+    );
+    expect(procedure).toContain(
+      'artifact_dir=$(mktemp -d "/tmp/connectwise-v2-${RELEASE_TARGET}-evidence.XXXXXXXX")',
+    );
+    expect(procedure).toContain(
+      '--name "v2-${RELEASE_TARGET}-release-${FULL_RELEASE_COMMIT}"',
+    );
+    for (const file of [
+      "index.js",
+      "staging-bundle-manifest.json",
+      "staging-runtime-inventory.json",
+      "connectwise-v2-staging.cdx.json",
+      "production-bundle-manifest.json",
+      "production-runtime-inventory.json",
+      "connectwise-v2-production.cdx.json",
+      "wrangler.jsonc",
+      "package-lock.json",
+    ]) {
+      expect(procedure).toContain(file);
+    }
+    for (const constraint of [
+      "--repo luckyludev/ConnectwiseMCP",
+      "--signer-workflow luckyludev/ConnectwiseMCP/.github/workflows/v2-ci.yml",
+      '--source-digest "$FULL_RELEASE_COMMIT"',
+      "--source-ref refs/heads/main",
+    ]) {
+      expect(procedure).toContain(constraint);
+    }
+    expect(procedureDownloadOffset).toBeGreaterThan(-1);
+    expect(procedureAttestationOffset).toBeGreaterThan(procedureDownloadOffset);
+    expect(procedureOfflineOffset).toBeGreaterThan(procedureAttestationOffset);
+    expect(runbook).toContain(
+      "[retained V2 release-evidence verification procedure](cloudflare-workers-staging-howto.md#verify-retained-v2-release-evidence)",
+    );
+    expect(runbook).toContain(
+      "all twelve successful provenance checks and both offline-verifier results",
+    );
     expect(runbook).toContain(
       "successful canonical `v2-ci` run, and verified references to its attested staging and production release-evidence artifacts",
     );
