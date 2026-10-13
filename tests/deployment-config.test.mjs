@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 
 import { parse } from "jsonc-parser";
 import { describe, expect, it } from "vitest";
@@ -887,19 +887,32 @@ describe("staging deployment configuration", () => {
   });
 
   it("preserves remote variables and isolates staging OAuth storage", async () => {
-    const [config, packageJson, productionEnvironment, stagingHowto] =
-      await Promise.all([
-        readWranglerConfig(),
-        readJson("../package.json"),
-        readFile(new URL("../config/empty.env", import.meta.url)),
-        readFile(
-          new URL(
-            "../docs/cloudflare-workers-staging-howto.md",
-            import.meta.url,
-          ),
-          "utf8",
-        ),
-      ]);
+    const [
+      config,
+      packageJson,
+      productionEnvironment,
+      stagingHowto,
+      stagingChecklist,
+      deploymentLauncher,
+      deploymentLauncherStat,
+    ] = await Promise.all([
+      readWranglerConfig(),
+      readJson("../package.json"),
+      readFile(new URL("../config/empty.env", import.meta.url)),
+      readFile(
+        new URL("../docs/cloudflare-workers-staging-howto.md", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../docs/v2-staging-acceptance-checklist.md", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../scripts/deploy-verified-bundle.sh", import.meta.url),
+        "utf8",
+      ),
+      stat(new URL("../scripts/deploy-verified-bundle.sh", import.meta.url)),
+    ]);
     const staging = config.env?.staging;
     const stagingOAuthBindings = (staging?.kv_namespaces ?? []).filter(
       ({ binding }) => binding === "OAUTH_KV",
@@ -933,10 +946,21 @@ describe("staging deployment configuration", () => {
     expect(stagingHowto).toContain(
       "STAGING_CONFIG_SHA256=<approved-configuration-sha256>",
     );
-    expect(stagingHowto).toContain(
-      "node scripts/staging-bundle-integrity.mjs deploy",
-    );
+    for (const guide of [stagingHowto, stagingChecklist]) {
+      expect(guide).toContain("scripts/deploy-verified-bundle.sh");
+      expect(guide).not.toContain(
+        "node scripts/staging-bundle-integrity.mjs deploy",
+      );
+    }
     expect(stagingHowto).not.toContain("npm run deploy:staging");
+    expect(deploymentLauncher).toContain(
+      'if [ "${NODE_OPTIONS+x}" = x ]; then',
+    );
+    expect(deploymentLauncher).toContain('if [ "${NODE_PATH+x}" = x ]; then');
+    expect(deploymentLauncher).toContain(
+      'exec node scripts/staging-bundle-integrity.mjs deploy "$@"',
+    );
+    expect(deploymentLauncherStat.mode & 0o111).not.toBe(0);
     expect(packageJson.scripts?.["prepare:staging"]).toContain("npm ci");
     expect(packageJson.scripts?.["prepare:staging"]).toContain("npm run check");
     expect(productionEnvironment).toHaveLength(0);

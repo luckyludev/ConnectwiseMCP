@@ -22,6 +22,9 @@ import { describe, expect, it } from "vitest";
 const integrityPath = fileURLToPath(
   new URL("../scripts/staging-bundle-integrity.mjs", import.meta.url),
 );
+const deploymentLauncherPath = fileURLToPath(
+  new URL("../scripts/deploy-verified-bundle.sh", import.meta.url),
+);
 const projectNodeModules = fileURLToPath(
   new URL("../node_modules", import.meta.url),
 );
@@ -35,6 +38,11 @@ function git(cwd, args) {
 async function createCheckout() {
   const cwd = await mkdtemp(join(tmpdir(), "cw-staging-bundle-"));
   await mkdir(join(cwd, "dist"));
+  await mkdir(join(cwd, "scripts"));
+  await writeFile(
+    join(cwd, "scripts", "staging-bundle-integrity.mjs"),
+    await readFile(integrityPath),
+  );
   await writeFile(join(cwd, "release.txt"), "reviewed\n");
   await writeFile(join(cwd, "package-lock.json"), "{}\n");
   await writeFile(join(cwd, "dist", "index.js"), "export default {};\n");
@@ -81,6 +89,23 @@ function run(
   const arguments_ = [integrityPath, action];
   if (target !== "staging") arguments_.push(target);
   return spawnSync(process.execPath, arguments_, {
+    cwd,
+    env,
+    encoding: "utf8",
+  });
+}
+
+function runLauncher(cwd, releaseSha, environmentOverrides = {}) {
+  const env = { ...process.env };
+  delete env.NODE_OPTIONS;
+  delete env.NODE_PATH;
+  delete env.STAGING_RELEASE_SHA;
+  delete env.STAGING_BUNDLE_SHA256;
+  delete env.STAGING_CONFIG_SHA256;
+  delete env.STAGING_DEPLOY_RUNTIME_SHA256;
+  Object.assign(env, environmentOverrides);
+  if (releaseSha !== undefined) env.STAGING_RELEASE_SHA = releaseSha;
+  return spawnSync(deploymentLauncherPath, [], {
     cwd,
     env,
     encoding: "utf8",
@@ -406,6 +431,74 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(
         "The staging deployment runtime must remain inside the checkout.",
+      );
+    });
+  });
+
+  it("rejects Node preload injection before exposing deployment credentials", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const wrangler = join(cwd, "node_modules", ".bin", "wrangler");
+      const preload = join(cwd, "preload.mjs");
+      const preloadMarker = join(cwd, "preload-ran");
+      const wranglerMarker = join(cwd, "wrangler-ran");
+      await writeFile(
+        preload,
+        `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(preloadMarker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
+      );
+      await writeFile(
+        wrangler,
+        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(wranglerMarker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
+      );
+      await chmod(wrangler, 0o755);
+      expect(run(cwd, "create").status).toBe(0);
+
+      const result = runLauncher(cwd, head, {
+        ...(await stagingDeploymentDigests(cwd)),
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+        NODE_OPTIONS: `--import=${preload}`,
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Refusing credential-bearing deployment while NODE_OPTIONS is set.",
+      );
+      await expect(readFile(preloadMarker)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readFile(wranglerMarker)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+  });
+
+  it("runs the verified deployment with Node injection variables absent", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const wrangler = join(cwd, "node_modules", ".bin", "wrangler");
+      const marker = join(cwd, "wrangler-ran");
+      await writeFile(
+        wrangler,
+        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nif (process.env.NODE_OPTIONS !== undefined || process.env.NODE_PATH !== undefined) process.exit(94);\nwriteFileSync(${JSON.stringify(marker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
+      );
+      await chmod(wrangler, 0o755);
+      expect(run(cwd, "create").status).toBe(0);
+
+      const result = runLauncher(cwd, head, {
+        ...(await stagingDeploymentDigests(cwd)),
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      await expect(readFile(marker, "utf8")).resolves.toBe("credential-canary");
+    });
+  });
+
+  it("rejects an inherited Node module search path", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const result = runLauncher(cwd, undefined, { NODE_PATH: cwd });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Refusing credential-bearing deployment while NODE_PATH is set.",
       );
     });
   });
