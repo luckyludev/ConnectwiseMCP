@@ -4817,6 +4817,47 @@ describe("ConnectWiseClient", () => {
     expect(cancelled).toBe(true);
   });
 
+  it("sanitizes document stream failures and emits one allowlisted request log", async () => {
+    const logs: string[] = [];
+    const sensitiveMarker = "sensitive stream failure";
+    let pullCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              pullCount += 1;
+              if (pullCount === 1) {
+                controller.enqueue(new TextEncoder().encode("partial"));
+                return;
+              }
+              controller.error(new Error(sensitiveMarker));
+            },
+          }),
+          { status: 200 },
+        ),
+      log: (message) => logs.push(message),
+    });
+
+    await expect(client.downloadDocument(400)).rejects.toThrow(
+      "ConnectWise download unavailable",
+    );
+    expect(pullCount).toBe(2);
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "upstream_error",
+    });
+    expect(logs[0]).not.toContain(sensitiveMarker);
+    expect(logs[0]).not.toContain(credentials.companyId);
+    expect(logs[0]).not.toContain(credentials.publicKey);
+    expect(logs[0]).not.toContain(credentials.privateKey);
+    expect(logs[0]).not.toContain(credentials.clientId);
+  });
+
   it("emits one allowlisted request log for a successful document download", async () => {
     const logs: string[] = [];
     const documentId = 987654321;

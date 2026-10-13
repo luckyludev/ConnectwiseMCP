@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { MAX_DOWNLOAD_BYTES } from "../src/connectwise-client";
 import { TOOL_ACCESS } from "../src/tool-access";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -12,6 +13,10 @@ const legacyServer = readFileSync(
 );
 const classification = readFileSync(
   `${repositoryRoot}/docs/legacy-read-surface-classification.md`,
+  "utf8",
+);
+const v2Foundation = readFileSync(
+  `${repositoryRoot}/docs/v2-foundation.md`,
   "utf8",
 );
 
@@ -291,5 +296,19 @@ describe("legacy read-surface classification", () => {
     for (const [tool, access] of Object.entries(V2_ADDITION_ACCESS)) {
       expect(TOOL_ACCESS[tool]).toBe(access);
     }
+  });
+
+  it("keeps the attachment-download contract aligned with the runtime bound", () => {
+    const documentedLimit = `${MAX_DOWNLOAD_BYTES / 1_000_000} MB`;
+
+    expect(classification).toContain(
+      `verifies their exact relationship before and after download, then returns bounded base64 with a ${documentedLimit} cap`,
+    );
+    expect(v2Foundation).toContain(
+      `downloads stop at ${documentedLimit} and sanitize mid-stream upstream failures`,
+    );
+    expect(v2Foundation).toContain(
+      "verify the exact document-to-ticket relationship both before and after retrieving the bytes",
+    );
   });
 });

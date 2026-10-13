@@ -316,7 +316,14 @@ async function readBoundedBytes(
   let total = 0;
   let chunkCount = 0;
   while (true) {
-    const { done, value } = await reader.read();
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch {
+      await cancelReader(reader);
+      throw new Error("ConnectWise download unavailable");
+    }
+    const { done, value } = chunk;
     if (done) break;
     chunkCount += 1;
     if (chunkCount > MAX_CONNECTWISE_RESPONSE_CHUNKS) {
