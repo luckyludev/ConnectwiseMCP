@@ -1047,6 +1047,46 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow("ConnectWise response exceeded requested page size");
   });
 
+  it("audits bounded-list validation before recording request success", async () => {
+    for (const { response, errorMessage, outcome } of [
+      {
+        response: [null],
+        errorMessage: "Invalid ConnectWise list response",
+        outcome: "upstream_error",
+      },
+      {
+        response: Array.from({ length: 51 }, (_, index) => ({ id: index + 1 })),
+        errorMessage: "ConnectWise response exceeded requested page size",
+        outcome: "upstream_error",
+      },
+      {
+        response: [{ id: 1 }],
+        errorMessage: undefined,
+        outcome: "success",
+      },
+    ] as const) {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(response),
+        log: (line) => logs.push(line),
+      });
+
+      if (errorMessage) {
+        await expect(client.getServiceBoards()).rejects.toThrow(errorMessage);
+      } else {
+        await expect(client.getServiceBoards()).resolves.toEqual(response);
+      }
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome,
+      });
+    }
+  });
+
   it("rejects malformed dedicated, targeted, and catalog list responses", async () => {
     const malformedResponses: unknown[] = [
       { value: [] },

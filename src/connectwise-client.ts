@@ -1086,22 +1086,30 @@ export function createConnectWiseClient(
     query: Readonly<Record<string, string | number>>,
     maxItems: number,
   ): Promise<unknown> {
-    const result = await requestJson("GET", path, query);
-    if (!Array.isArray(result)) {
-      throw new Error("Invalid ConnectWise list response");
-    }
-    if (result.length > maxItems) {
-      throw new Error("ConnectWise response exceeded requested page size");
-    }
-    if (
-      result.some(
-        (item) =>
-          item === null || typeof item !== "object" || Array.isArray(item),
-      )
-    ) {
-      throw new Error("Invalid ConnectWise list response");
-    }
-    return result;
+    return requestJson(
+      "GET",
+      path,
+      query,
+      undefined,
+      undefined,
+      undefined,
+      (result) => {
+        if (!Array.isArray(result)) {
+          throw new Error("Invalid ConnectWise list response");
+        }
+        if (result.length > maxItems) {
+          throw new Error("ConnectWise response exceeded requested page size");
+        }
+        if (
+          result.some(
+            (item) =>
+              item === null || typeof item !== "object" || Array.isArray(item),
+          )
+        ) {
+          throw new Error("Invalid ConnectWise list response");
+        }
+      },
+    );
   }
 
   function assertReferenceCollectionIdentities(records: unknown): void {
