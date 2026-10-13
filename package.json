@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:live-staging": "node scripts/staging-live-smoke.mjs",
     "verify:v2-evidence": "node scripts/verify-v2-release-evidence.mjs",
-    "scripts:check": "for file in scripts/*.mjs; do node --check \"$file\" || exit 1; done",
+    "scripts:check": "for file in scripts/*.mjs; do node --check \"$file\" || exit 1; done && for file in scripts/*.sh; do sh -n \"$file\" || exit 1; done",
     "build:attachment-app": "vite build --config vite.attachment.config.ts && node scripts/embed-attachment-app.mjs",
     "verify:attachment-app": "node scripts/verify-attachment-artifacts.mjs && npm run build:attachment-app && node scripts/verify-attachment-artifacts.mjs",
     "pretypecheck": "npm run verify:attachment-app",

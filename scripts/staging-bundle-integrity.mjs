@@ -738,8 +738,11 @@ function deployVerifiedBundle(
     );
     if (dryRun) arguments_.push("--dry-run");
     if (!result) {
+      const deploymentEnvironment = { ...process.env };
+      delete deploymentEnvironment.NODE_OPTIONS;
+      delete deploymentEnvironment.NODE_PATH;
       result = spawnSync(wrangler, arguments_, {
-        env: process.env,
+        env: deploymentEnvironment,
         stdio: "inherit",
       });
     }
