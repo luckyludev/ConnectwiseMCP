@@ -941,6 +941,7 @@ export function createConnectWiseClient(
     body?: unknown,
     maxBodyBytes?: number,
     overflowMessage?: string,
+    validateResponse?: (value: unknown) => void | Promise<void>,
   ): Promise<unknown> {
     const url = new URL(`${credentials.apiBaseUrl}${path}`);
     for (const [key, value] of Object.entries(query ?? {})) {
@@ -1058,6 +1059,7 @@ export function createConnectWiseClient(
       }
       try {
         const parsed = JSON.parse(responseText) as unknown;
+        await validateResponse?.(parsed);
         emitRequestLog(method, response.status, startedAtMs, "success");
         return parsed;
       } catch (error) {
@@ -1158,6 +1160,45 @@ export function createConnectWiseClient(
       !Number.isSafeInteger(created.id) ||
       created.id <= 0
     ) {
+      throw new ConnectWiseIndeterminateWriteError();
+    }
+    return created;
+  }
+
+  async function verifiedCreatedDocument(
+    record: unknown,
+    expectedRecordType: "Ticket" | "TimeEntry",
+    expectedRecordId: number,
+  ): Promise<Record<string, unknown>> {
+    const created = verifiedCreatedRecord(record);
+    assertOptionalCreatedValue(created, "recordType", expectedRecordType);
+    assertOptionalCreatedValue(created, "recordId", expectedRecordId);
+    const documentId = created.id as number;
+    try {
+      await requestJson(
+        "GET",
+        `/system/documents/${documentId}`,
+        { fields: "id,recordType,recordId" },
+        undefined,
+        undefined,
+        undefined,
+        (confirmation) => {
+          const document = verifiedRecordIdentity(
+            confirmation,
+            documentId,
+            "document",
+          );
+          if (
+            document.recordType !== expectedRecordType ||
+            document.recordId !== expectedRecordId
+          ) {
+            throw new Error(
+              "ConnectWise document is not associated with requested record",
+            );
+          }
+        },
+      );
+    } catch {
       throw new ConnectWiseIndeterminateWriteError();
     }
     return created;
@@ -1618,18 +1659,18 @@ export function createConnectWiseClient(
     async attachImageToTicket(ticketId, input): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       const payload = attachmentPayload(input);
-      const created = verifiedCreatedRecord(
-        await requestJson(
-          "POST",
-          `/service/tickets/${ticketId}/attachments`,
-          undefined,
-          payload,
-        ),
+      const created = await requestJson(
+        "POST",
+        `/service/tickets/${ticketId}/attachments`,
+        undefined,
+        payload,
+        undefined,
+        undefined,
+        async (record) => {
+          await verifiedCreatedDocument(record, "Ticket", ticketId);
+        },
       );
-      assertOptionalCreatedValue(created, "recordId", ticketId);
-      assertOptionalCreatedValue(created, "ticketId", ticketId);
-      assertOptionalCreatedValue(created, "recordType", "Ticket");
-      return created;
+      return verifiedCreatedRecord(created);
     },
 
     async attachImageToTimeEntry(timeEntryId, input): Promise<unknown> {
@@ -1639,18 +1680,18 @@ export function createConnectWiseClient(
         timeEntryId,
         "attach_image_to_time_entry",
       );
-      const created = verifiedCreatedRecord(
-        await requestJson(
-          "POST",
-          `/timeentries/${timeEntryId}/attachments`,
-          undefined,
-          payload,
-        ),
+      const created = await requestJson(
+        "POST",
+        `/timeentries/${timeEntryId}/attachments`,
+        undefined,
+        payload,
+        undefined,
+        undefined,
+        async (record) => {
+          await verifiedCreatedDocument(record, "TimeEntry", timeEntryId);
+        },
       );
-      assertOptionalCreatedValue(created, "recordId", timeEntryId);
-      assertOptionalCreatedValue(created, "timeEntryId", timeEntryId);
-      assertOptionalCreatedValue(created, "recordType", "TimeEntry");
-      return created;
+      return verifiedCreatedRecord(created);
     },
 
     async getServiceBoards(): Promise<unknown> {
@@ -2002,11 +2043,11 @@ export function createConnectWiseClient(
         if (!responseText) {
           throw new ConnectWiseIndeterminateWriteError();
         }
-        const created = verifiedCreatedRecord(
+        const created = await verifiedCreatedDocument(
           JSON.parse(responseText) as unknown,
+          recordType,
+          recordId,
         );
-        assertOptionalCreatedValue(created, "recordId", recordId);
-        assertOptionalCreatedValue(created, "recordType", recordType);
         emitRequestLog("POST", response.status, startedAtMs, "success");
         return created;
       } catch {
