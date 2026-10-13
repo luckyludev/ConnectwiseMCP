@@ -4172,6 +4172,14 @@ describe("ConnectWiseClient", () => {
           (init as { method?: string } | undefined)?.method ?? "GET";
         calls.push(`${method} ${String(input)}`);
         if (method === "GET") {
+          const url = new URL(String(input));
+          if (url.pathname.endsWith("/system/documents/901")) {
+            return Response.json({
+              id: 901,
+              recordType: "TimeEntry",
+              recordId: 42,
+            });
+          }
           return Response.json({ id: 42, member: { id: 149 } });
         }
         return Response.json({ id: 901 }, { status: 201 });
@@ -4194,16 +4202,241 @@ describe("ConnectWiseClient", () => {
       "GET",
       "POST",
       "GET",
+      "GET",
       "POST",
+      "GET",
     ]);
-    const lookupCalls = calls.filter((call) => call.startsWith("GET "));
-    expect(lookupCalls).toHaveLength(2);
-    for (const lookupCall of lookupCalls) {
+    const ownershipCalls = calls.filter((call) =>
+      call.includes("/time/entries/42?"),
+    );
+    expect(ownershipCalls).toHaveLength(2);
+    for (const lookupCall of ownershipCalls) {
       const lookupUrl = new URL(lookupCall.slice("GET ".length));
       expect(lookupUrl.pathname).toBe("/v4_6_release/apis/3.0/time/entries/42");
       expect(lookupUrl.searchParams.getAll("fields")).toEqual(["id,member"]);
       expect([...lookupUrl.searchParams.keys()]).toEqual(["fields"]);
     }
+    const confirmationCalls = calls.filter((call) =>
+      call.includes("/system/documents/901?"),
+    );
+    expect(confirmationCalls).toHaveLength(2);
+    for (const confirmationCall of confirmationCalls) {
+      const confirmationUrl = new URL(confirmationCall.slice("GET ".length));
+      expect(confirmationUrl.searchParams.getAll("fields")).toEqual([
+        "id,recordType,recordId",
+      ]);
+      expect([...confirmationUrl.searchParams.keys()]).toEqual(["fields"]);
+    }
+  });
+
+  it.each(["attachment", "document"] as const)(
+    "classifies a mismatched %s creation confirmation as indeterminate without repeating the write",
+    async (writeForm) => {
+      const calls: string[] = [];
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input, init) => {
+          const method = init?.method ?? "GET";
+          calls.push(`${method} ${String(input)}`);
+          if (method === "POST") {
+            return Response.json({ id: 901 }, { status: 201 });
+          }
+          return Response.json({
+            id: 901,
+            recordType: "Ticket",
+            recordId: 78,
+          });
+        },
+        log: (line) => logs.push(line),
+      });
+
+      const write =
+        writeForm === "attachment"
+          ? client.attachImageToTicket(77, {
+              filename: "image.png",
+              base64: "iVBORw0KGgo=",
+              mimeType: "image/png",
+            })
+          : client.uploadImageDocument("Ticket", 77, {
+              fileName: "image.png",
+              mimeType: "image/png",
+              base64: "iVBORw0KGgo=",
+              privateFlag: true,
+            });
+
+      await expect(write).rejects.toBeInstanceOf(
+        ConnectWiseIndeterminateWriteError,
+      );
+      expect(calls.map((call) => call.split(" ")[0])).toEqual(["POST", "GET"]);
+      expect(calls[1]).toContain(
+        "/system/documents/901?fields=id%2CrecordType%2CrecordId",
+      );
+      const requestLogs = logs.map(
+        (line) => JSON.parse(line) as Record<string, unknown>,
+      );
+      expect(requestLogs.filter((entry) => entry.method === "POST")).toEqual([
+        expect.objectContaining({ outcome: "indeterminate", status: 201 }),
+      ]);
+      expect(requestLogs).not.toContainEqual(
+        expect.objectContaining({ method: "POST", outcome: "success" }),
+      );
+    },
+  );
+
+  it("classifies a mismatched time-entry attachment confirmation as indeterminate without repeating the write", async () => {
+    const methods: string[] = [];
+    const logs: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        const method = init?.method ?? "GET";
+        methods.push(method);
+        if (method === "POST") {
+          return Response.json({ id: 902 }, { status: 201 });
+        }
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/time/entries/42")) {
+          return Response.json({ id: 42, member: { id: 149 } });
+        }
+        return Response.json({
+          id: 902,
+          recordType: "Ticket",
+          recordId: 42,
+        });
+      },
+      log: (line) => logs.push(line),
+    });
+
+    await expect(
+      client.attachImageToTimeEntry(42, {
+        filename: "image.png",
+        base64: "iVBORw0KGgo=",
+        mimeType: "image/png",
+      }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    expect(methods).toEqual(["GET", "POST", "GET"]);
+    const postLogs = logs
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((entry) => entry.method === "POST");
+    expect(postLogs).toEqual([
+      expect.objectContaining({ outcome: "indeterminate", status: 201 }),
+    ]);
+  });
+
+  it.each([
+    {
+      label: "wrong document ID",
+      confirmation: { id: 902, recordType: "Ticket", recordId: 77 },
+    },
+    {
+      label: "wrong record type",
+      confirmation: { id: 901, recordType: "TimeEntry", recordId: 77 },
+    },
+    { label: "malformed body", confirmation: null },
+  ])(
+    "rejects a created-document confirmation with $label",
+    async ({ confirmation }) => {
+      const methods: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          const method = init?.method ?? "GET";
+          methods.push(method);
+          return method === "POST"
+            ? Response.json({ id: 901 }, { status: 201 })
+            : Response.json(confirmation);
+        },
+      });
+
+      await expect(
+        client.attachImageToTicket(77, {
+          filename: "image.png",
+          base64: "iVBORw0KGgo=",
+          mimeType: "image/png",
+        }),
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+      expect(methods).toEqual(["POST", "GET"]);
+    },
+  );
+
+  it.each([
+    { label: "fetch failures", getResponse: "throw" as const },
+    { label: "retryable responses", getResponse: "retryable" as const },
+  ])(
+    "exhausts bounded confirmation retries after $label without repeating the write",
+    async ({ getResponse }) => {
+      const methods: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (_input, init) => {
+          const method = init?.method ?? "GET";
+          methods.push(method);
+          if (method === "POST") {
+            return Response.json({ id: 901 }, { status: 201 });
+          }
+          if (getResponse === "throw") throw new Error("unavailable");
+          return new Response(null, { status: 503 });
+        },
+        sleep: async () => {},
+      });
+
+      await expect(
+        client.attachImageToTicket(77, {
+          filename: "image.png",
+          base64: "iVBORw0KGgo=",
+          mimeType: "image/png",
+        }),
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+      expect(methods).toEqual(["POST", "GET", "GET"]);
+    },
+  );
+
+  it("accepts an exact created-document confirmation after one bounded retry", async () => {
+    const methods: string[] = [];
+    let getAttempts = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method = init?.method ?? "GET";
+        methods.push(method);
+        if (method === "POST") {
+          return Response.json({ id: 901 }, { status: 201 });
+        }
+        getAttempts += 1;
+        return getAttempts === 1
+          ? new Response(null, { status: 503 })
+          : Response.json({ id: 901, recordType: "Ticket", recordId: 77 });
+      },
+      sleep: async () => {},
+    });
+
+    await expect(
+      client.attachImageToTicket(77, {
+        filename: "image.png",
+        base64: "iVBORw0KGgo=",
+        mimeType: "image/png",
+      }),
+    ).resolves.toEqual({ id: 901 });
+    expect(methods).toEqual(["POST", "GET", "GET"]);
+  });
+
+  it("treats an unavailable created-document confirmation as indeterminate without repeating the write", async () => {
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method = init?.method ?? "GET";
+        methods.push(method);
+        if (method === "POST") {
+          return Response.json({ id: 901 }, { status: 201 });
+        }
+        return new Response(null, { status: 404 });
+      },
+    });
+
+    await expect(
+      client.attachImageToTicket(77, {
+        filename: "image.png",
+        base64: "iVBORw0KGgo=",
+        mimeType: "image/png",
+      }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    expect(methods).toEqual(["POST", "GET"]);
   });
 
   it("scopes and verifies object schedule reads at the upstream boundary", async () => {
@@ -4698,6 +4931,14 @@ describe("ConnectWiseClient", () => {
     const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input, init) => {
+        const method = init?.method ?? "GET";
+        if (method === "GET") {
+          return Response.json({
+            id: 901,
+            recordType: "Ticket",
+            recordId: 77,
+          });
+        }
         capturedUrl = String(input);
         capturedInit = init;
         return Response.json(
@@ -4749,7 +4990,12 @@ describe("ConnectWiseClient", () => {
     expect(file.name).toBe("router.png");
     expect(file.type).toBe("image/png");
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(pngSignature);
-    const requestLog = JSON.parse(logs[0]!) as Record<string, unknown>;
+    const postLog = logs.find((line) => {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      return entry.method === "POST";
+    });
+    expect(postLog).toBeDefined();
+    const requestLog = JSON.parse(postLog!) as Record<string, unknown>;
     expect(Object.keys(requestLog).sort()).toEqual([
       "event",
       "latencyMs",
@@ -5084,6 +5330,10 @@ describe("ConnectWiseClient", () => {
     let capturedInit: RequestInit | undefined;
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input, init) => {
+        const method = init?.method ?? "GET";
+        if (method === "GET") {
+          return Response.json({ id: 55, recordType: "Ticket", recordId: 77 });
+        }
         capturedUrl = String(input);
         capturedInit = init;
         return Response.json({ id: 55 });
@@ -5114,6 +5364,14 @@ describe("ConnectWiseClient", () => {
           (init as { method?: string } | undefined)?.method ?? "GET";
         calls.push(`${method} ${String(input)}`);
         if (method === "GET") {
+          const url = new URL(String(input));
+          if (url.pathname.endsWith("/system/documents/66")) {
+            return Response.json({
+              id: 66,
+              recordType: "TimeEntry",
+              recordId: 42,
+            });
+          }
           return Response.json({ id: 42, member: { id: 149 } });
         }
         capturedUrl = String(input);
