@@ -718,6 +718,97 @@ describe("Entra auth handler", () => {
     );
   });
 
+  it.each(["missing", "redirect_changed", "lookup_error"])(
+    "revalidates a %s OAuth client before reading the Entra secret",
+    async (clientState) => {
+      const secret = "0123456789abcdef0123456789abcdef";
+      const browserNonce = "callback-browser-nonce";
+      const signedState = await signFlowState(
+        {
+          purpose: "entra_callback",
+          browserNonce,
+          pkceVerifier: "callback-pkce-verifier",
+          oidcNonce: "callback-oidc-nonce",
+          oauthRequest: {
+            responseType: "code",
+            clientId: "mcp-client",
+            redirectUri: "https://client.example.com/callback",
+            scope: ["mcp:read"],
+            state: "client-state",
+            codeChallenge: "challenge",
+            codeChallengeMethod: "S256",
+            resource: "https://mcp.example.com/mcp",
+          },
+        },
+        secret,
+        "https://mcp.example.com",
+      );
+      let secretRead = false;
+      let fetched = false;
+      let completed = false;
+      const lookedUpClientIds: string[] = [];
+      const baseEnv = {
+        OAUTH_STATE_SECRET: secret,
+        MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+          "https://client.example.com/callback",
+        ]),
+        OAUTH_PROVIDER: {
+          async lookupClient(clientId: string) {
+            lookedUpClientIds.push(clientId);
+            if (clientState === "lookup_error") {
+              throw new Error("sensitive provider failure");
+            }
+            if (clientState === "missing") return undefined;
+            return {
+              clientId: "mcp-client",
+              redirectUris: ["https://replacement.example.com/callback"],
+            };
+          },
+          async completeAuthorization() {
+            completed = true;
+            throw new Error("must not complete authorization");
+          },
+        },
+      };
+      const env = new Proxy(baseEnv, {
+        get(target, property, receiver) {
+          if (property === "ENTRA_CLIENT_SECRET") {
+            secretRead = true;
+            throw new Error("must not read the Entra secret");
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      }) as unknown as WorkerEnv;
+      const handler = createEntraAuthHandler({
+        async fetcher() {
+          fetched = true;
+          throw new Error("must not exchange the Entra code");
+        },
+      });
+
+      const response = await handler.fetch!(
+        new Request(
+          `https://mcp.example.com/callback?code=entra-code&state=${encodeURIComponent(signedState)}`,
+          { headers: { Cookie: `__Host-CW_ENTRA_STATE=${browserNonce}` } },
+        ) as never,
+        env,
+        {} as ExecutionContext,
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(response.headers.get("X-Auth-Stage")).toBe("callback_client");
+      expect(await response.text()).toBe(
+        "OAuth client is no longer authorized",
+      );
+      expect(lookedUpClientIds).toEqual(["mcp-client"]);
+      expect(secretRead).toBe(false);
+      expect(fetched).toBe(false);
+      expect(completed).toBe(false);
+    },
+  );
+
   it("validates the Entra callback and completes authorization with an immutable profile", async () => {
     const now = Math.floor(Date.now() / 1000);
     const keys = await generateKeyPair("RS256", { extractable: true });
@@ -728,6 +819,7 @@ describe("Entra auth handler", () => {
     let completed: Record<string, unknown> | undefined;
     let tokenRequestBody = "";
     let idToken = "";
+    const lookedUpClientIds: string[] = [];
     const fetcher: typeof fetch = async (_input, init) => {
       tokenRequestBody = String(init?.body);
       return Response.json({
@@ -762,7 +854,8 @@ describe("Entra auth handler", () => {
         async parseAuthRequest() {
           return oauthRequest;
         },
-        async lookupClient() {
+        async lookupClient(clientId: string) {
+          lookedUpClientIds.push(clientId);
           return {
             clientId: "mcp-client",
             clientName: "Trusted MCP Client",
@@ -806,6 +899,7 @@ describe("Entra auth handler", () => {
       env,
       {} as ExecutionContext,
     );
+    expect(lookedUpClientIds).toEqual(["mcp-client"]);
     const entraLocation = new URL(upstream.headers.get("Location")!);
     const signedState = entraLocation.searchParams.get("state")!;
     const oidcNonce = decodeJwt(signedState).oidcNonce as string;
@@ -856,6 +950,7 @@ describe("Entra auth handler", () => {
     );
 
     expect(callback.status).toBe(302);
+    expect(lookedUpClientIds).toEqual(["mcp-client", "mcp-client"]);
     expect(callback.headers.get("Location")).toContain("code=mcp-code");
     expect(
       new URLSearchParams(tokenRequestBody).get("code_verifier"),
