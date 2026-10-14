@@ -89,6 +89,37 @@ describe("MCP handler OAuth context adapter", () => {
     ]);
   });
 
+  it("installs only a validated scope snapshot", async () => {
+    const observed: unknown[] = [];
+    const scope = ["mcp:read"];
+    Object.defineProperty(scope, Symbol.iterator, {
+      value: function* () {
+        yield "mcp:read";
+        yield "mcp:write";
+      },
+    });
+    const handler = createMcpHandler(() => {
+      observed.push(getMcpAuthContext()?.props);
+      return server();
+    });
+
+    const response = await handler(
+      request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      {},
+      {
+        props: { profileAlias: "LUIS" },
+        auth: {
+          token: "opaque-token",
+          clientId: "approved-client",
+          scope,
+        },
+      } as unknown as ExecutionContext,
+    );
+
+    expect(response.status).toBe(200);
+    expect(observed).toEqual([{ profileAlias: "LUIS", scopes: ["mcp:read"] }]);
+  });
+
   it("derives direct-fetch tool scopes from AuthInfo, not extra props", async () => {
     const observed: unknown[] = [];
     const handler = createMcpHandler(() => {
@@ -187,6 +218,87 @@ describe("MCP handler OAuth context adapter", () => {
 
     expect(response.status).toBe(200);
     expect(factory).toHaveBeenCalledOnce();
+  });
+
+  it("rejects worker scopes missing mcp:read before accessing profile props", async () => {
+    for (const scope of [
+      [],
+      ["mcp:write"],
+      Array(1),
+      Array.from({ length: 17 }, () => "mcp:read"),
+    ]) {
+      const factory = vi.fn(server);
+      const propsAccess = vi.fn();
+      const authFieldAccess = vi.fn();
+      const auth = { scope };
+      for (const field of ["token", "clientId"] as const) {
+        Object.defineProperty(auth, field, {
+          get() {
+            authFieldAccess(field);
+            throw new Error("auth fields must not be accessed");
+          },
+        });
+      }
+      const context = { auth };
+      Object.defineProperty(context, "props", {
+        get() {
+          propsAccess();
+          throw new Error("profile props must not be accessed");
+        },
+      });
+      const handler = createMcpHandler(factory);
+
+      const response = await handler(
+        request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+        {},
+        context as unknown as ExecutionContext,
+      );
+
+      expect(response.status).toBe(500);
+      expect(factory).not.toHaveBeenCalled();
+      expect(authFieldAccess).not.toHaveBeenCalled();
+      expect(propsAccess).not.toHaveBeenCalled();
+      expect(await response.text()).not.toContain("profile props");
+    }
+  });
+
+  it("does not install profile props from direct auth info without mcp:read", async () => {
+    for (const scopes of [
+      [],
+      ["mcp:write"],
+      Array(1),
+      Array.from({ length: 17 }, () => "mcp:read"),
+    ]) {
+      const observed: unknown[] = [];
+      const propsAccess = vi.fn();
+      const extra = {};
+      Object.defineProperty(extra, "props", {
+        get() {
+          propsAccess();
+          throw new Error("profile props must not be accessed");
+        },
+      });
+      const handler = createMcpHandler(() => {
+        observed.push(getMcpAuthContext()?.props);
+        return server();
+      });
+
+      const response = await handler.fetch(
+        request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+        {
+          authInfo: {
+            token: "opaque-token",
+            clientId: "approved-client",
+            scopes,
+            extra,
+          },
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(observed).toEqual([undefined]);
+      expect(propsAccess).not.toHaveBeenCalled();
+    }
   });
 
   it("fails closed before constructing a server for malformed OAuth context", async () => {

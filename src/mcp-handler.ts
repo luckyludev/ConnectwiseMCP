@@ -61,19 +61,46 @@ function plainRecord(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+function authorizedScopeSnapshot(value: unknown): string[] | undefined {
+  try {
+    if (!Array.isArray(value)) return undefined;
+    const scopeCount = value.length;
+    if (scopeCount > 16) return undefined;
+
+    let hasRead = false;
+    const snapshot: string[] = [];
+    for (let index = 0; index < scopeCount; index += 1) {
+      if (!Object.prototype.hasOwnProperty.call(value, index)) return undefined;
+      const scope: unknown = value[index];
+      if (typeof scope !== "string") return undefined;
+      if (scope === "mcp:read") hasRead = true;
+      snapshot.push(scope);
+    }
+    return hasRead ? snapshot : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function authInfoFromWorkerContext(context: WorkerOAuthContext): AuthInfo {
-  if (!plainRecord(context.props) || !plainRecord(context.auth)) {
+  const auth = context.auth;
+  if (!plainRecord(auth)) {
     throw new TypeError("Invalid verified OAuth request context");
   }
-  const { token, clientId, scope, expiresAt, audience } = context.auth;
+  const scopeSnapshot = authorizedScopeSnapshot(auth.scope);
+  if (scopeSnapshot === undefined) {
+    throw new TypeError("Invalid verified OAuth request context");
+  }
+  const { token, clientId, expiresAt, audience } = auth;
   if (
     typeof token !== "string" ||
     token.length === 0 ||
     typeof clientId !== "string" ||
-    clientId.length === 0 ||
-    !Array.isArray(scope) ||
-    !scope.every((value) => typeof value === "string")
+    clientId.length === 0
   ) {
+    throw new TypeError("Invalid verified OAuth request context");
+  }
+  if (!plainRecord(context.props)) {
     throw new TypeError("Invalid verified OAuth request context");
   }
   if (
@@ -96,11 +123,11 @@ function authInfoFromWorkerContext(context: WorkerOAuthContext): AuthInfo {
     }
   }
 
-  const verifiedProps = { ...context.props, scopes: [...scope] };
+  const verifiedProps = { ...context.props, scopes: scopeSnapshot };
   return {
     token,
     clientId,
-    scopes: [...scope],
+    scopes: scopeSnapshot,
     ...(expiresAt === undefined ? {} : { expiresAt }),
     ...(resource === undefined ? {} : { resource }),
     extra: { props: verifiedProps },
@@ -110,13 +137,12 @@ function authInfoFromWorkerContext(context: WorkerOAuthContext): AuthInfo {
 function authContextFromInfo(
   authInfo: AuthInfo | undefined,
 ): McpAuthContext | undefined {
+  const scopes = authorizedScopeSnapshot(authInfo?.scopes);
+  if (scopes === undefined) {
+    return undefined;
+  }
   const props = authInfo?.extra?.props;
-  const scopes: unknown = authInfo?.scopes;
-  if (
-    !plainRecord(props) ||
-    !Array.isArray(scopes) ||
-    !scopes.every((scope) => typeof scope === "string")
-  ) {
+  if (!plainRecord(props)) {
     return undefined;
   }
   return { props: { ...props, scopes: [...scopes] } };
