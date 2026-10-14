@@ -131,6 +131,11 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - name: Check out attestation verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Download verified staging release evidence
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -141,6 +146,10 @@ jobs:
         with:
           name: v2-production-release-${{ github.sha }}
           path: release-evidence/production
+      - name: Reverify downloaded release evidence
+        run: |
+          node scripts/verify-v2-release-evidence.mjs release-evidence/staging staging "$GITHUB_SHA"
+          node scripts/verify-v2-release-evidence.mjs release-evidence/production production "$GITHUB_SHA"
       - name: Attest verified staging release evidence
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
