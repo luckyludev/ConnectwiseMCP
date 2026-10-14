@@ -3091,6 +3091,7 @@ describe("authenticated MCP transport", () => {
 
   it("delete_schedule_entry verifies mapped-member ownership and confirms removal", async () => {
     const calls: string[] = [];
+    const auditMessages: string[] = [];
     let getCount = 0;
     const fetcher: typeof fetch = async (input, init) => {
       const method = (init as { method?: string } | undefined)?.method ?? "GET";
@@ -3106,6 +3107,7 @@ describe("authenticated MCP transport", () => {
     const handler = createMcpHandler(
       () =>
         createMcpServer(env, {
+          audit: { logger: (message) => auditMessages.push(message) },
           createBusinessClient: (credentials) =>
             createConnectWiseClient(credentials, { fetcher }),
         }),
@@ -3137,12 +3139,21 @@ describe("authenticated MCP transport", () => {
         }),
       }),
     );
-    await response.text();
+    const text = await response.text();
     expect(calls).toEqual([
       "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134?fields=id%2Cmember",
       "DELETE https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134",
       "GET https://api-na.myconnectwise.net/v4_6_release/apis/3.0/schedule/entries/247134?fields=id%2Cmember",
     ]);
+    expect(text).toContain('\\"entryId\\":247134,\\"deleted\\":true');
+    expect(text).not.toContain('"isError":true');
+    expect(auditMessages).toHaveLength(1);
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      profileAlias: "LUIS",
+      tool: "delete_schedule_entry",
+      outcome: "success",
+      reason: "ok",
+    });
   });
 
   it("reports and audits a schedule deletion that remains present", async () => {

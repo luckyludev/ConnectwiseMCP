@@ -2027,7 +2027,10 @@ export function registerConnectWiseBusinessTools(
         getProps(),
         env,
         "delete_schedule_entry",
-        (client) => client.deleteScheduleEntry(entryId),
+        async (client) => {
+          await client.deleteScheduleEntry(entryId);
+          return { entryId, deleted: true };
+        },
         dependencies,
       ),
   );
