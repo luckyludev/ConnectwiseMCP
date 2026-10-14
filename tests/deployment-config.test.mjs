@@ -1029,7 +1029,7 @@ describe("staging deployment configuration", () => {
       "staging release manifest binds the generated regular, non-symlink, single-link `dist/index.js` bytes, reviewed `wrangler.jsonc` bytes, and complete installed deployment-runtime tree",
     );
     expect(checklist).toContain(
-      "rejects any altered Wrangler shim or installed runtime file before credential exposure and passes only private read-only copies of the verified bundle and configuration bytes to Wrangler",
+      "rejects any altered Wrangler shim or installed runtime file and independently rejects unsafe non-Node deployment environment overrides before invoking Wrangler, then passes only private read-only copies of the verified bundle and configuration bytes to Wrangler",
     );
     for (const requiredSection of [
       "## 1. Required change record",
