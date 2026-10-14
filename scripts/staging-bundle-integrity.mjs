@@ -99,6 +99,7 @@ const RUNTIME_PATH = "node_modules";
 const MANIFEST_PATH = `dist/${target}-bundle-manifest.json`;
 const INVENTORY_PATH = `dist/${target}-runtime-inventory.json`;
 const LOCK_PATH = "package-lock.json";
+const DEPLOYMENT_ENTRYPOINT_PATH = "scripts/staging-bundle-integrity.mjs";
 const releaseVariable =
   target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
 const bundleDigestVariable =
@@ -484,8 +485,11 @@ function createManifest() {
     `${JSON.stringify(manifest, null, 2)}\n`,
     `The ${target} bundle manifest`,
   );
+  const entrypointSha256 = sha256(
+    readRegularFile(DEPLOYMENT_ENTRYPOINT_PATH, "The deployment entrypoint"),
+  );
   process.stdout.write(
-    `Recorded ${target} bundle ${manifest.sha256}, configuration ${manifest.configSha256}, and deployment runtime ${manifest.runtimeSha256} for ${manifest.releaseCommit}.\n`,
+    `Recorded ${target} bundle ${manifest.sha256}, configuration ${manifest.configSha256}, deployment runtime ${manifest.runtimeSha256}, and deployment entrypoint ${entrypointSha256} for ${manifest.releaseCommit}.\n`,
   );
 }
 

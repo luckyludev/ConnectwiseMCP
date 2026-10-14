@@ -53,6 +53,68 @@ if [ -L "$DEPLOY_NODE_PATH" ] || [ ! -f "$DEPLOY_NODE_PATH" ] || [ ! -x "$DEPLOY
   exit 1
 fi
 
+case "$0" in
+  scripts/deploy-verified-bundle.sh | ./scripts/deploy-verified-bundle.sh) ;;
+  *)
+    printf '%s\n' "Run the deployment launcher directly from the reviewed repository root." >&2
+    exit 1
+    ;;
+esac
+repository_root=$(pwd -P)
+if [ "${PWD:-}" != "$repository_root" ]; then
+  printf '%s\n' "Run the deployment launcher directly from the reviewed repository root." >&2
+  exit 1
+fi
+launcher_path="$repository_root/scripts/deploy-verified-bundle.sh"
+integrity_path="$repository_root/scripts/staging-bundle-integrity.mjs"
+if [ -L "$launcher_path" ] || [ ! -f "$launcher_path" ] || \
+   [ -L "$integrity_path" ] || [ ! -f "$integrity_path" ]; then
+  printf '%s\n' "Deployment launcher files must be regular, non-symlink files in the reviewed repository root." >&2
+  exit 1
+fi
+if [ -z "${STAGING_INTEGRITY_SHA256:-}" ] || [ "${#STAGING_INTEGRITY_SHA256}" -ne 64 ]; then
+  printf '%s\n' "STAGING_INTEGRITY_SHA256 must be the retained lowercase SHA-256 of the reviewed deployment entrypoint." >&2
+  exit 1
+fi
+case "$STAGING_INTEGRITY_SHA256" in
+  *[!0-9a-f]*)
+    printf '%s\n' "STAGING_INTEGRITY_SHA256 must be the retained lowercase SHA-256 of the reviewed deployment entrypoint." >&2
+    exit 1
+    ;;
+esac
+
+# Hash the entrypoint with the already approved Node executable. Inline code is used
+# here so no unverified repository JavaScript receives deployment credentials first.
+"$DEPLOY_NODE_PATH" -e '
+  const { createHash } = require("node:crypto");
+  const { lstatSync, readFileSync } = require("node:fs");
+  const [launcher, entrypoint, expected] = process.argv.slice(1);
+  function inspect(path) {
+    const value = lstatSync(path);
+    if (!value.isFile() || value.isSymbolicLink() || value.nlink !== 1) {
+      throw new Error("unsafe-file");
+    }
+    return value;
+  }
+  try {
+    inspect(launcher);
+    const before = inspect(entrypoint);
+    const bytes = readFileSync(entrypoint);
+    const after = inspect(entrypoint);
+    if (before.dev !== after.dev || before.ino !== after.ino ||
+        before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+      throw new Error("changed-file");
+    }
+    const actual = createHash("sha256").update(bytes).digest("hex");
+    if (actual !== expected) throw new Error("digest-mismatch");
+  } catch {
+    process.exit(1);
+  }
+' "$launcher_path" "$integrity_path" "$STAGING_INTEGRITY_SHA256" || {
+  printf '%s\n' "The deployment entrypoint does not match the retained reviewed digest or has an unsafe file type." >&2
+  exit 1
+}
+
 unset NODE_OPTIONS NODE_PATH CLOUDFLARE_API_BASE_URL CF_API_BASE_URL CLOUDFLARE_BASE_URL
 unset CLOUDFLARE_CONTAINER_REGISTRY WRANGLER_API_ENVIRONMENT CLOUDFLARE_COMPLIANCE_REGION
 unset WRANGLER_AUTH_DOMAIN WRANGLER_AUTH_URL WRANGLER_TOKEN_URL WRANGLER_REVOKE_URL
@@ -61,4 +123,4 @@ unset WRANGLER_LOG WRANGLER_LOG_SANITIZE WRANGLER_LOG_PATH WRANGLER_WRITE_LOGS
 unset WRANGLER_OUTPUT_FILE_PATH WRANGLER_OUTPUT_FILE_DIRECTORY
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy
 unset NODE_EXTRA_CA_CERTS NODE_TLS_REJECT_UNAUTHORIZED OPENSSL_CONF SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE
-exec "$DEPLOY_NODE_PATH" scripts/staging-bundle-integrity.mjs deploy "$@"
+exec "$DEPLOY_NODE_PATH" "$integrity_path" deploy "$@"

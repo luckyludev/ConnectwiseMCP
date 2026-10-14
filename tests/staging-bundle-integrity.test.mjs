@@ -25,6 +25,9 @@ const integrityPath = fileURLToPath(
 const deploymentLauncherPath = fileURLToPath(
   new URL("../scripts/deploy-verified-bundle.sh", import.meta.url),
 );
+const reviewedIntegritySha256 = createHash("sha256")
+  .update(await readFile(integrityPath))
+  .digest("hex");
 const projectNodeModules = fileURLToPath(
   new URL("../node_modules", import.meta.url),
 );
@@ -85,6 +88,11 @@ async function createCheckout() {
     join(cwd, "scripts", "staging-bundle-integrity.mjs"),
     await readFile(integrityPath),
   );
+  await writeFile(
+    join(cwd, "scripts", "deploy-verified-bundle.sh"),
+    await readFile(deploymentLauncherPath),
+  );
+  await chmod(join(cwd, "scripts", "deploy-verified-bundle.sh"), 0o755);
   await writeFile(join(cwd, "release.txt"), "reviewed\n");
   await writeFile(join(cwd, "package-lock.json"), "{}\n");
   await writeFile(join(cwd, "dist", "index.js"), "export default {};\n");
@@ -144,10 +152,12 @@ function runLauncher(cwd, releaseSha, environmentOverrides = {}) {
   delete env.STAGING_BUNDLE_SHA256;
   delete env.STAGING_CONFIG_SHA256;
   delete env.STAGING_DEPLOY_RUNTIME_SHA256;
+  delete env.STAGING_INTEGRITY_SHA256;
   env.DEPLOY_NODE_PATH = process.execPath;
+  env.STAGING_INTEGRITY_SHA256 = reviewedIntegritySha256;
   Object.assign(env, environmentOverrides);
   if (releaseSha !== undefined) env.STAGING_RELEASE_SHA = releaseSha;
-  return spawnSync(deploymentLauncherPath, [], {
+  return spawnSync("scripts/deploy-verified-bundle.sh", [], {
     cwd,
     env,
     encoding: "utf8",
@@ -183,7 +193,7 @@ describe("staging bundle integrity", () => {
       expect(created.status, created.stderr).toBe(0);
       expect(created.stdout).toMatch(
         new RegExp(
-          `^Recorded staging bundle [0-9a-f]{64}, configuration [0-9a-f]{64}, and deployment runtime [0-9a-f]{64} for ${head}\\.\\n$`,
+          `^Recorded staging bundle [0-9a-f]{64}, configuration [0-9a-f]{64}, deployment runtime [0-9a-f]{64}, and deployment entrypoint ${reviewedIntegritySha256} for ${head}\\.\\n$`,
         ),
       );
       expect(verified.status, verified.stderr).toBe(0);
@@ -512,6 +522,97 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
       });
     });
   });
+
+  it("rejects a launcher invoked outside its reviewed repository root", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const fakeMarker = join(cwd, "fake-entrypoint-ran");
+      await writeFile(
+        join(cwd, "scripts", "staging-bundle-integrity.mjs"),
+        `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(fakeMarker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
+      );
+      const env = cleanDeploymentEnvironment();
+      env.DEPLOY_NODE_PATH = process.execPath;
+      env.STAGING_INTEGRITY_SHA256 = createHash("sha256")
+        .update(
+          await readFile(join(cwd, "scripts", "staging-bundle-integrity.mjs")),
+        )
+        .digest("hex");
+      env.CLOUDFLARE_API_TOKEN = "credential-canary";
+
+      const result = spawnSync(deploymentLauncherPath, [], {
+        cwd,
+        env,
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Run the deployment launcher directly from the reviewed repository root.",
+      );
+      await expect(readFile(fakeMarker)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+  });
+
+  it("rejects a changed deployment entrypoint before executing it", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const marker = join(cwd, "changed-entrypoint-ran");
+      await writeFile(
+        join(cwd, "scripts", "staging-bundle-integrity.mjs"),
+        `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
+      );
+
+      const result = runLauncher(cwd, undefined, {
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The deployment entrypoint does not match the retained reviewed digest or has an unsafe file type.",
+      );
+      await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  it.each(["symlink", "hard link"])(
+    "rejects a %s deployment entrypoint before executing it",
+    async (fileType) => {
+      await withCheckout(async ({ cwd }) => {
+        const entrypoint = join(cwd, "scripts", "staging-bundle-integrity.mjs");
+        const replacement = join(cwd, "replacement-integrity.mjs");
+        await writeFile(replacement, await readFile(entrypoint));
+        await unlink(entrypoint);
+        if (fileType === "symlink") await symlink(replacement, entrypoint);
+        else await link(replacement, entrypoint);
+
+        const result = runLauncher(cwd, undefined, {
+          CLOUDFLARE_API_TOKEN: "credential-canary",
+        });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toMatch(
+          /Deployment launcher files must be regular|deployment entrypoint does not match/,
+        );
+      });
+    },
+  );
+
+  it.each(["", "abc", "A".repeat(64), `${"a".repeat(63)}g`])(
+    "rejects a missing or malformed retained entrypoint digest (%s)",
+    async (digest) => {
+      await withCheckout(async ({ cwd }) => {
+        const result = runLauncher(cwd, undefined, {
+          STAGING_INTEGRITY_SHA256: digest,
+        });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          "STAGING_INTEGRITY_SHA256 must be the retained lowercase SHA-256",
+        );
+      });
+    },
+  );
 
   it("runs the verified deployment with Node injection variables absent", async () => {
     await withCheckout(async ({ cwd, head }) => {

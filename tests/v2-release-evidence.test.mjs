@@ -37,6 +37,11 @@ async function makeEvidence(target = "staging") {
   const evidence = await mkdtemp(join(tmpdir(), "cw-v2-evidence-"));
   temporaryDirectories.push(cwd, evidence);
   await mkdir(join(cwd, "dist"));
+  await mkdir(join(cwd, "scripts"));
+  await copyFile(
+    integrityScript,
+    join(cwd, "scripts", "staging-bundle-integrity.mjs"),
+  );
   await mkdir(join(cwd, "node_modules", "package"), { recursive: true });
   await writeFile(join(cwd, "dist", "index.js"), "export default {};\n");
   await writeFile(join(cwd, "wrangler.jsonc"), '{"name":"evidence-test"}\n');
