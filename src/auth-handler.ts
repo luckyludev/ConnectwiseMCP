@@ -459,7 +459,14 @@ function isTerminalGrantFailure(error: unknown): boolean {
   );
 }
 
-function reauthorizeGrantProfile(props: EntraGrantProps, env: WorkerEnv): void {
+function reauthorizeGrantProfile(
+  props: EntraGrantProps,
+  env: WorkerEnv,
+  userId: string,
+): void {
+  if (userId !== oauthUserId(props.tenantId, props.objectId)) {
+    throw new Error("identity_or_profile_changed");
+  }
   const profile = resolveCredentialProfile(
     {
       tid: props.tenantId,
@@ -646,7 +653,7 @@ export function createTokenExchangeCallback(
     const props = options.props as EntraGrantProps;
     if (options.grantType === "authorization_code") {
       try {
-        reauthorizeGrantProfile(props, env);
+        reauthorizeGrantProfile(props, env, options.userId);
         return {
           accessTokenTTL: Math.min(props.upstreamExpiresIn, 3600),
           refreshTokenTTL: 2_592_000,
@@ -669,7 +676,7 @@ export function createTokenExchangeCallback(
       // Reapply the stored grant's local identity and authorization policy before
       // reading either refresh credential or making an authenticated request.
       // The post-refresh check below remains necessary for fresh Entra claims.
-      reauthorizeGrantProfile(props, env);
+      reauthorizeGrantProfile(props, env, options.userId);
       const tokenSet = await refreshEntraTokens(
         {
           tenantId: env.ENTRA_TENANT_ID,
