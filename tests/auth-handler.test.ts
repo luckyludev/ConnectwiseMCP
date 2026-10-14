@@ -416,6 +416,122 @@ describe("Entra auth handler", () => {
     expect(await response.text()).toBe("Invalid request");
   });
 
+  it("prevents caching malformed callback failures before token exchange", async () => {
+    let fetched = false;
+    let completed = false;
+    const response = await createEntraAuthHandler({
+      fetcher: async () => {
+        fetched = true;
+        throw new Error("must not fetch");
+      },
+    }).fetch!(
+      new Request("https://mcp.example.com/callback?code=entra-code") as never,
+      {
+        OAUTH_PROVIDER: {
+          async completeAuthorization() {
+            completed = true;
+            throw new Error("must not complete authorization");
+          },
+        },
+      } as unknown as WorkerEnv,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("X-Auth-Stage")).toBe("callback_error_param");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(fetched).toBe(false);
+    expect(completed).toBe(false);
+  });
+
+  it("prevents caching invalid callback state failures before token exchange", async () => {
+    let fetched = false;
+    let completed = false;
+    const response = await createEntraAuthHandler({
+      fetcher: async () => {
+        fetched = true;
+        throw new Error("must not fetch");
+      },
+    }).fetch!(
+      new Request(
+        "https://mcp.example.com/callback?code=entra-code&state=tampered-state",
+      ) as never,
+      {
+        OAUTH_STATE_SECRET: "0123456789abcdef0123456789abcdef",
+        MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        OAUTH_PROVIDER: {
+          async completeAuthorization() {
+            completed = true;
+            throw new Error("must not complete authorization");
+          },
+        },
+      } as unknown as WorkerEnv,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("X-Auth-Stage")).toBe("callback_state");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(fetched).toBe(false);
+    expect(completed).toBe(false);
+  });
+
+  it("prevents caching invalid callback session failures before token exchange", async () => {
+    const secret = "0123456789abcdef0123456789abcdef";
+    const signedState = await signFlowState(
+      {
+        purpose: "entra_callback",
+        browserNonce: "callback-browser-nonce",
+        pkceVerifier: "pkce-verifier",
+        oidcNonce: "oidc-nonce",
+        oauthRequest: {
+          responseType: "code",
+          clientId: "mcp-client",
+          redirectUri: "https://client.example.com/callback",
+          scope: ["mcp:read"],
+          state: "client-state",
+          codeChallenge: "challenge",
+          codeChallengeMethod: "S256",
+          resource: "https://mcp.example.com/mcp",
+        },
+      },
+      secret,
+      "https://mcp.example.com",
+    );
+    let fetched = false;
+    let completed = false;
+    const response = await createEntraAuthHandler({
+      fetcher: async () => {
+        fetched = true;
+        throw new Error("must not fetch");
+      },
+    }).fetch!(
+      new Request(
+        `https://mcp.example.com/callback?code=entra-code&state=${encodeURIComponent(signedState)}`,
+      ) as never,
+      {
+        OAUTH_STATE_SECRET: secret,
+        MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+          "https://client.example.com/callback",
+        ]),
+        OAUTH_PROVIDER: {
+          async completeAuthorization() {
+            completed = true;
+            throw new Error("must not complete authorization");
+          },
+        },
+      } as unknown as WorkerEnv,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("X-Auth-Stage")).toBe("callback_session");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(fetched).toBe(false);
+    expect(completed).toBe(false);
+  });
+
   it("rechecks scope in callback state before token or profile access", async () => {
     const secret = "0123456789abcdef0123456789abcdef";
     const browserNonce = "callback-browser-nonce";
