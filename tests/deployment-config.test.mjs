@@ -683,17 +683,25 @@ describe("staging deployment configuration", () => {
       "      - name: Retain verified production release evidence",
     );
     const attestJobOffset = workflow.indexOf("\n  attest:\n");
+    const checkoutVerifierOffset = workflow.indexOf(
+      "      - name: Check out attestation verifier",
+      attestJobOffset,
+    );
     const downloadStagingOffset = workflow.indexOf(
       "      - name: Download verified staging release evidence",
-      attestJobOffset,
+      checkoutVerifierOffset,
     );
     const downloadProductionOffset = workflow.indexOf(
       "      - name: Download verified production release evidence",
       downloadStagingOffset,
     );
+    const reverifyOffset = workflow.indexOf(
+      "      - name: Reverify downloaded release evidence",
+      downloadProductionOffset,
+    );
     const attestStagingOffset = workflow.indexOf(
       "      - name: Attest verified staging release evidence",
-      downloadProductionOffset,
+      reverifyOffset,
     );
     const attestProductionOffset = workflow.indexOf(
       "      - name: Attest verified production release evidence",
@@ -716,9 +724,11 @@ describe("staging deployment configuration", () => {
     expect(stageProductionOffset).toBeGreaterThan(productionDryRunOffset);
     expect(retainProductionOffset).toBeGreaterThan(stageProductionOffset);
     expect(attestJobOffset).toBeGreaterThan(retainProductionOffset);
-    expect(downloadStagingOffset).toBeGreaterThan(attestJobOffset);
+    expect(checkoutVerifierOffset).toBeGreaterThan(attestJobOffset);
+    expect(downloadStagingOffset).toBeGreaterThan(checkoutVerifierOffset);
     expect(downloadProductionOffset).toBeGreaterThan(downloadStagingOffset);
-    expect(attestStagingOffset).toBeGreaterThan(downloadProductionOffset);
+    expect(reverifyOffset).toBeGreaterThan(downloadProductionOffset);
+    expect(attestStagingOffset).toBeGreaterThan(reverifyOffset);
     expect(attestProductionOffset).toBeGreaterThan(attestStagingOffset);
     const sbomStep = workflow.slice(sbomOffset, stageStagingOffset);
     const stageStagingStep = workflow.slice(
@@ -737,14 +747,19 @@ describe("staging deployment configuration", () => {
       retainProductionOffset,
       attestJobOffset,
     );
+    const checkoutVerifierStep = workflow.slice(
+      checkoutVerifierOffset,
+      downloadStagingOffset,
+    );
     const downloadStagingStep = workflow.slice(
       downloadStagingOffset,
       downloadProductionOffset,
     );
     const downloadProductionStep = workflow.slice(
       downloadProductionOffset,
-      attestStagingOffset,
+      reverifyOffset,
     );
+    const reverifyStep = workflow.slice(reverifyOffset, attestStagingOffset);
     const attestStagingStep = workflow.slice(
       attestStagingOffset,
       attestProductionOffset,
@@ -779,6 +794,11 @@ describe("staging deployment configuration", () => {
       "path: ${{ runner.temp }}/release-evidence/production",
     );
     expect(retainProductionStep).toContain("retention-days: 90");
+    expect(checkoutVerifierStep).toContain(
+      "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+    );
+    expect(checkoutVerifierStep).toContain("ref: ${{ github.sha }}");
+    expect(checkoutVerifierStep).toContain("persist-credentials: false");
     expect(downloadStagingStep).toContain(downloadAction);
     expect(downloadStagingStep).toContain(
       "name: v2-staging-release-${{ github.sha }}",
@@ -786,6 +806,12 @@ describe("staging deployment configuration", () => {
     expect(downloadProductionStep).toContain(downloadAction);
     expect(downloadProductionStep).toContain(
       "name: v2-production-release-${{ github.sha }}",
+    );
+    expect(reverifyStep).toContain(
+      'node scripts/verify-v2-release-evidence.mjs release-evidence/staging staging "$GITHUB_SHA"',
+    );
+    expect(reverifyStep).toContain(
+      'node scripts/verify-v2-release-evidence.mjs release-evidence/production production "$GITHUB_SHA"',
     );
     expect(attestStagingStep).toContain(attestAction);
     expect(attestProductionStep).toContain(attestAction);
