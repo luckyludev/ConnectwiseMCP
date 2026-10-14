@@ -35,12 +35,14 @@ Set non-secret variables in `wrangler.jsonc` or environment-specific Wrangler co
 Provision these as Worker secrets; do not place values in Git, `.dev.vars`, command arguments, or ordinary request headers. The following example is staging-only and deliberately names the environment so it cannot mutate the top-level production Worker. Production secret entry requires the separate approved production procedure and its explicit approval boundary.
 
 ```bash
-node node_modules/wrangler/bin/wrangler.js secret put ENTRA_CLIENT_SECRET --env staging
-node node_modules/wrangler/bin/wrangler.js secret put OAUTH_STATE_SECRET --env staging
-node node_modules/wrangler/bin/wrangler.js secret put IDENTITY_PROFILE_MAP --env staging
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh ENTRA_CLIENT_SECRET
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh OAUTH_STATE_SECRET
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh IDENTITY_PROFILE_MAP
 # Repeat once per configured alias, for example:
-node node_modules/wrangler/bin/wrangler.js secret put CW_PROFILE_LUIS --env staging
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh CW_PROFILE_LUIS
 ```
+
+The launcher accepts only these fixed names and valid `CW_PROFILE_<ALIAS>` bindings, pins staging, and rejects inherited Node preload, Wrangler logging, API-endpoint, account-routing, proxy, and TLS overrides. Run it from the reviewed repository root; it resolves that physical directory, pins its reviewed `wrangler.jsonc` explicitly, and accepts only its non-symlink launcher and lock-installed Wrangler path components. `DEPLOY_NODE_PATH` must identify the reviewed absolute, canonical, regular executable through a path with no symlink components.
 
 `OAUTH_STATE_SECRET` must contain at least 32 random bytes. `IDENTITY_PROFILE_MAP` is JSON such as:
 
