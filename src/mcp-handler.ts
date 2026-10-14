@@ -88,7 +88,11 @@ function authInfoFromWorkerContext(context: WorkerOAuthContext): AuthInfo {
     throw new TypeError("Invalid verified OAuth request context");
   }
   const scopeSnapshot = authorizedScopeSnapshot(auth.scope);
-  if (scopeSnapshot === undefined) {
+  if (
+    scopeSnapshot === undefined ||
+    scopeSnapshot.length !== 1 ||
+    scopeSnapshot[0] !== "mcp:read"
+  ) {
     throw new TypeError("Invalid verified OAuth request context");
   }
   const { token, clientId, expiresAt, audience } = auth;

@@ -220,10 +220,13 @@ describe("MCP handler OAuth context adapter", () => {
     expect(factory).toHaveBeenCalledOnce();
   });
 
-  it("rejects worker scopes missing mcp:read before accessing profile props", async () => {
+  it("requires the exact read-only worker scope before accessing profile props", async () => {
     for (const scope of [
       [],
       ["mcp:write"],
+      ["mcp:read", "mcp:write"],
+      ["mcp:read", "mcp:read"],
+      ["mcp:read", "unknown"],
       Array(1),
       Array.from({ length: 17 }, () => "mcp:read"),
     ]) {
