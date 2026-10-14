@@ -193,11 +193,13 @@ Do not add names, email addresses, ticket identifiers, raw URLs with paths, loca
 Only an authorized operator should enter secrets using Wrangler’s secure prompt or an approved Cloudflare secret-management workflow. Never put a secret value on the command line or in a redirected shell pipeline.
 
 ```bash
-node node_modules/wrangler/bin/wrangler.js secret put ENTRA_CLIENT_SECRET --env staging
-node node_modules/wrangler/bin/wrangler.js secret put OAUTH_STATE_SECRET --env staging
-node node_modules/wrangler/bin/wrangler.js secret put IDENTITY_PROFILE_MAP --env staging
-node node_modules/wrangler/bin/wrangler.js secret put CW_PROFILE_LUIS --env staging
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh ENTRA_CLIENT_SECRET
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh OAUTH_STATE_SECRET
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh IDENTITY_PROFILE_MAP
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh CW_PROFILE_LUIS
 ```
+
+The launcher rejects inherited Node preload, Wrangler logging, Cloudflare API-endpoint, account-routing, proxy, and TLS overrides; permits only the documented staging secret names or a valid ASCII `CW_PROFILE_<ALIAS>` binding; and cannot select production or forward arbitrary Wrangler arguments. Run it from the reviewed repository root; it resolves that physical directory, pins its reviewed `wrangler.jsonc` explicitly, and accepts only its non-symlink launcher and lock-installed Wrangler path components. `DEPLOY_NODE_PATH` must identify the reviewed absolute, canonical, regular executable through a path with no symlink components.
 
 Required controls:
 

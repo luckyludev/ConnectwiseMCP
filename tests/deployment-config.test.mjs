@@ -533,28 +533,45 @@ describe("legacy rollback image security", () => {
 });
 
 describe("staging deployment configuration", () => {
-  it("uses the lock-installed Wrangler for staging secret entry", async () => {
-    const documents = await Promise.all(
-      ["v2-foundation.md", "cloudflare-workers-staging-howto.md"].map((file) =>
-        readFile(new URL(`../docs/${file}`, import.meta.url), "utf8"),
+  it("uses the hardened launcher for staging secret entry", async () => {
+    const [documents, launcher, launcherStat] = await Promise.all([
+      Promise.all(
+        ["v2-foundation.md", "cloudflare-workers-staging-howto.md"].map(
+          (file) =>
+            readFile(new URL(`../docs/${file}`, import.meta.url), "utf8"),
+        ),
       ),
-    );
+      readFile(
+        new URL("../scripts/put-staging-secret.sh", import.meta.url),
+        "utf8",
+      ),
+      stat(new URL("../scripts/put-staging-secret.sh", import.meta.url)),
+    ]);
     const secretCommandPrefix =
-      "node node_modules/wrangler/bin/wrangler.js secret put ";
+      "DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh ";
 
     for (const document of documents) {
       const secretCommands = document
         .split("\n")
-        .filter((line) => line.includes("secret put"));
+        .filter((line) => line.startsWith(secretCommandPrefix));
       expect(secretCommands).toHaveLength(4);
-      for (const command of secretCommands) {
-        expect(command.startsWith(secretCommandPrefix)).toBe(true);
-        expect(command).toMatch(/ --env staging$/u);
-      }
+      expect(document).not.toContain(
+        "node node_modules/wrangler/bin/wrangler.js secret put",
+      );
     }
     expect(documents[0]).toContain(
       "Production secret entry requires the separate approved production procedure",
     );
+    expect(launcher).toContain(
+      'if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_PATH+x}" = x ]; then',
+    );
+    expect(launcher).toContain("CLOUDFLARE_API_BASE_URL");
+    expect(launcher).toContain("HTTPS_PROXY");
+    expect(launcher).toContain("NODE_EXTRA_CA_CERTS");
+    expect(launcher).toContain(
+      'exec "$DEPLOY_NODE_PATH" "$wrangler_entrypoint" secret put "$secret_name" --env staging --config "$wrangler_config"',
+    );
+    expect(launcherStat.mode & 0o111).not.toBe(0);
   });
 
   it("exercises the verified staging artifact without deploying it", async () => {
