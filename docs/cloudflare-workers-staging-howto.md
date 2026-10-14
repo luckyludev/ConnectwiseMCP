@@ -159,6 +159,8 @@ The preparation command fails before validation unless `STAGING_RELEASE_SHA` exa
 
 This creates or updates the staging Worker and its Workers.dev endpoint. The integrity wrapper labels the deployed Worker version with the exact verified `STAGING_RELEASE_SHA` as its Wrangler tag and includes that SHA in the version message. Record the returned Worker version ID in the secure operations record, then use the approved Cloudflare read-only workflow to confirm that version's tag exactly equals the approved full release SHA. A missing or mismatched tag blocks acceptance. The deployment does not create a custom-domain route.
 
+OAuth flow state is an encrypted, ten-minute, version-local artifact. Deploy this state-format change only to a target with no active authorization flows; do not use a gradual/canary rollout that mixes Worker versions. On rollback, in-flight authorization and callback URLs fail closed and users must restart OAuth against the restored version. Never add a legacy signed-state reader to preserve in-flight flows, because that would restore disclosure of the browser-binding nonce and upstream PKCE verifier.
+
 Immediately verify only the public, non-sensitive boundary:
 
 ```bash

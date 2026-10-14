@@ -1,5 +1,5 @@
 import type { AuthRequest } from "@cloudflare/workers-oauth-provider";
-import { SignJWT, jwtVerify } from "jose";
+import { EncryptJWT, jwtDecrypt } from "jose";
 
 export type FlowPurpose = "consent" | "entra_callback";
 
@@ -14,11 +14,12 @@ export type FlowState = {
 const encoder = new TextEncoder();
 const STATE_TTL_SECONDS = 600;
 
-function key(secret: string): Uint8Array {
-  if (encoder.encode(secret).byteLength < 32) {
+async function key(secret: string): Promise<Uint8Array> {
+  const encoded = encoder.encode(secret);
+  if (encoded.byteLength < 32) {
     throw new Error("OAUTH_STATE_SECRET must be at least 32 bytes");
   }
-  return encoder.encode(secret);
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", encoded));
 }
 
 export async function signFlowState(
@@ -27,20 +28,20 @@ export async function signFlowState(
   origin: string,
   now = Math.floor(Date.now() / 1000),
 ): Promise<string> {
-  return new SignJWT({
+  return new EncryptJWT({
     oauthRequest: state.oauthRequest,
     browserNonce: state.browserNonce,
     pkceVerifier: state.pkceVerifier,
     oidcNonce: state.oidcNonce,
   })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setProtectedHeader({ alg: "dir", enc: "A256GCM", typ: "JWT" })
     .setIssuer(origin)
     .setAudience(`${origin}/callback`)
     .setSubject(state.purpose)
     .setJti(state.browserNonce)
     .setIssuedAt(now)
     .setExpirationTime(now + STATE_TTL_SECONDS)
-    .sign(key(secret));
+    .encrypt(await key(secret));
 }
 
 export async function verifyFlowState(
@@ -50,8 +51,9 @@ export async function verifyFlowState(
   origin: string,
   now = Math.floor(Date.now() / 1000),
 ): Promise<FlowState> {
-  const { payload } = await jwtVerify(token, key(secret), {
-    algorithms: ["HS256"],
+  const { payload } = await jwtDecrypt(token, await key(secret), {
+    keyManagementAlgorithms: ["dir"],
+    contentEncryptionAlgorithms: ["A256GCM"],
     typ: "JWT",
     issuer: origin,
     audience: `${origin}/callback`,
