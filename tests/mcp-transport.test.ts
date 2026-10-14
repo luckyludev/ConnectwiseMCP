@@ -622,6 +622,98 @@ describe("authenticated MCP transport", () => {
 
   it.each([
     {
+      label: "read-only caller",
+      scopes: ["mcp:read"],
+      reason: "insufficient_scope",
+      profileAlias: "LUIS",
+    },
+    {
+      label: "write-authorized caller",
+      scopes: ["mcp:read", "mcp:write"],
+      reason: "invalid_arguments",
+      profileAlias: "LUIS",
+    },
+    {
+      label: "caller without read scope",
+      scopes: ["mcp:write"],
+      reason: "insufficient_scope",
+      profileAlias: undefined,
+    },
+  ])(
+    "classifies malformed write arguments after scope authorization for a $label",
+    async ({ scopes, reason, profileAlias }) => {
+      const auditMessages: string[] = [];
+      const bindingReads: string[] = [];
+      let clientCreated = false;
+      const guardedEnv = new Proxy(env, {
+        get(target, property, receiver) {
+          bindingReads.push(String(property));
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      const handler = createMcpHandler(
+        () =>
+          createMcpServer(guardedEnv, {
+            audit: { logger: (message) => auditMessages.push(message) },
+            createBusinessClient: () => {
+              clientCreated = true;
+              return businessClient();
+            },
+          }),
+        {
+          route: "/mcp",
+          corsOptions: false,
+          authContext: { props: authProps("LUIS", scopes) },
+        },
+      );
+
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 4,
+            method: "tools/call",
+            params: {
+              name: "create_ticket_note",
+              arguments: { ticketId: 1, text: "" },
+            },
+          }),
+        }),
+      );
+      const eventStream = await response.text();
+
+      expect(response.status, eventStream).toBe(200);
+      expect(eventStream).toContain("Invalid");
+      expect(bindingReads).toEqual([]);
+      expect(clientCreated).toBe(false);
+      expect(auditMessages).toHaveLength(1);
+      const auditEvent = JSON.parse(auditMessages[0]!) as Record<
+        string,
+        unknown
+      >;
+      expect(auditEvent).toMatchObject({
+        tool: "create_ticket_note",
+        outcome: "denied",
+        reason,
+      });
+      expect(auditEvent.profileAlias).toBe(profileAlias);
+      if (profileAlias === undefined) {
+        expect(auditEvent).not.toHaveProperty("tenantId");
+        expect(auditEvent).not.toHaveProperty("objectId");
+        expect(auditEvent).not.toHaveProperty("profileAlias");
+      }
+    },
+  );
+
+  it.each([
+    {
       name: "list_ticket_tasks",
       clientMethod: "getTicketTasks",
       upstream: {
