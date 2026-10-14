@@ -571,6 +571,25 @@ async function completeEntraCallback(
     });
   }
 
+  let client: Awaited<ReturnType<WorkerEnv["OAUTH_PROVIDER"]["lookupClient"]>>;
+  try {
+    client = await env.OAUTH_PROVIDER.lookupClient(state.oauthRequest.clientId);
+  } catch {
+    client = null;
+  }
+  if (
+    !client ||
+    !isApprovedClientRedirectUri(redirectUri, client.redirectUris)
+  ) {
+    return new Response("OAuth client is no longer authorized", {
+      status: 400,
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "callback_client",
+      },
+    });
+  }
+
   const oauthConfig = {
     tenantId: env.ENTRA_TENANT_ID,
     clientId: env.ENTRA_CLIENT_ID,
