@@ -544,7 +544,10 @@ async function completeEntraCallback(
     });
     return new Response("Authentication failed", {
       status: 400,
-      headers: { "X-Auth-Stage": "callback_error_param" },
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "callback_error_param",
+      },
     });
   }
 
@@ -563,7 +566,10 @@ async function completeEntraCallback(
     );
     return new Response("Invalid or expired authentication state", {
       status: 400,
-      headers: { "X-Auth-Stage": "callback_state" },
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "callback_state",
+      },
     });
   }
   if (!hasExactReadScope(state.oauthRequest.scope)) {
@@ -605,7 +611,10 @@ async function completeEntraCallback(
     );
     return new Response("Invalid authentication session", {
       status: 400,
-      headers: { "X-Auth-Stage": "callback_session" },
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "callback_session",
+      },
     });
   }
 
