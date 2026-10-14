@@ -989,7 +989,11 @@ describe("staging deployment configuration", () => {
     expect(stagingHowto).toContain(
       "STAGING_CONFIG_SHA256=<approved-configuration-sha256>",
     );
+    expect(stagingHowto).toContain(
+      "STAGING_INTEGRITY_SHA256=<approved-deployment-entrypoint-sha256>",
+    );
     for (const guide of [stagingHowto, stagingChecklist]) {
+      expect(guide).toContain("STAGING_INTEGRITY_SHA256");
       expect(guide).toContain("scripts/deploy-verified-bundle.sh");
       expect(guide).not.toContain(
         "node scripts/staging-bundle-integrity.mjs deploy",
@@ -1004,7 +1008,7 @@ describe("staging deployment configuration", () => {
       'if [ -z "${DEPLOY_NODE_PATH:-}" ]; then',
     );
     expect(deploymentLauncher).toContain(
-      'exec "$DEPLOY_NODE_PATH" scripts/staging-bundle-integrity.mjs deploy "$@"',
+      'exec "$DEPLOY_NODE_PATH" "$integrity_path" deploy "$@"',
     );
     expect(deploymentLauncherStat.mode & 0o111).not.toBe(0);
     expect(packageJson.scripts?.["prepare:staging"]).toContain("npm ci");
