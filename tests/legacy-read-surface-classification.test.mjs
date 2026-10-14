@@ -298,6 +298,15 @@ describe("legacy read-surface classification", () => {
     }
   });
 
+  it("describes board option and ticket-list relationship handling accurately", () => {
+    expect(classification).toContain(
+      "Board options use fixed board-nested endpoints and validate positive option IDs; ticket lists verify each returned board reference, which remains in the allowlisted ticket projection.",
+    );
+    expect(classification).not.toContain(
+      "before stripping internal relationship fields",
+    );
+  });
+
   it("keeps the attachment-download contract aligned with the runtime bound", () => {
     const documentedLimit = `${MAX_DOWNLOAD_BYTES / 1_000_000} MB`;
 
