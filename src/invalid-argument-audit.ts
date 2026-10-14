@@ -1,10 +1,13 @@
 import { z } from "zod";
+import type { EntraAccessTokenProps } from "./auth-handler";
+import { hasMcpScopes } from "./auth-scopes";
 import {
   emitToolAudit,
   getAuditStartTime,
   isToolAuditName,
   type ToolAuditDependencies,
 } from "./audit";
+import { requiredMcpScopes } from "./tool-access";
 
 interface StandardValidationResult {
   readonly value?: unknown | undefined;
@@ -72,7 +75,7 @@ function normalizeInputSchema(value: unknown): StandardSchema | undefined {
 function auditInvalidArguments(
   schema: StandardSchema,
   tool: string,
-  props: unknown,
+  props: Partial<EntraAccessTokenProps> | undefined,
   dependencies: ToolAuditDependencies | undefined,
 ): StandardSchema {
   const standard = schema["~standard"];
@@ -90,12 +93,15 @@ function auditInvalidArguments(
           result.issues.length > 0 &&
           isToolAuditName(tool)
         ) {
+          const hasReadScope = hasMcpScopes(props, ["mcp:read"]);
           emitToolAudit(
             {
-              props,
+              props: hasReadScope ? props : undefined,
               tool,
               outcome: "denied",
-              reason: "invalid_arguments",
+              reason: hasMcpScopes(props, requiredMcpScopes(tool))
+                ? "invalid_arguments"
+                : "insufficient_scope",
               startedAtMs,
             },
             dependencies,
@@ -113,7 +119,7 @@ function auditInvalidArguments(
  */
 export function installInvalidArgumentAudit(
   server: { registerTool: unknown },
-  props: unknown,
+  props: Partial<EntraAccessTokenProps> | undefined,
   dependencies: ToolAuditDependencies | undefined,
 ): void {
   if (typeof server.registerTool !== "function") {
