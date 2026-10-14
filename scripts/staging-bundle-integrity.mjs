@@ -46,6 +46,52 @@ if (target === "production" && action === "deploy") {
   process.exit(1);
 }
 
+const NODE_INJECTION_ENVIRONMENT = ["NODE_OPTIONS", "NODE_PATH"];
+const UNSAFE_DEPLOYMENT_ENVIRONMENT = [
+  "CLOUDFLARE_API_BASE_URL",
+  "CF_API_BASE_URL",
+  "CLOUDFLARE_BASE_URL",
+  "CLOUDFLARE_CONTAINER_REGISTRY",
+  "WRANGLER_API_ENVIRONMENT",
+  "CLOUDFLARE_COMPLIANCE_REGION",
+  "WRANGLER_AUTH_DOMAIN",
+  "WRANGLER_AUTH_URL",
+  "WRANGLER_TOKEN_URL",
+  "WRANGLER_REVOKE_URL",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CF_ACCOUNT_ID",
+  "WRANGLER_LOG",
+  "WRANGLER_LOG_SANITIZE",
+  "WRANGLER_LOG_PATH",
+  "WRANGLER_WRITE_LOGS",
+  "WRANGLER_OUTPUT_FILE_PATH",
+  "WRANGLER_OUTPUT_FILE_DIRECTORY",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "NO_PROXY",
+  "no_proxy",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "OPENSSL_CONF",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "CURL_CA_BUNDLE",
+];
+
+if (
+  action === "deploy" &&
+  UNSAFE_DEPLOYMENT_ENVIRONMENT.some((name) => Object.hasOwn(process.env, name))
+) {
+  process.stderr.write(
+    "Refusing credential-bearing deployment while an unsafe environment override is present.\n",
+  );
+  process.exit(1);
+}
+
 const DIST_PATH = "dist";
 const BUNDLE_PATH = "dist/index.js";
 const CONFIG_PATH = "wrangler.jsonc";
@@ -740,8 +786,12 @@ function deployVerifiedBundle(
     if (dryRun) arguments_.push("--dry-run");
     if (!result) {
       const deploymentEnvironment = { ...process.env };
-      delete deploymentEnvironment.NODE_OPTIONS;
-      delete deploymentEnvironment.NODE_PATH;
+      for (const name of [
+        ...NODE_INJECTION_ENVIRONMENT,
+        ...UNSAFE_DEPLOYMENT_ENVIRONMENT,
+      ]) {
+        delete deploymentEnvironment[name];
+      }
       result = spawnSync(process.execPath, arguments_, {
         env: deploymentEnvironment,
         stdio: "inherit",

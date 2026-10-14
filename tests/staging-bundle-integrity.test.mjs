@@ -28,6 +28,48 @@ const deploymentLauncherPath = fileURLToPath(
 const projectNodeModules = fileURLToPath(
   new URL("../node_modules", import.meta.url),
 );
+const unsafeDeploymentEnvironment = [
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "CLOUDFLARE_API_BASE_URL",
+  "CF_API_BASE_URL",
+  "CLOUDFLARE_BASE_URL",
+  "CLOUDFLARE_CONTAINER_REGISTRY",
+  "WRANGLER_API_ENVIRONMENT",
+  "CLOUDFLARE_COMPLIANCE_REGION",
+  "WRANGLER_AUTH_DOMAIN",
+  "WRANGLER_AUTH_URL",
+  "WRANGLER_TOKEN_URL",
+  "WRANGLER_REVOKE_URL",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CF_ACCOUNT_ID",
+  "WRANGLER_LOG",
+  "WRANGLER_LOG_SANITIZE",
+  "WRANGLER_LOG_PATH",
+  "WRANGLER_WRITE_LOGS",
+  "WRANGLER_OUTPUT_FILE_PATH",
+  "WRANGLER_OUTPUT_FILE_DIRECTORY",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "NO_PROXY",
+  "no_proxy",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "OPENSSL_CONF",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "CURL_CA_BUNDLE",
+];
+
+function cleanDeploymentEnvironment() {
+  const env = { ...process.env };
+  for (const name of unsafeDeploymentEnvironment) delete env[name];
+  return env;
+}
 
 function git(cwd, args) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -73,7 +115,7 @@ function run(
   environmentOverrides = {},
   target = "staging",
 ) {
-  const env = { ...process.env };
+  const env = cleanDeploymentEnvironment();
   delete env.STAGING_RELEASE_SHA;
   delete env.PRODUCTION_RELEASE_SHA;
   delete env.STAGING_BUNDLE_SHA256;
@@ -96,9 +138,7 @@ function run(
 }
 
 function runLauncher(cwd, releaseSha, environmentOverrides = {}) {
-  const env = { ...process.env };
-  delete env.NODE_OPTIONS;
-  delete env.NODE_PATH;
+  const env = cleanDeploymentEnvironment();
   delete env.DEPLOY_NODE_PATH;
   delete env.STAGING_RELEASE_SHA;
   delete env.STAGING_BUNDLE_SHA256;
@@ -479,7 +519,7 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
       const marker = join(cwd, "wrangler-ran");
       await writeFile(
         wrangler,
-        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nif (process.env.NODE_OPTIONS !== undefined || process.env.NODE_PATH !== undefined) process.exit(94);\nwriteFileSync(${JSON.stringify(marker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
+        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nconst blocked = ${JSON.stringify(unsafeDeploymentEnvironment)};\nif (blocked.some((name) => Object.hasOwn(process.env, name))) process.exit(94);\nwriteFileSync(${JSON.stringify(marker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
       );
       await chmod(wrangler, 0o755);
       expect(run(cwd, "create").status).toBe(0);
@@ -501,6 +541,50 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(
         "Refusing credential-bearing deployment while NODE_PATH is set.",
+      );
+    });
+  });
+
+  it.each(
+    unsafeDeploymentEnvironment.filter(
+      (name) => name !== "NODE_OPTIONS" && name !== "NODE_PATH",
+    ),
+  )("rejects the %s override before the launcher starts Node", async (name) => {
+    await withCheckout(async ({ cwd }) => {
+      const result = runLauncher(cwd, undefined, { [name]: "hostile-value" });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Refusing credential-bearing deployment");
+    });
+  });
+
+  it("rejects even an empty unsafe override", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const result = runLauncher(cwd, undefined, {
+        CLOUDFLARE_API_BASE_URL: "",
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Cloudflare endpoint or account override is present",
+      );
+    });
+  });
+
+  it.each(
+    unsafeDeploymentEnvironment.filter(
+      (name) => name !== "NODE_OPTIONS" && name !== "NODE_PATH",
+    ),
+  )("rejects direct deploy when %s bypasses the launcher", async (name) => {
+    await withCheckout(async ({ cwd }) => {
+      const result = run(cwd, "deploy", undefined, {
+        [name]: "hostile-value",
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Refusing credential-bearing deployment while an unsafe environment override is present.",
       );
     });
   });
