@@ -1223,7 +1223,7 @@ describe("authenticated MCP transport", () => {
     { label: "malformed string scopes", scopes: "mcp:read mcp:write" },
   ])(
     "denies every write tool with $label before resolving a profile",
-    async ({ scopes }) => {
+    async ({ label, scopes }) => {
       const auditMessages: string[] = [];
       const bindingReads: string[] = [];
       let clientCreated = false;
@@ -1351,10 +1351,12 @@ describe("authenticated MCP transport", () => {
       );
       for (const message of auditMessages) {
         expect(JSON.parse(message)).toMatchObject({
-          profileAlias: "LUIS",
           outcome: "denied",
           reason: "insufficient_scope",
         });
+        expect(JSON.parse(message).profileAlias).toBe(
+          label === "missing mcp:write" ? "LUIS" : undefined,
+        );
         expect(message).not.toContain("must not be sent");
       }
     },
@@ -1483,10 +1485,10 @@ describe("authenticated MCP transport", () => {
     );
     for (const message of auditMessages) {
       expect(JSON.parse(message)).toMatchObject({
-        profileAlias: "LUIS",
         outcome: "denied",
         reason: "insufficient_scope",
       });
+      expect(JSON.parse(message).profileAlias).toBeUndefined();
       expect(message).not.toContain("must not be sent");
     }
   });
