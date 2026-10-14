@@ -1,17 +1,11 @@
-import {
-  SignJWT,
-  createLocalJWKSet,
-  decodeJwt,
-  exportJWK,
-  generateKeyPair,
-} from "jose";
+import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
 import {
   createEntraAuthHandler,
   isCanonicalMcpResource,
   type WorkerEnv,
 } from "../src/auth-handler";
-import { signFlowState } from "../src/flow-state";
+import { signFlowState, verifyFlowState } from "../src/flow-state";
 
 const INVALID_OAUTH_SCOPES: { scope: string[] }[] = [
   { scope: [] },
@@ -1012,7 +1006,14 @@ describe("Entra auth handler", () => {
     expect(lookedUpClientIds).toEqual(["mcp-client", "mcp-client"]);
     const entraLocation = new URL(upstream.headers.get("Location")!);
     const signedState = entraLocation.searchParams.get("state")!;
-    const oidcNonce = decodeJwt(signedState).oidcNonce as string;
+    const callbackState = await verifyFlowState(
+      signedState,
+      "entra_callback",
+      env.OAUTH_STATE_SECRET,
+      "https://mcp.example.com",
+      now,
+    );
+    const oidcNonce = callbackState.oidcNonce!;
     const browserNonce = upstream.headers
       .get("Set-Cookie")
       ?.match(/__Host-CW_ENTRA_STATE=([^;]+)/)?.[1];
