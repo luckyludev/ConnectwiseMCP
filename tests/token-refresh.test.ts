@@ -6,6 +6,8 @@ import {
   type WorkerEnv,
 } from "../src/auth-handler";
 
+const USER_ID = "dGVuYW50LWE6dXNlci0x";
+
 function authorizationCodeEnv(
   identityProfileMap = JSON.stringify({ "tenant-a:user-1": "LUIS" }),
   revokeGrant?: (...args: unknown[]) => Promise<void>,
@@ -40,7 +42,7 @@ describe("Entra token refresh reauthorization", () => {
         clientId: "mcp-client",
         subjectClientId: "mcp-client",
         resource: "https://mcp.example.com/mcp",
-        userId: "tenant-a:user-1",
+        userId: USER_ID,
         grantId: "grant-1",
         scope,
         requestedScope,
@@ -81,7 +83,7 @@ describe("Entra token refresh reauthorization", () => {
       clientId: "mcp-client",
       subjectClientId: "mcp-client",
       resource: "https://mcp.example.com/mcp",
-      userId: "tenant-a:user-1",
+      userId: USER_ID,
       grantId: "grant-1",
       scope: ["mcp:read"],
       requestedScope: ["mcp:read"],
@@ -98,6 +100,52 @@ describe("Entra token refresh reauthorization", () => {
       scopes: ["mcp:read"],
     });
   });
+
+  it.each(["authorization_code", "refresh_token"] as const)(
+    "rejects and revokes a %s grant whose subject does not match its immutable identity before secret access",
+    async (grantType) => {
+      let revokedWith: unknown[] | undefined;
+      let fetched = false;
+      const env = authorizationCodeEnv(undefined, async (...args) => {
+        revokedWith = args;
+      });
+      const props = {
+        tenantId: "tenant-a",
+        objectId: "user-1",
+        profileAlias: "LUIS",
+        groups: ["group-mcp-users"],
+        roles: [],
+        upstreamExpiresIn: 3600,
+      };
+      Object.defineProperty(props, "upstreamRefreshToken", {
+        get() {
+          throw new Error("token exchange accessed upstream refresh token");
+        },
+      });
+
+      await expect(
+        createTokenExchangeCallback(env, {
+          fetcher: async () => {
+            fetched = true;
+            throw new Error("token exchange made an upstream request");
+          },
+        })({
+          env,
+          grantType: grantType as never,
+          clientId: "mcp-client",
+          subjectClientId: "mcp-client",
+          resource: "https://mcp.example.com/mcp",
+          userId: "dGVuYW50LWE6dXNlci0y",
+          grantId: "grant-1",
+          scope: ["mcp:read"],
+          requestedScope: ["mcp:read"],
+          props: props as unknown as EntraGrantProps,
+        }),
+      ).rejects.toThrow("identity_or_profile_changed");
+      expect(fetched).toBe(false);
+      expect(revokedWith).toEqual(["grant-1", "dGVuYW50LWE6dXNlci0y"]);
+    },
+  );
 
   it.each([
     ["removes", "{}"],
@@ -124,7 +172,7 @@ describe("Entra token refresh reauthorization", () => {
           clientId: "mcp-client",
           subjectClientId: "mcp-client",
           resource: "https://mcp.example.com/mcp",
-          userId: "tenant-a:user-1",
+          userId: USER_ID,
           grantId: "grant-1",
           scope: ["mcp:read"],
           requestedScope: ["mcp:read"],
@@ -139,7 +187,7 @@ describe("Entra token refresh reauthorization", () => {
           },
         }),
       ).rejects.toThrow();
-      expect(revokedWith).toEqual(["grant-1", "tenant-a:user-1"]);
+      expect(revokedWith).toEqual(["grant-1", USER_ID]);
     },
   );
 
@@ -201,7 +249,7 @@ describe("Entra token refresh reauthorization", () => {
           clientId: "mcp-client",
           subjectClientId: "mcp-client",
           resource: "https://mcp.example.com/mcp",
-          userId: "tenant-a:user-1",
+          userId: USER_ID,
           grantId: "grant-1",
           scope: ["mcp:read"],
           requestedScope: ["mcp:read"],
@@ -209,7 +257,7 @@ describe("Entra token refresh reauthorization", () => {
         }),
       ).rejects.toThrow();
       expect(fetched).toBe(false);
-      expect(revokedWith).toEqual(["grant-1", "tenant-a:user-1"]);
+      expect(revokedWith).toEqual(["grant-1", USER_ID]);
     },
   );
 
@@ -227,7 +275,7 @@ describe("Entra token refresh reauthorization", () => {
         clientId: "mcp-client",
         subjectClientId: "mcp-client",
         resource: "https://mcp.example.com/mcp",
-        userId: "tenant-a:user-1",
+        userId: USER_ID,
         grantId: "grant-1",
         scope: ["mcp:read"],
         requestedScope: ["mcp:read"],
@@ -301,7 +349,7 @@ describe("Entra token refresh reauthorization", () => {
       clientId: "mcp-client",
       subjectClientId: "mcp-client",
       resource: "https://mcp.example.com/mcp",
-      userId: "tenant-a:user-1",
+      userId: USER_ID,
       grantId: "grant-1",
       scope: ["mcp:read"],
       requestedScope: ["mcp:read"],
@@ -368,7 +416,7 @@ describe("Entra token refresh reauthorization", () => {
         clientId: "mcp-client",
         subjectClientId: "mcp-client",
         resource: "https://mcp.example.com/mcp",
-        userId: "tenant-a:user-1",
+        userId: USER_ID,
         grantId: "grant-1",
         scope: ["mcp:read"],
         requestedScope: ["mcp:read"],
@@ -416,7 +464,7 @@ describe("Entra token refresh reauthorization", () => {
         clientId: "mcp-client",
         subjectClientId: "mcp-client",
         resource: "https://mcp.example.com/mcp",
-        userId: "tenant-a:user-1",
+        userId: USER_ID,
         grantId: "grant-1",
         scope: ["mcp:read"],
         requestedScope: ["mcp:read"],
@@ -431,6 +479,6 @@ describe("Entra token refresh reauthorization", () => {
         },
       }),
     ).rejects.toThrow();
-    expect(revokedWith).toEqual(["grant-1", "tenant-a:user-1"]);
+    expect(revokedWith).toEqual(["grant-1", USER_ID]);
   });
 });
