@@ -398,6 +398,44 @@ async function continueAuthorization(
     return invalidScopeResponse("authorize_consent_scope");
   }
 
+  const redirectUri = consent.oauthRequest.redirectUri;
+  if (
+    typeof redirectUri !== "string" ||
+    !isConfiguredClientRedirectUri(
+      redirectUri,
+      env.ALLOWED_CLIENT_REDIRECT_URIS,
+    )
+  ) {
+    return new Response("OAuth client is no longer authorized", {
+      status: 400,
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "authorize_consent_client",
+      },
+    });
+  }
+
+  let client: Awaited<ReturnType<WorkerEnv["OAUTH_PROVIDER"]["lookupClient"]>>;
+  try {
+    client = await env.OAUTH_PROVIDER.lookupClient(
+      consent.oauthRequest.clientId,
+    );
+  } catch {
+    client = null;
+  }
+  if (
+    !client ||
+    !isApprovedClientRedirectUri(redirectUri, client.redirectUris)
+  ) {
+    return new Response("OAuth client is no longer authorized", {
+      status: 400,
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "authorize_consent_client",
+      },
+    });
+  }
+
   const { verifier, challenge } = await createPkce();
   const browserNonce = crypto.randomUUID();
   const oidcNonce = crypto.randomUUID();

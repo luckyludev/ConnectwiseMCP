@@ -193,6 +193,116 @@ describe("Entra auth handler", () => {
     expect(response.headers.get("Location")).toBeNull();
   });
 
+  it.each([
+    {
+      case: "deployment redirect allowlist removal",
+      allowedRedirects: ["https://other.example.com/callback"],
+      lookupResult: "approved",
+      expectedLookups: 0,
+    },
+    {
+      case: "client deletion",
+      allowedRedirects: ["https://client.example.com/callback"],
+      lookupResult: "missing",
+      expectedLookups: 1,
+    },
+    {
+      case: "client lookup failure",
+      allowedRedirects: ["https://client.example.com/callback"],
+      lookupResult: "failure",
+      expectedLookups: 1,
+    },
+    {
+      case: "registered redirect removal",
+      allowedRedirects: ["https://client.example.com/callback"],
+      lookupResult: "redirect-removed",
+      expectedLookups: 1,
+    },
+  ])(
+    "rejects signed consent after $case before starting Entra login",
+    async ({ allowedRedirects, lookupResult, expectedLookups }) => {
+      const secret = "0123456789abcdef0123456789abcdef";
+      const signedState = await signFlowState(
+        {
+          purpose: "consent",
+          browserNonce: "consent-browser-nonce",
+          oauthRequest: {
+            responseType: "code",
+            clientId: "mcp-client",
+            redirectUri: "https://client.example.com/callback",
+            scope: ["mcp:read"],
+            state: "client-state",
+            codeChallenge: "challenge",
+            codeChallengeMethod: "S256",
+            resource: "https://mcp.example.com/mcp",
+          },
+        },
+        secret,
+        "https://mcp.example.com",
+      );
+      let lookups = 0;
+      let entraConfigReads = 0;
+      const env = {
+        OAUTH_STATE_SECRET: secret,
+        MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+        ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify(allowedRedirects),
+        get ENTRA_TENANT_ID() {
+          entraConfigReads += 1;
+          throw new Error("must not read Entra configuration");
+        },
+        get ENTRA_CLIENT_ID() {
+          entraConfigReads += 1;
+          throw new Error("must not read Entra configuration");
+        },
+        OAUTH_PROVIDER: {
+          async lookupClient() {
+            lookups += 1;
+            if (lookupResult === "failure") {
+              throw new Error("simulated client-store failure");
+            }
+            if (lookupResult === "missing") return undefined;
+            return {
+              clientId: "mcp-client",
+              clientName: "MCP Client",
+              redirectUris:
+                lookupResult === "redirect-removed"
+                  ? ["https://other.example.com/callback"]
+                  : ["https://client.example.com/callback"],
+            };
+          },
+        },
+      } as unknown as WorkerEnv;
+
+      const response = await createEntraAuthHandler().fetch!(
+        new Request("https://mcp.example.com/authorize", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Cookie: "__Host-CW_CSRF=csrf-token",
+          },
+          body: new URLSearchParams({
+            flow_state: signedState,
+            csrf_token: "csrf-token",
+          }),
+        }) as never,
+        env,
+        {} as ExecutionContext,
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.text()).toBe(
+        "OAuth client is no longer authorized",
+      );
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(response.headers.get("X-Auth-Stage")).toBe(
+        "authorize_consent_client",
+      );
+      expect(response.headers.get("Location")).toBeNull();
+      expect(lookups).toBe(expectedLookups);
+      expect(entraConfigReads).toBe(0);
+    },
+  );
+
   it("rejects a consent body with an oversized declared length before reading it", async () => {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
@@ -899,7 +1009,7 @@ describe("Entra auth handler", () => {
       env,
       {} as ExecutionContext,
     );
-    expect(lookedUpClientIds).toEqual(["mcp-client"]);
+    expect(lookedUpClientIds).toEqual(["mcp-client", "mcp-client"]);
     const entraLocation = new URL(upstream.headers.get("Location")!);
     const signedState = entraLocation.searchParams.get("state")!;
     const oidcNonce = decodeJwt(signedState).oidcNonce as string;
@@ -950,7 +1060,11 @@ describe("Entra auth handler", () => {
     );
 
     expect(callback.status).toBe(302);
-    expect(lookedUpClientIds).toEqual(["mcp-client", "mcp-client"]);
+    expect(lookedUpClientIds).toEqual([
+      "mcp-client",
+      "mcp-client",
+      "mcp-client",
+    ]);
     expect(callback.headers.get("Location")).toContain("code=mcp-code");
     expect(
       new URLSearchParams(tokenRequestBody).get("code_verifier"),
