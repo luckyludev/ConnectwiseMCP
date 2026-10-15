@@ -113,6 +113,8 @@ describe("staging secret launcher", () => {
       "NODE_PATH",
       "CLOUDFLARE_API_BASE_URL",
       "CF_API_BASE_URL",
+      "CLOUDFLARE_BASE_URL",
+      "CLOUDFLARE_CONTAINER_REGISTRY",
       "WRANGLER_API_ENVIRONMENT",
       "CLOUDFLARE_COMPLIANCE_REGION",
       "WRANGLER_AUTH_DOMAIN",
@@ -125,6 +127,8 @@ describe("staging secret launcher", () => {
       "WRANGLER_LOG_SANITIZE",
       "WRANGLER_LOG_PATH",
       "WRANGLER_WRITE_LOGS",
+      "WRANGLER_OUTPUT_FILE_PATH",
+      "WRANGLER_OUTPUT_FILE_DIRECTORY",
       "HTTP_PROXY",
       "https_proxy",
       "NODE_EXTRA_CA_CERTS",
@@ -133,11 +137,13 @@ describe("staging secret launcher", () => {
       "SSL_CERT_FILE",
       "CURL_CA_BUNDLE",
     ]) {
-      const result = run(["ENTRA_CLIENT_SECRET"], { [variable]: "" });
-      expect(result.status).not.toBe(0);
-      await expect(lstat(capturePath)).rejects.toMatchObject({
-        code: "ENOENT",
-      });
+      for (const value of ["", "https://attacker.invalid"]) {
+        const result = run(["ENTRA_CLIENT_SECRET"], { [variable]: value });
+        expect(result.status).not.toBe(0);
+        await expect(lstat(capturePath)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      }
     }
   });
 
