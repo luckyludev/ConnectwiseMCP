@@ -194,13 +194,19 @@ Do not add names, email addresses, ticket identifiers, raw URLs with paths, loca
 Only an authorized operator should enter secrets using Wrangler’s secure prompt or an approved Cloudflare secret-management workflow. Never put a secret value on the command line or in a redirected shell pipeline.
 
 ```bash
+# Set these from the retained, separately reviewed staging release evidence.
+export STAGING_RELEASE_SHA=<40-character-release-commit>
+export STAGING_BUNDLE_SHA256=<approved-bundle-sha256>
+export STAGING_CONFIG_SHA256=<approved-wrangler-config-sha256>
+export STAGING_DEPLOY_RUNTIME_SHA256=<approved-lock-installed-runtime-sha256>
+export STAGING_INTEGRITY_SHA256=<retained-reviewed-integrity-entrypoint-sha256>
 DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh ENTRA_CLIENT_SECRET
 DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh OAUTH_STATE_SECRET
 DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh IDENTITY_PROFILE_MAP
 DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh CW_PROFILE_LUIS
 ```
 
-The launcher rejects inherited Node preload, Wrangler logging, Cloudflare API-endpoint, account-routing, proxy, and TLS overrides; permits only the documented staging secret names or a valid ASCII `CW_PROFILE_<ALIAS>` binding; and cannot select production or forward arbitrary Wrangler arguments. Run it from the reviewed repository root; it resolves that physical directory, pins its reviewed `wrangler.jsonc` explicitly, and accepts only its non-symlink launcher and lock-installed Wrangler path components. `DEPLOY_NODE_PATH` must identify the reviewed absolute, canonical, regular executable through a path with no symlink components.
+The launcher rejects inherited Node preload, Wrangler logging, Cloudflare API-endpoint, account-routing, proxy, and TLS overrides; clears inherited temporary-directory overrides before isolation; permits only the documented staging secret names or a valid ASCII `CW_PROFILE_<ALIAS>` binding; and cannot select production or forward arbitrary Wrangler arguments. Run it from the reviewed repository root. It authenticates the integrity entrypoint against `STAGING_INTEGRITY_SHA256`; that entrypoint verifies the approved release, bundle, configuration, and lock-installed runtime digests before copying the manifest-bound configuration and runtime to private read-only locations. Wrangler executes only from that snapshot, which is removed with the private configuration after success or failure. `DEPLOY_NODE_PATH` must identify the reviewed absolute, canonical, regular executable through a path with no symlink components.
 
 Required controls:
 
