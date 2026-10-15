@@ -85,10 +85,46 @@ describe("Entra auth handler", () => {
       );
 
       expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
       expect(await response.text()).toBe("Invalid authorization resource");
       expect(lookedUp).toBe(false);
     },
   );
+
+  it("prevents caching authorization parser failures", async () => {
+    let lookedUp = false;
+    const env = {
+      MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      ALLOWED_CLIENT_REDIRECT_URIS: JSON.stringify([
+        "https://client.example.com/callback",
+      ]),
+      OAUTH_PROVIDER: {
+        async parseAuthRequest() {
+          throw new Error(
+            "simulated parser failure containing sensitive input",
+          );
+        },
+        async lookupClient() {
+          lookedUp = true;
+          return undefined;
+        },
+      },
+    } as unknown as WorkerEnv;
+
+    const response = await createEntraAuthHandler().fetch!(
+      new Request(
+        authorizationUrl("https://client.example.com/callback"),
+      ) as never,
+      env,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("X-Auth-Stage")).toBe("authorize_parse");
+    expect(await response.text()).toBe("Invalid authorization request");
+    expect(lookedUp).toBe(false);
+  });
 
   it.each(INVALID_OAUTH_SCOPES)(
     "rejects unsupported authorization scopes before handler client processing: %j",
@@ -134,6 +170,69 @@ describe("Entra auth handler", () => {
       expect(lookedUp).toBe(false);
     },
   );
+
+  it("prevents caching consent CSRF failures", async () => {
+    const response = await createEntraAuthHandler().fetch!(
+      new Request("https://mcp.example.com/authorize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Cookie: "__Host-CW_CSRF=expected-csrf",
+        },
+        body: new URLSearchParams({
+          flow_state: "opaque-sensitive-state",
+          csrf_token: "wrong-csrf",
+        }),
+      }) as never,
+      {} as WorkerEnv,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("X-Auth-Stage")).toBe("authorize_consent");
+    expect(await response.text()).toBe("Invalid authorization request");
+  });
+
+  it("prevents caching invalid consent-state failures before client lookup", async () => {
+    let lookedUp = false;
+    const env = {
+      MCP_CANONICAL_URL: "https://mcp.example.com/mcp",
+      OAUTH_STATE_SECRET: "0123456789abcdef0123456789abcdef",
+      OAUTH_PROVIDER: {
+        async lookupClient() {
+          lookedUp = true;
+          return undefined;
+        },
+      },
+    } as unknown as WorkerEnv;
+
+    const response = await createEntraAuthHandler().fetch!(
+      new Request("https://mcp.example.com/authorize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Cookie: "__Host-CW_CSRF=csrf-token",
+        },
+        body: new URLSearchParams({
+          flow_state: "invalid-sensitive-state",
+          csrf_token: "csrf-token",
+        }),
+      }) as never,
+      env,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("X-Auth-Stage")).toBe(
+      "authorize_consent_state",
+    );
+    expect(await response.text()).toBe(
+      "Invalid or expired authorization request",
+    );
+    expect(lookedUp).toBe(false);
+  });
 
   it("rechecks scope in signed consent state before starting Entra login", async () => {
     const secret = "0123456789abcdef0123456789abcdef";

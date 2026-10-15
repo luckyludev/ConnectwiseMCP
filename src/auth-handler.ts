@@ -253,12 +253,18 @@ async function beginAuthorization(
     console.log("[auth] stage=authorize_parse fail (parseAuthRequest threw)");
     return new Response("Invalid authorization request", {
       status: 400,
-      headers: { "X-Auth-Stage": "authorize_parse" },
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "authorize_parse",
+      },
     });
   }
 
   if (oauthRequest.resource !== env.MCP_CANONICAL_URL) {
-    return new Response("Invalid authorization resource", { status: 400 });
+    return new Response("Invalid authorization resource", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
   }
   if (!hasExactReadScope(oauthRequest.scope)) {
     return invalidScopeResponse("authorize_scope");
@@ -372,7 +378,10 @@ async function continueAuthorization(
     });
     return new Response("Invalid authorization request", {
       status: 400,
-      headers: { "X-Auth-Stage": "authorize_consent" },
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "authorize_consent",
+      },
     });
   }
 
@@ -391,7 +400,10 @@ async function continueAuthorization(
     );
     return new Response("Invalid or expired authorization request", {
       status: 400,
-      headers: { "X-Auth-Stage": "authorize_consent_state" },
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Auth-Stage": "authorize_consent_state",
+      },
     });
   }
   if (!hasExactReadScope(consent.oauthRequest.scope)) {
