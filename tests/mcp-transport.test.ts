@@ -501,6 +501,27 @@ describe("authenticated MCP transport", () => {
       arguments: { ticketId: "AUDIT_SECRET_TYPE_MARKER" },
     },
     {
+      name: "get_service_ticket",
+      arguments: {
+        ticketId: 123,
+        memberId: 999,
+        profileAlias: "AUDIT_SECRET_PROFILE_MARKER",
+        apiBaseUrl: "https://AUDIT_SECRET_HOST_MARKER.example",
+        endpoint: "/AUDIT_SECRET_ENDPOINT_MARKER",
+        conditions: "AUDIT_SECRET_CONDITIONS_MARKER",
+        publicKey: "AUDIT_SECRET_PUBLIC_KEY_MARKER",
+        privateKey: "AUDIT_SECRET_PRIVATE_KEY_MARKER",
+      },
+    },
+    {
+      name: "search_agreement_additions",
+      arguments: {
+        agreementId: 123,
+        maxResults: 5,
+        conditions: "AUDIT_SECRET_AGREEMENT_CONDITIONS_MARKER",
+      },
+    },
+    {
       name: "search_tickets_by_content",
       arguments: { searchText: "x", maxResults: 5 },
     },
@@ -616,6 +637,7 @@ describe("authenticated MCP transport", () => {
       expect(auditMessages.join("\n")).not.toContain(
         "AUDIT_SECRET_TYPE_MARKER",
       );
+      expect(auditMessages.join("\n")).not.toContain("AUDIT_SECRET_");
       expect(auditMessages.join("\n")).not.toContain("Invalid");
     },
   );
@@ -1109,7 +1131,7 @@ describe("authenticated MCP transport", () => {
     expect(body).not.toContain("secret");
   });
 
-  it("bounds and projects schedule entries without accepting a caller member", async () => {
+  it("bounds and projects schedule entries for the mapped member", async () => {
     const calls: number[] = [];
     const client = businessClient({
       async listScheduleEntries(maxResults: number) {
@@ -1153,7 +1175,7 @@ describe("authenticated MCP transport", () => {
           method: "tools/call",
           params: {
             name: "list_schedule_entries",
-            arguments: { maxResults: 2, memberId: 999 },
+            arguments: { maxResults: 2 },
           },
         }),
       }),
@@ -1219,7 +1241,7 @@ describe("authenticated MCP transport", () => {
           method: "tools/call",
           params: {
             name: "get_time_sheets",
-            arguments: { maxResults: 2, memberId: 999 },
+            arguments: { maxResults: 2 },
           },
         }),
       }),
@@ -1309,10 +1331,6 @@ describe("authenticated MCP transport", () => {
             arguments: {
               query: "  Smith  ",
               maxResults: 2,
-              profileAlias: "MAYA",
-              host: "https://attacker.invalid",
-              conditions: "id>0",
-              privateKey: "hostile-private-key",
             },
           },
         }),
@@ -1415,7 +1433,6 @@ describe("authenticated MCP transport", () => {
         {
           name: "create_schedule_entry",
           arguments: {
-            memberId: 1,
             dateStart: "2026-09-02T10:00:00Z",
             dateEnd: "2026-09-02T11:00:00Z",
           },
@@ -1428,7 +1445,6 @@ describe("authenticated MCP transport", () => {
         {
           name: "create_time_entry",
           arguments: {
-            memberId: 1,
             timeStart: "2026-09-02T10:00:00Z",
             timeEnd: "2026-09-02T11:00:00Z",
           },
@@ -1666,7 +1682,6 @@ describe("authenticated MCP transport", () => {
               ticketId: 77,
               text: "Approved staging note",
               internalOnly: true,
-              profileAlias: "MAYA",
             },
           },
         }),
@@ -2015,7 +2030,7 @@ describe("authenticated MCP transport", () => {
     },
   );
 
-  it("isolates concurrent profile contexts from hostile headers and arguments", async () => {
+  it("isolates concurrent profile contexts from hostile headers", async () => {
     const selectedCompanies: string[] = [];
     const auditMessages: string[] = [];
 
@@ -2069,9 +2084,6 @@ describe("authenticated MCP transport", () => {
               name: "get_service_ticket",
               arguments: {
                 ticketId,
-                profileAlias: profileAlias === "LUIS" ? "MAYA" : "LUIS",
-                publicKey: "hostile-public-key",
-                privateKey: "hostile-private-key",
               },
             },
           }),
@@ -2995,7 +3007,7 @@ describe("authenticated MCP transport", () => {
   // Phase 2 write tools must be exercised through the MCP tool interface with
   // the exact JSON arguments a client sends (third occurrence of the
   // wrong-layer test: mocks/curl passed while the tool handler failed).
-  it("create_schedule_entry ignores a caller member and uses the mapped profile member", async () => {
+  it("create_schedule_entry uses the mapped profile member", async () => {
     const bodies: Array<{ method: string; url: string; body?: unknown }> = [];
     const fetcher: typeof fetch = async (input, init) => {
       const method = (init as { method?: string } | undefined)?.method ?? "GET";
@@ -3043,7 +3055,6 @@ describe("authenticated MCP transport", () => {
           params: {
             name: "create_schedule_entry",
             arguments: {
-              memberId: 999,
               objectId: 1892065,
               objectType: 4,
               statusId: 1,
@@ -3385,7 +3396,6 @@ describe("authenticated MCP transport", () => {
           params: {
             name: "create_time_entry",
             arguments: {
-              memberId: 999,
               timeStart: "2026-09-01T12:00:00-04:00",
               timeEnd: "2026-09-01T13:00:00-04:00",
             },
@@ -3444,7 +3454,6 @@ describe("authenticated MCP transport", () => {
           params: {
             name: "create_time_entry",
             arguments: {
-              memberId: 999,
               timeStart: "2026-09-01T12:00:00-04:00",
               timeEnd: "2026-09-01T13:00:00-04:00",
             },

@@ -69,7 +69,7 @@ function normalizeInputSchema(value: unknown): StandardSchema | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
-  return z.object(value as Record<string, z.ZodType>);
+  return z.strictObject(value as Record<string, z.ZodType>);
 }
 
 function auditInvalidArguments(
