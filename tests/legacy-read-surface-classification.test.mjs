@@ -308,6 +308,15 @@ describe("legacy read-surface classification", () => {
     );
   });
 
+  it("documents external-only ticket-note defaults and internal opt-in", () => {
+    expect(classification).toContain(
+      "external-only default visibility; internal notes require explicit opt-in",
+    );
+    expect(classification).toContain(
+      "external-only default note visibility; internal notes require explicit opt-in",
+    );
+  });
+
   it("keeps the attachment-download contract aligned with the runtime bound", () => {
     const documentedLimit = `${MAX_DOWNLOAD_BYTES / 1_000_000} MB`;
 
