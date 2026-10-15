@@ -317,6 +317,12 @@ describe("legacy read-surface classification", () => {
     );
   });
 
+  it("documents recent-note selection and chronological presentation", () => {
+    expect(classification).toContain(
+      "Ticket-note bounds retain the most recent notes and present that retained window in chronological order.",
+    );
+  });
+
   it("keeps the attachment-download contract aligned with the runtime bound", () => {
     const documentedLimit = `${MAX_DOWNLOAD_BYTES / 1_000_000} MB`;
 

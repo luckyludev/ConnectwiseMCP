@@ -1543,19 +1543,21 @@ export function createConnectWiseClient(
         {
           fields: SERVICE_TICKET_NOTE_RELATIONSHIP_FIELDS,
           pageSize,
-          orderBy: "dateCreated asc",
+          orderBy: "dateCreated desc",
         },
         pageSize,
       );
-      return (notes as Array<Record<string, unknown>>).map((note) => {
-        if (note.ticketId !== ticketId) {
-          throw new Error(
-            "ConnectWise note is not associated with requested ticket",
-          );
-        }
-        const { ticketId: _ticketId, ...item } = note;
-        return item;
-      });
+      return (notes as Array<Record<string, unknown>>)
+        .map((note) => {
+          if (note.ticketId !== ticketId) {
+            throw new Error(
+              "ConnectWise note is not associated with requested ticket",
+            );
+          }
+          const { ticketId: _ticketId, ...item } = note;
+          return item;
+        })
+        .reverse();
     },
 
     async getTicketAttachments(
