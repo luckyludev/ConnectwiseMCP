@@ -14,7 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -783,6 +783,48 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
           "DEPLOY_NODE_PATH must be a regular, non-symlink executable.",
         );
       }
+    });
+  });
+
+  it.each([
+    [
+      "dot component",
+      `${dirname(process.execPath)}/./${basename(process.execPath)}`,
+    ],
+    [
+      "repeated separator",
+      `${dirname(process.execPath)}//${basename(process.execPath)}`,
+    ],
+    ["leading double slash", `/${process.execPath}`],
+  ])(
+    "rejects a Node path with a non-canonical %s",
+    async (_label, nodePath) => {
+      await withCheckout(async ({ cwd }) => {
+        const result = runLauncher(cwd, undefined, {
+          DEPLOY_NODE_PATH: nodePath,
+        });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          "DEPLOY_NODE_PATH must not contain symlinked or non-canonical path components.",
+        );
+      });
+    },
+  );
+
+  it("rejects an approved Node path with a symlinked parent", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const nodeParentLink = join(cwd, "node-parent-link");
+      await symlink(dirname(process.execPath), nodeParentLink, "dir");
+
+      const result = runLauncher(cwd, undefined, {
+        DEPLOY_NODE_PATH: join(nodeParentLink, basename(process.execPath)),
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "DEPLOY_NODE_PATH must not contain symlinked or non-canonical path components.",
+      );
     });
   });
 

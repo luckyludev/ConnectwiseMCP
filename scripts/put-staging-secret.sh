@@ -72,17 +72,31 @@ case "$DEPLOY_NODE_PATH" in
     exit 1
     ;;
 esac
+case "$DEPLOY_NODE_PATH" in
+  //*)
+    printf '%s\n' "DEPLOY_NODE_PATH must not contain symlinked or non-canonical path components." >&2
+    exit 1
+    ;;
+esac
 if [ -L "$DEPLOY_NODE_PATH" ] || [ ! -f "$DEPLOY_NODE_PATH" ] || [ ! -x "$DEPLOY_NODE_PATH" ]; then
   printf '%s\n' "DEPLOY_NODE_PATH must be a regular, non-symlink executable." >&2
   exit 1
 fi
 node_parent=${DEPLOY_NODE_PATH%/*}
 node_name=${DEPLOY_NODE_PATH##*/}
-if ! physical_node_parent=$(CDPATH= cd -- "$node_parent" && pwd -P); then
+if [ -z "$node_parent" ]; then
+  node_parent=/
+fi
+if ! physical_node_parent=$(CDPATH=; cd "$node_parent" && pwd -P); then
   printf '%s\n' "DEPLOY_NODE_PATH parent directory is unavailable." >&2
   exit 1
 fi
-if [ "$DEPLOY_NODE_PATH" != "$physical_node_parent/$node_name" ]; then
+if [ "$physical_node_parent" = / ]; then
+  physical_node_path=/$node_name
+else
+  physical_node_path=$physical_node_parent/$node_name
+fi
+if [ "$DEPLOY_NODE_PATH" != "$physical_node_path" ]; then
   printf '%s\n' "DEPLOY_NODE_PATH must not contain symlinked or non-canonical path components." >&2
   exit 1
 fi

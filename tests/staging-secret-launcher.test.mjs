@@ -106,6 +106,18 @@ describe("staging secret launcher", () => {
     }
   });
 
+  it("rejects a leading double slash in the approved Node path", async () => {
+    const result = run(["ENTRA_CLIENT_SECRET"], {
+      DEPLOY_NODE_PATH: `/${approvedNode}`,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "DEPLOY_NODE_PATH must not contain symlinked or non-canonical path components.",
+    );
+    await expect(lstat(capturePath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("executes authenticated bytes without reopening the repository entrypoint", async () => {
     const result = run(["ENTRA_CLIENT_SECRET"], {
       DEPLOY_NODE_PATH: process.execPath,
