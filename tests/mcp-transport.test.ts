@@ -941,7 +941,7 @@ describe("authenticated MCP transport", () => {
     );
 
     const defaultVisibility = await call(23);
-    expect(defaultVisibility.map(({ id }) => id)).toEqual([1, 2, 3, 5, 8]);
+    expect(defaultVisibility.map(({ id }) => id)).toEqual([2]);
 
     await expect(call(24, false, false)).resolves.toEqual([]);
   });
@@ -974,53 +974,76 @@ describe("authenticated MCP transport", () => {
         return [];
       },
     });
-    const handler = createMcpHandler(
-      () =>
-        createMcpServer(env, {
-          createBusinessClient: () => client,
-        }),
-      {
-        route: "/mcp",
-        corsOptions: false,
-        authContext: {
-          props: authProps("LUIS"),
-        },
-      },
-    );
-    const response = await handler.fetch(
-      new Request("http://localhost/mcp", {
-        method: "POST",
-        headers: {
-          Accept: "application/json, text/event-stream",
-          "Content-Type": "application/json",
-          Host: "localhost",
-          "MCP-Protocol-Version": "2025-06-18",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 25,
-          method: "tools/call",
-          params: {
-            name: "get_complete_ticket_content",
-            arguments: { ticketId: 123, maxResultsPerSection: 20 },
+    const call = async (
+      requestId: number,
+      visibility: { includeInternal?: boolean; includeExternal?: boolean } = {},
+    ) => {
+      const handler = createMcpHandler(
+        () =>
+          createMcpServer(env, {
+            createBusinessClient: () => client,
+          }),
+        {
+          route: "/mcp",
+          corsOptions: false,
+          authContext: {
+            props: authProps("LUIS"),
           },
+        },
+      );
+      const response = await handler.fetch(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            Host: "localhost",
+            "MCP-Protocol-Version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: requestId,
+            method: "tools/call",
+            params: {
+              name: "get_complete_ticket_content",
+              arguments: {
+                ticketId: 123,
+                maxResultsPerSection: 20,
+                ...visibility,
+              },
+            },
+          }),
         }),
-      }),
-    );
-    const eventStream = await response.text();
-    expect(response.status, eventStream).toBe(200);
-    const rpc = parseSseJsonRpcResponse(eventStream, 25) as {
-      result: { content: Array<{ type: string; text: string }> };
+      );
+      const eventStream = await response.text();
+      expect(response.status, eventStream).toBe(200);
+      const rpc = parseSseJsonRpcResponse(eventStream, requestId) as {
+        result: { content: Array<{ type: string; text: string }> };
+      };
+      return JSON.parse(rpc.result.content[0]!.text) as {
+        ticket: { summary?: string };
+        notes: Array<{ id: number; internal?: boolean; external?: boolean }>;
+      };
     };
-    const complete = JSON.parse(rpc.result.content[0]!.text) as {
-      ticket: { summary?: string };
-      notes: Array<{ id: number; internal?: boolean; external?: boolean }>;
-    };
-    expect(complete.ticket.summary).toBe("Safe summary");
-    expect(complete.notes.map(({ id }) => id)).toEqual([1, 2, 4]);
-    expect(complete.notes.find(({ id }) => id === 4)).toEqual(
+
+    const defaultVisibility = await call(25);
+    expect(defaultVisibility.ticket.summary).toBe("Safe summary");
+    expect(defaultVisibility.notes.map(({ id }) => id)).toEqual([2]);
+
+    const internalOnly = await call(26, {
+      includeInternal: true,
+      includeExternal: false,
+    });
+    expect(internalOnly.notes.map(({ id }) => id)).toEqual([1, 4]);
+    expect(internalOnly.notes.find(({ id }) => id === 4)).toEqual(
       expect.objectContaining({ internal: true, external: false }),
     );
+
+    const noNotes = await call(27, {
+      includeInternal: false,
+      includeExternal: false,
+    });
+    expect(noNotes.notes).toEqual([]);
   });
 
   it("projects the ConnectWise dateEntered field from bounded time entries", async () => {

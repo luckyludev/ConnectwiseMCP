@@ -11,7 +11,7 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   search_tickets_by_content:
     "9892c1279f8fda87ad69ba8d1b87a53d44b271d4e18f668919124f5536443591",
   get_ticket_notes_with_content:
-    "bd4860b1bba092191983eb40420fdb65550f22ee13b3a014c575807469d270bd",
+    "c7f54283ef4cf7762ee93ded81dbb4faed7d48fe43a4f18f43010e14880bd1a4",
   get_ticket_attachments_with_details:
     "17bbce167c9bf830eaa826f9ffd9f7c562f5398402270ca124f9fbb23e91e4f7",
   list_ticket_tasks:
@@ -19,7 +19,7 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   list_ticket_time_entries:
     "17bbce167c9bf830eaa826f9ffd9f7c562f5398402270ca124f9fbb23e91e4f7",
   get_complete_ticket_content:
-    "81775f5a354403c26bd89c1f0a1b8d181f61b5561905d920180b99e27c751f2e",
+    "7a424bd6142b9b8f6473cf742c6444474c34843678bb0afd3dcb7a3ddaa68293",
   create_ticket_note:
     "c09f25e4771e12764885dea1a2d97e1ceb3916f696ce40ed5f73e8c912f910be",
   attach_image_to_ticket:

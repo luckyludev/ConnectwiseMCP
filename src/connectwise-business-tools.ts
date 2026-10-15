@@ -861,10 +861,10 @@ export function registerConnectWiseBusinessTools(
     "get_ticket_notes_with_content",
     {
       description:
-        "Get bounded service-ticket note content. ConnectWise API-member permissions determine access, including internal notes.",
+        "Get bounded service-ticket note content. External notes are included by default; internal notes require explicit opt-in and ConnectWise API-member permission.",
       inputSchema: {
         ticketId: positiveId,
-        includeInternal: z.boolean().default(true),
+        includeInternal: z.boolean().default(false),
         includeExternal: z.boolean().default(true),
         maxResults: pageSize,
       },
@@ -955,11 +955,16 @@ export function registerConnectWiseBusinessTools(
     "get_complete_ticket_content",
     {
       description:
-        "Get a bounded ticket view including details, notes, attachment metadata, tasks, and time entries.",
-      inputSchema: { ticketId: positiveId, maxResultsPerSection: pageSize },
+        "Get a bounded ticket view including details, externally visible notes by default, attachment metadata, tasks, and time entries. Internal notes require explicit opt-in.",
+      inputSchema: {
+        ticketId: positiveId,
+        includeInternal: z.boolean().default(false),
+        includeExternal: z.boolean().default(true),
+        maxResultsPerSection: pageSize,
+      },
       annotations: readAnnotations,
     },
-    ({ ticketId, maxResultsPerSection }) =>
+    ({ ticketId, includeInternal, includeExternal, maxResultsPerSection }) =>
       runBusinessTool(
         getProps(),
         env,
@@ -978,7 +983,9 @@ export function registerConnectWiseBusinessTools(
             notes: list(notes, maxResultsPerSection)
               .map(note)
               .filter(
-                (entry) => entry.internal === true || entry.external === true,
+                (entry) =>
+                  (includeInternal && entry.internal === true) ||
+                  (includeExternal && entry.external === true),
               ),
             attachments: list(attachments, maxResultsPerSection).map(
               attachment,
