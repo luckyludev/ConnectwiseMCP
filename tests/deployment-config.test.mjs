@@ -392,14 +392,29 @@ describe("legacy rollback image security", () => {
       "- name: Retain the verified rollback image",
     );
     const attestJobOffset = workflow.indexOf("\n  attest:\n");
+    const checkoutVerifierOffset = workflow.indexOf(
+      "- name: Check out rollback artifact verifier",
+      attestJobOffset,
+    );
     const downloadOffset = workflow.indexOf(
       "- name: Download the verified rollback artifact",
+      checkoutVerifierOffset,
+    );
+    const reverifyOffset = workflow.indexOf(
+      "- name: Reverify downloaded rollback artifact",
+      downloadOffset,
     );
     const attestOffset = workflow.indexOf(
       "- name: Attest the verified rollback artifact",
+      reverifyOffset,
     );
     const retainStep = workflow.slice(retainOffset, attestJobOffset);
     const attestJob = workflow.slice(attestJobOffset);
+    const downloadedArtifactStep = workflow.slice(
+      downloadOffset,
+      reverifyOffset,
+    );
+    const reverifyStep = workflow.slice(reverifyOffset, attestOffset);
     const attestStep = workflow.slice(attestOffset);
     const artifactFiles = [
       "connectwise-legacy-rollback-image.tar.gz",
@@ -419,8 +434,10 @@ describe("legacy rollback image security", () => {
     expect(smokeOffset).toBeGreaterThan(reloadOffset);
     expect(retainOffset).toBeGreaterThan(smokeOffset);
     expect(attestJobOffset).toBeGreaterThan(retainOffset);
-    expect(downloadOffset).toBeGreaterThan(attestJobOffset);
-    expect(attestOffset).toBeGreaterThan(downloadOffset);
+    expect(checkoutVerifierOffset).toBeGreaterThan(attestJobOffset);
+    expect(downloadOffset).toBeGreaterThan(checkoutVerifierOffset);
+    expect(reverifyOffset).toBeGreaterThan(downloadOffset);
+    expect(attestOffset).toBeGreaterThan(reverifyOffset);
     expect(workflow).toMatch(/^permissions:\n  contents: read$/mu);
     expect(attestJob).toMatch(
       /^  attest:\n    needs: verify\n    if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\)\n    runs-on: ubuntu-24\.04\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      id-token: write\n      attestations: write$/mu,
@@ -498,16 +515,30 @@ describe("legacy rollback image security", () => {
       'test "$(docker image inspect --format \'{{.Id}}\' connectwise-legacy-rollback-ci)" = "$image_id"',
     );
     expect(attestJob).toContain(
+      "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+    );
+    expect(attestJob).toContain("ref: ${{ github.sha }}");
+    expect(attestJob).toContain("persist-credentials: false");
+    expect(attestJob).toContain(
       "uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2",
     );
     expect(attestJob).toContain(
       "name: legacy-rollback-image-${{ github.sha }}",
     );
+    expect(downloadedArtifactStep).toContain("path: release-evidence/rollback");
+    expect(downloadedArtifactStep).not.toContain("actions/attest@");
+    expect(reverifyStep).toContain(
+      "python deploy/http-gateway/tests/verify_rollback_artifact.py",
+    );
+    expect(reverifyStep).toContain(
+      'release-evidence/rollback "$GITHUB_SHA" "$GITHUB_RUN_ID"',
+    );
+    expect(reverifyStep).not.toContain("actions/attest@");
     expect(attestStep).toContain(
       "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2",
     );
     const subjectBlock = `          subject-path: |\n${artifactFiles
-      .map((file) => `            ${file}`)
+      .map((file) => `            release-evidence/rollback/${file}`)
       .join("\n")}\n`;
     expect(attestStep.endsWith(subjectBlock)).toBe(true);
     expect(attestStep.match(/subject-path: \|/gu)).toHaveLength(1);
