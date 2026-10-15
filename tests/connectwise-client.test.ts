@@ -329,7 +329,7 @@ describe("ConnectWiseClient", () => {
     expect(Object.fromEntries(serviceNotesUrl.searchParams)).toEqual({
       fields: serviceTicketNoteCollectionFields,
       pageSize: "20",
-      orderBy: "dateCreated asc",
+      orderBy: "dateCreated desc",
     });
     expect(serviceNotesUrl.searchParams.getAll("fields")).toEqual([
       serviceTicketNoteCollectionFields,
@@ -341,6 +341,35 @@ describe("ConnectWiseClient", () => {
     });
     expect(tasksUrl.searchParams.getAll("fields")).toEqual([
       ticketTaskCollectionFields,
+    ]);
+  });
+
+  it("returns the bounded recent-note window in chronological order", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          {
+            id: 303,
+            dateCreated: "2026-10-15T12:00:00Z",
+            ticketId: 123,
+          },
+          {
+            id: 302,
+            dateCreated: "2026-10-15T11:00:00Z",
+            ticketId: 123,
+          },
+          {
+            id: 301,
+            dateCreated: "2026-10-15T10:00:00Z",
+            ticketId: 123,
+          },
+        ]),
+    });
+
+    await expect(client.getTicketNotes(123, 3)).resolves.toEqual([
+      { id: 301, dateCreated: "2026-10-15T10:00:00Z" },
+      { id: 302, dateCreated: "2026-10-15T11:00:00Z" },
+      { id: 303, dateCreated: "2026-10-15T12:00:00Z" },
     ]);
   });
 
