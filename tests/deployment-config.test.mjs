@@ -21,17 +21,20 @@ async function readWranglerConfig() {
 
 describe("dependency maintenance configuration", () => {
   it("covers maintained dependency surfaces without unsafe Python lock updates", async () => {
-    const [source, v2Workflow, legacyWorkflow] = await Promise.all([
-      readFile(new URL("../.github/dependabot.yml", import.meta.url), "utf8"),
-      readFile(
-        new URL("../.github/workflows/v2-ci.yml", import.meta.url),
-        "utf8",
-      ),
-      readFile(
-        new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
-        "utf8",
-      ),
-    ]);
+    const [source, v2Workflow, legacyWorkflow, npmConfig, v2Package] =
+      await Promise.all([
+        readFile(new URL("../.github/dependabot.yml", import.meta.url), "utf8"),
+        readFile(
+          new URL("../.github/workflows/v2-ci.yml", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+          "utf8",
+        ),
+        readFile(new URL("../.npmrc", import.meta.url), "utf8"),
+        readJson("../package.json"),
+      ]);
     const entries = [
       ...source.matchAll(
         /  - package-ecosystem: "([^"]+)"\n    directory: "([^"]+)"/gu,
@@ -55,6 +58,9 @@ describe("dependency maintenance configuration", () => {
       legacyWorkflow.match(/- "\.github\/dependabot\.yml"/gu),
     ).toHaveLength(1);
     expect(legacyWorkflow).toContain("node-version: 24.11.0");
+    expect(npmConfig).toBe("engine-strict=true\n");
+    expect(v2Package.engines).toEqual({ node: "^24.11.0 || >=26.0.0" });
+    expect(v2Workflow.match(/- "\.npmrc"/gu)).toHaveLength(1);
   });
 
   it("pins every CI job to the reviewed Ubuntu runner image", async () => {

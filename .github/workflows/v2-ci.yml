@@ -12,6 +12,7 @@ on:
       - ".attachment-app-dist/**"
       - "scripts/**"
       - "config/**"
+      - ".npmrc"
       - "package.json"
       - "package-lock.json"
       - "tsconfig.json"
