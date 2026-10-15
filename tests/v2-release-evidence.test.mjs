@@ -21,6 +21,9 @@ import { afterEach, describe, expect, it } from "vitest";
 const integrityScript = fileURLToPath(
   new URL("../scripts/staging-bundle-integrity.mjs", import.meta.url),
 );
+const deploymentLauncher = fileURLToPath(
+  new URL("../scripts/deploy-verified-bundle.sh", import.meta.url),
+);
 const verifierScript = fileURLToPath(
   new URL("../scripts/verify-v2-release-evidence.mjs", import.meta.url),
 );
@@ -41,6 +44,10 @@ async function makeEvidence(target = "staging") {
   await copyFile(
     integrityScript,
     join(cwd, "scripts", "staging-bundle-integrity.mjs"),
+  );
+  await copyFile(
+    deploymentLauncher,
+    join(cwd, "scripts", "deploy-verified-bundle.sh"),
   );
   await mkdir(join(cwd, "node_modules", "package"), { recursive: true });
   await writeFile(join(cwd, "dist", "index.js"), "export default {};\n");

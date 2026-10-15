@@ -975,6 +975,8 @@ describe("staging deployment configuration", () => {
       productionEnvironment,
       stagingHowto,
       stagingChecklist,
+      deploymentBootstrap,
+      deploymentBootstrapStat,
       deploymentLauncher,
       deploymentLauncherStat,
     ] = await Promise.all([
@@ -988,6 +990,13 @@ describe("staging deployment configuration", () => {
       readFile(
         new URL("../docs/v2-staging-acceptance-checklist.md", import.meta.url),
         "utf8",
+      ),
+      readFile(
+        new URL("../scripts/bootstrap-verified-deployment.sh", import.meta.url),
+        "utf8",
+      ),
+      stat(
+        new URL("../scripts/bootstrap-verified-deployment.sh", import.meta.url),
       ),
       readFile(
         new URL("../scripts/deploy-verified-bundle.sh", import.meta.url),
@@ -1029,27 +1038,51 @@ describe("staging deployment configuration", () => {
       "STAGING_CONFIG_SHA256=<approved-configuration-sha256>",
     );
     expect(stagingHowto).toContain(
+      "STAGING_LAUNCHER_SHA256=<approved-deployment-launcher-sha256>",
+    );
+    expect(stagingHowto).toContain(
       "STAGING_INTEGRITY_SHA256=<approved-deployment-entrypoint-sha256>",
     );
     for (const guide of [stagingHowto, stagingChecklist]) {
+      expect(guide).toContain("STAGING_LAUNCHER_SHA256");
       expect(guide).toContain("STAGING_INTEGRITY_SHA256");
-      expect(guide).toContain("scripts/deploy-verified-bundle.sh");
+      expect(guide).toContain("bootstrap-verified-deployment.sh");
       expect(guide).not.toContain(
         "node scripts/staging-bundle-integrity.mjs deploy",
       );
     }
-    expect(stagingHowto).not.toContain("npm run deploy:staging");
-    expect(deploymentLauncher).toContain(
-      'if [ "${NODE_OPTIONS+x}" = x ]; then',
+    expect(stagingHowto).toContain(
+      "/approved/operator-tools/connectwisemcp-deploy-bootstrap",
     );
-    expect(deploymentLauncher).toContain('if [ "${NODE_PATH+x}" = x ]; then');
+    expect(stagingHowto).not.toMatch(
+      /^\s+scripts\/deploy-verified-bundle\.sh\s*$/mu,
+    );
+    expect(stagingHowto).not.toContain("npm run deploy:staging");
+    expect(deploymentBootstrap).toContain("STAGING_LAUNCHER_SHA256");
+    expect(deploymentBootstrap).toContain(
+      "openSync(launcher, constants.O_RDONLY | constants.O_NOFOLLOW)",
+    );
+    expect(deploymentBootstrap).toContain('spawnSync("/bin/sh", ["-s"],');
+    expect(deploymentBootstrap).not.toContain(
+      'spawnSync("/bin/sh", [launcher]',
+    );
+    expect(deploymentBootstrapStat.mode & 0o111).not.toBe(0);
+    expect(deploymentLauncher).toContain(
+      'if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_PATH+x}" = x ] || [ "${NODE_DEBUG+x}" = x ]; then',
+    );
+    expect(deploymentLauncher).toContain(
+      'if [ "${LD_PRELOAD+x}" = x ] || [ "${LD_LIBRARY_PATH+x}" = x ] || \\',
+    );
     expect(deploymentLauncher).toContain(
       'if [ -z "${DEPLOY_NODE_PATH:-}" ]; then',
     );
     expect(deploymentLauncher).toContain(
-      'exec "$DEPLOY_NODE_PATH" "$integrity_path" deploy "$@"',
+      'import(`data:text/javascript;base64,${bytes.toString("base64")}`)',
     );
-    expect(deploymentLauncherStat.mode & 0o111).not.toBe(0);
+    expect(deploymentLauncher).not.toContain(
+      '"$DEPLOY_NODE_PATH" "$integrity_path"',
+    );
+    expect(deploymentLauncherStat.mode & 0o111).toBe(0);
     expect(packageJson.scripts?.["prepare:staging"]).toContain("npm ci");
     expect(packageJson.scripts?.["prepare:staging"]).toContain("npm run check");
     expect(productionEnvironment).toHaveLength(0);

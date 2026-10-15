@@ -1,12 +1,19 @@
 #!/bin/sh
 set -eu
 
-if [ "${NODE_OPTIONS+x}" = x ]; then
-  printf '%s\n' "Refusing credential-bearing deployment while NODE_OPTIONS is set." >&2
+if [ "${BASH_ENV+x}" = x ] || [ "${ENV+x}" = x ]; then
+  printf '%s\n' "Refusing credential-bearing deployment while shell startup overrides are present." >&2
   exit 1
 fi
-if [ "${NODE_PATH+x}" = x ]; then
-  printf '%s\n' "Refusing credential-bearing deployment while NODE_PATH is set." >&2
+if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_PATH+x}" = x ] || [ "${NODE_DEBUG+x}" = x ]; then
+  printf '%s\n' "Refusing credential-bearing deployment while Node injection or debug settings are present." >&2
+  exit 1
+fi
+if [ "${LD_PRELOAD+x}" = x ] || [ "${LD_LIBRARY_PATH+x}" = x ] || \
+   [ "${DYLD_INSERT_LIBRARIES+x}" = x ] || [ "${DYLD_LIBRARY_PATH+x}" = x ] || \
+   [ "${DYLD_FRAMEWORK_PATH+x}" = x ] || [ "${DYLD_FALLBACK_LIBRARY_PATH+x}" = x ] || \
+   [ "${DYLD_FALLBACK_FRAMEWORK_PATH+x}" = x ]; then
+  printf '%s\n' "Refusing credential-bearing deployment while dynamic-loader overrides are present." >&2
   exit 1
 fi
 if [ "${CLOUDFLARE_API_BASE_URL+x}" = x ] || [ "${CF_API_BASE_URL+x}" = x ] || \
@@ -78,22 +85,20 @@ if [ "$DEPLOY_NODE_PATH" != "$physical_node_path" ]; then
 fi
 
 case "$0" in
-  scripts/deploy-verified-bundle.sh | ./scripts/deploy-verified-bundle.sh) ;;
+  /bin/sh) ;;
   *)
-    printf '%s\n' "Run the deployment launcher directly from the reviewed repository root." >&2
+    printf '%s\n' "The deployment launcher must receive authenticated bytes over standard input from the independently retained bootstrap." >&2
     exit 1
     ;;
 esac
 repository_root=$(pwd -P)
 if [ "${PWD:-}" != "$repository_root" ]; then
-  printf '%s\n' "Run the deployment launcher directly from the reviewed repository root." >&2
+  printf '%s\n' "Run the independently retained deployment bootstrap from the physical reviewed repository root." >&2
   exit 1
 fi
-launcher_path="$repository_root/scripts/deploy-verified-bundle.sh"
 integrity_path="$repository_root/scripts/staging-bundle-integrity.mjs"
-if [ -L "$launcher_path" ] || [ ! -f "$launcher_path" ] || \
-   [ -L "$integrity_path" ] || [ ! -f "$integrity_path" ]; then
-  printf '%s\n' "Deployment launcher files must be regular, non-symlink files in the reviewed repository root." >&2
+if [ -L "$integrity_path" ] || [ ! -f "$integrity_path" ]; then
+  printf '%s\n' "The deployment entrypoint must be a regular, non-symlink file in the reviewed repository root." >&2
   exit 1
 fi
 if [ -z "${STAGING_INTEGRITY_SHA256:-}" ] || [ "${#STAGING_INTEGRITY_SHA256}" -ne 64 ]; then
@@ -107,39 +112,13 @@ case "$STAGING_INTEGRITY_SHA256" in
     ;;
 esac
 
-# Hash the entrypoint with the already approved Node executable. Inline code is used
-# here so no unverified repository JavaScript receives deployment credentials first.
-"$DEPLOY_NODE_PATH" -e '
-  const { createHash } = require("node:crypto");
-  const { lstatSync, readFileSync } = require("node:fs");
-  const [launcher, entrypoint, expected] = process.argv.slice(1);
-  function inspect(path) {
-    const value = lstatSync(path);
-    if (!value.isFile() || value.isSymbolicLink() || value.nlink !== 1) {
-      throw new Error("unsafe-file");
-    }
-    return value;
-  }
-  try {
-    inspect(launcher);
-    const before = inspect(entrypoint);
-    const bytes = readFileSync(entrypoint);
-    const after = inspect(entrypoint);
-    if (before.dev !== after.dev || before.ino !== after.ino ||
-        before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
-      throw new Error("changed-file");
-    }
-    const actual = createHash("sha256").update(bytes).digest("hex");
-    if (actual !== expected) throw new Error("digest-mismatch");
-  } catch {
-    process.exit(1);
-  }
-' "$launcher_path" "$integrity_path" "$STAGING_INTEGRITY_SHA256" || {
-  printf '%s\n' "The deployment entrypoint does not match the retained reviewed digest or has an unsafe file type." >&2
-  exit 1
-}
-
-unset NODE_OPTIONS NODE_PATH CLOUDFLARE_API_BASE_URL CF_API_BASE_URL CLOUDFLARE_BASE_URL
+# Remove guarded routing/injection settings before the approved Node executable
+# receives credentials. The inline verifier opens the entrypoint once and
+# imports those exact authenticated bytes, never reopening its mutable path.
+unset NODE_OPTIONS NODE_PATH NODE_DEBUG LD_PRELOAD LD_LIBRARY_PATH
+unset DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
+unset DYLD_FALLBACK_LIBRARY_PATH DYLD_FALLBACK_FRAMEWORK_PATH
+unset CLOUDFLARE_API_BASE_URL CF_API_BASE_URL CLOUDFLARE_BASE_URL
 unset CLOUDFLARE_CONTAINER_REGISTRY WRANGLER_API_ENVIRONMENT CLOUDFLARE_COMPLIANCE_REGION
 unset WRANGLER_AUTH_DOMAIN WRANGLER_AUTH_URL WRANGLER_TOKEN_URL WRANGLER_REVOKE_URL
 unset CLOUDFLARE_ACCOUNT_ID CF_ACCOUNT_ID
@@ -148,4 +127,37 @@ unset WRANGLER_OUTPUT_FILE_PATH WRANGLER_OUTPUT_FILE_DIRECTORY
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy
 unset NODE_EXTRA_CA_CERTS NODE_TLS_REJECT_UNAUTHORIZED OPENSSL_CONF SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE
 unset TMPDIR TMP TEMP
-exec "$DEPLOY_NODE_PATH" "$integrity_path" deploy "$@"
+exec "$DEPLOY_NODE_PATH" -e '
+  const { createHash, timingSafeEqual } = require("node:crypto");
+  const { closeSync, constants, fstatSync, openSync, readFileSync } = require("node:fs");
+  const [entrypoint, expected, ...forwarded] = process.argv.slice(1);
+  let descriptor;
+  let bytes;
+  try {
+    descriptor = openSync(entrypoint, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const before = fstatSync(descriptor, { bigint: true });
+    if (!before.isFile() || before.nlink !== 1n) throw new Error("unsafe-file");
+    bytes = readFileSync(descriptor);
+    const after = fstatSync(descriptor, { bigint: true });
+    if (after.nlink !== before.nlink || after.dev !== before.dev ||
+        after.ino !== before.ino || after.size !== before.size ||
+        after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs) {
+      throw new Error("changed-file");
+    }
+    const actual = createHash("sha256").update(bytes).digest();
+    const approved = Buffer.from(expected, "hex");
+    if (approved.length !== actual.length || !timingSafeEqual(actual, approved)) {
+      throw new Error("digest-mismatch");
+    }
+  } catch {
+    process.stderr.write("The deployment entrypoint does not match the retained reviewed digest or has an unsafe file type.\n");
+    process.exit(1);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+  process.argv = [process.execPath, entrypoint, "deploy", ...forwarded];
+  import(`data:text/javascript;base64,${bytes.toString("base64")}`).catch(() => {
+    process.stderr.write("The authenticated deployment entrypoint failed.\n");
+    process.exit(1);
+  });
+' "$integrity_path" "$STAGING_INTEGRITY_SHA256" "$@"

@@ -56,6 +56,16 @@ if (target === "production" && action === "deploy") {
 
 const NODE_INJECTION_ENVIRONMENT = ["NODE_OPTIONS", "NODE_PATH"];
 const UNSAFE_DEPLOYMENT_ENVIRONMENT = [
+  "NODE_DEBUG",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "DYLD_INSERT_LIBRARIES",
+  "DYLD_LIBRARY_PATH",
+  "DYLD_FRAMEWORK_PATH",
+  "DYLD_FALLBACK_LIBRARY_PATH",
+  "DYLD_FALLBACK_FRAMEWORK_PATH",
+  "BASH_ENV",
+  "ENV",
   "CLOUDFLARE_API_BASE_URL",
   "CF_API_BASE_URL",
   "CLOUDFLARE_BASE_URL",
@@ -111,6 +121,7 @@ const RUNTIME_PATH = "node_modules";
 const MANIFEST_PATH = `dist/${target}-bundle-manifest.json`;
 const INVENTORY_PATH = `dist/${target}-runtime-inventory.json`;
 const LOCK_PATH = "package-lock.json";
+const DEPLOYMENT_LAUNCHER_PATH = "scripts/deploy-verified-bundle.sh";
 const DEPLOYMENT_ENTRYPOINT_PATH = "scripts/staging-bundle-integrity.mjs";
 const releaseVariable =
   target === "production" ? "PRODUCTION_RELEASE_SHA" : "STAGING_RELEASE_SHA";
@@ -497,11 +508,14 @@ function createManifest() {
     `${JSON.stringify(manifest, null, 2)}\n`,
     `The ${target} bundle manifest`,
   );
+  const launcherSha256 = sha256(
+    readRegularFile(DEPLOYMENT_LAUNCHER_PATH, "The deployment launcher"),
+  );
   const entrypointSha256 = sha256(
     readRegularFile(DEPLOYMENT_ENTRYPOINT_PATH, "The deployment entrypoint"),
   );
   process.stdout.write(
-    `Recorded ${target} bundle ${manifest.sha256}, configuration ${manifest.configSha256}, deployment runtime ${manifest.runtimeSha256}, and deployment entrypoint ${entrypointSha256} for ${manifest.releaseCommit}.\n`,
+    `Recorded ${target} bundle ${manifest.sha256}, configuration ${manifest.configSha256}, deployment runtime ${manifest.runtimeSha256}, deployment launcher ${launcherSha256}, and deployment entrypoint ${entrypointSha256} for ${manifest.releaseCommit}.\n`,
   );
 }
 
