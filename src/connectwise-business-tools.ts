@@ -1285,6 +1285,7 @@ export function registerConnectWiseBusinessTools(
       dateTo: date.optional(),
       maxResults: pageSize,
     })
+    .strict()
     .refine(
       ({ dateFrom, dateTo }) =>
         dateFrom === undefined || dateTo === undefined || dateFrom <= dateTo,
