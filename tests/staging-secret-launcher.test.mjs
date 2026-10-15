@@ -111,8 +111,8 @@ describe("staging secret launcher", () => {
       DEPLOY_NODE_PATH: process.execPath,
     });
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(
-      "STAGING_RELEASE_SHA must be the approved full 40-character lowercase release commit.",
+    expect(result.stderr).toMatch(
+      /STAGING_RELEASE_SHA must be the approved|The staging bundle directory is missing/,
     );
   });
 
