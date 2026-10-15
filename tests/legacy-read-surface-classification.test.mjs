@@ -19,6 +19,7 @@ const v2Foundation = readFileSync(
   `${repositoryRoot}/docs/v2-foundation.md`,
   "utf8",
 );
+const readme = readFileSync(`${repositoryRoot}/README.md`, "utf8");
 
 const MIGRATED_TOOL_ACCESS = Object.freeze({
   get_ticket_notes_with_content: {
@@ -318,6 +319,9 @@ describe("legacy read-surface classification", () => {
     );
     expect(v2Foundation).toContain(
       "verify the exact document-to-ticket relationship both before and after retrieving the bytes",
+    );
+    expect(readme).toContain(
+      `Document downloads are capped at ${documentedLimit};`,
     );
   });
 });
