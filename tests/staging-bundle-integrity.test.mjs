@@ -25,6 +25,12 @@ const integrityPath = fileURLToPath(
 const deploymentLauncherPath = fileURLToPath(
   new URL("../scripts/deploy-verified-bundle.sh", import.meta.url),
 );
+const deploymentBootstrapPath = fileURLToPath(
+  new URL("../scripts/bootstrap-verified-deployment.sh", import.meta.url),
+);
+const reviewedLauncherSha256 = createHash("sha256")
+  .update(await readFile(deploymentLauncherPath))
+  .digest("hex");
 const reviewedIntegritySha256 = createHash("sha256")
   .update(await readFile(integrityPath))
   .digest("hex");
@@ -34,6 +40,16 @@ const projectNodeModules = fileURLToPath(
 const unsafeDeploymentEnvironment = [
   "NODE_OPTIONS",
   "NODE_PATH",
+  "NODE_DEBUG",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "DYLD_INSERT_LIBRARIES",
+  "DYLD_LIBRARY_PATH",
+  "DYLD_FRAMEWORK_PATH",
+  "DYLD_FALLBACK_LIBRARY_PATH",
+  "DYLD_FALLBACK_FRAMEWORK_PATH",
+  "BASH_ENV",
+  "ENV",
   "CLOUDFLARE_API_BASE_URL",
   "CF_API_BASE_URL",
   "CLOUDFLARE_BASE_URL",
@@ -67,6 +83,10 @@ const unsafeDeploymentEnvironment = [
   "SSL_CERT_DIR",
   "CURL_CA_BUNDLE",
 ];
+const observableUnsafeDeploymentEnvironment =
+  unsafeDeploymentEnvironment.filter(
+    (name) => !(process.platform === "darwin" && name.startsWith("DYLD_")),
+  );
 
 function cleanDeploymentEnvironment() {
   const env = { ...process.env };
@@ -92,7 +112,7 @@ async function createCheckout() {
     join(cwd, "scripts", "deploy-verified-bundle.sh"),
     await readFile(deploymentLauncherPath),
   );
-  await chmod(join(cwd, "scripts", "deploy-verified-bundle.sh"), 0o755);
+  await chmod(join(cwd, "scripts", "deploy-verified-bundle.sh"), 0o644);
   await writeFile(join(cwd, "release.txt"), "reviewed\n");
   await writeFile(join(cwd, "package-lock.json"), "{}\n");
   await writeFile(join(cwd, "dist", "index.js"), "export default {};\n");
@@ -145,20 +165,27 @@ function run(
   });
 }
 
-function runLauncher(cwd, releaseSha, environmentOverrides = {}) {
+function runLauncher(
+  cwd,
+  releaseSha,
+  environmentOverrides = {},
+  invocationCwd = cwd,
+) {
   const env = cleanDeploymentEnvironment();
   delete env.DEPLOY_NODE_PATH;
   delete env.STAGING_RELEASE_SHA;
   delete env.STAGING_BUNDLE_SHA256;
   delete env.STAGING_CONFIG_SHA256;
   delete env.STAGING_DEPLOY_RUNTIME_SHA256;
+  delete env.STAGING_LAUNCHER_SHA256;
   delete env.STAGING_INTEGRITY_SHA256;
   env.DEPLOY_NODE_PATH = process.execPath;
+  env.STAGING_LAUNCHER_SHA256 = reviewedLauncherSha256;
   env.STAGING_INTEGRITY_SHA256 = reviewedIntegritySha256;
   Object.assign(env, environmentOverrides);
   if (releaseSha !== undefined) env.STAGING_RELEASE_SHA = releaseSha;
-  return spawnSync("scripts/deploy-verified-bundle.sh", [], {
-    cwd,
+  return spawnSync(deploymentBootstrapPath, [], {
+    cwd: invocationCwd,
     env,
     encoding: "utf8",
   });
@@ -218,7 +245,7 @@ describe("staging bundle integrity", () => {
       expect(created.status, created.stderr).toBe(0);
       expect(created.stdout).toMatch(
         new RegExp(
-          `^Recorded staging bundle [0-9a-f]{64}, configuration [0-9a-f]{64}, deployment runtime [0-9a-f]{64}, and deployment entrypoint ${reviewedIntegritySha256} for ${head}\\.\\n$`,
+          `^Recorded staging bundle [0-9a-f]{64}, configuration [0-9a-f]{64}, deployment runtime [0-9a-f]{64}, deployment launcher ${reviewedLauncherSha256}, and deployment entrypoint ${reviewedIntegritySha256} for ${head}\\.\\n$`,
         ),
       );
       expect(verified.status, verified.stderr).toBe(0);
@@ -537,7 +564,7 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(
-        "Refusing credential-bearing deployment while NODE_OPTIONS is set.",
+        "Refusing credential-bearing deployment while Node injection or debug settings are present.",
       );
       await expect(readFile(preloadMarker)).rejects.toMatchObject({
         code: "ENOENT",
@@ -548,33 +575,170 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
     });
   });
 
-  it("rejects a launcher invoked outside its reviewed repository root", async () => {
+  it("ignores inherited exported shell functions before authenticating the launcher", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const marker = join(cwd, "exported-shell-function-ran");
+      const result = runLauncher(cwd, undefined, {
+        "BASH_FUNC_pwd%%": `() { printf "%s" "$CLOUDFLARE_API_TOKEN" > ${JSON.stringify(marker)}; builtin pwd; }`,
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+        STAGING_LAUNCHER_SHA256: "0".repeat(64),
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The deployment launcher does not match the retained reviewed digest",
+      );
+      expect(result.stderr).not.toContain("credential-canary");
+      await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  it("rejects a bootstrap invoked outside its physical reviewed repository root", async () => {
     await withCheckout(async ({ cwd }) => {
       const fakeMarker = join(cwd, "fake-entrypoint-ran");
       await writeFile(
         join(cwd, "scripts", "staging-bundle-integrity.mjs"),
         `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(fakeMarker)}, process.env.CLOUDFLARE_API_TOKEN ?? "missing");\n`,
       );
+
+      const result = runLauncher(
+        cwd,
+        undefined,
+        { CLOUDFLARE_API_TOKEN: "credential-canary" },
+        join(cwd, "scripts"),
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(
+        /Run the independently retained deployment bootstrap|deployment launcher must remain a regular/,
+      );
+      await expect(readFile(fakeMarker)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+  });
+
+  it("keeps the repository launcher non-executable outside the bootstrap", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const marker = join(cwd, "direct-launcher-ran");
+      const launcher = join(cwd, "scripts", "deploy-verified-bundle.sh");
+      await writeFile(
+        launcher,
+        `#!/bin/sh\nprintf "$CLOUDFLARE_API_TOKEN" > ${JSON.stringify(marker)}\n`,
+      );
       const env = cleanDeploymentEnvironment();
-      env.DEPLOY_NODE_PATH = process.execPath;
-      env.STAGING_INTEGRITY_SHA256 = createHash("sha256")
-        .update(
-          await readFile(join(cwd, "scripts", "staging-bundle-integrity.mjs")),
-        )
-        .digest("hex");
       env.CLOUDFLARE_API_TOKEN = "credential-canary";
 
-      const result = spawnSync(deploymentLauncherPath, [], {
-        cwd,
-        env,
-        encoding: "utf8",
+      const result = spawnSync(launcher, [], { cwd, env, encoding: "utf8" });
+
+      expect(result.status).toBeNull();
+      expect(result.error).toMatchObject({ code: "EACCES" });
+      await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  it("rejects any executable mode bit even when the launcher digest matches", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const launcher = join(cwd, "scripts", "deploy-verified-bundle.sh");
+      await chmod(launcher, 0o645);
+
+      const result = runLauncher(cwd, undefined, {
+        CLOUDFLARE_API_TOKEN: "credential-canary",
       });
 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(
-        "Run the deployment launcher directly from the reviewed repository root.",
+        "The deployment launcher does not match the retained reviewed digest or has an unsafe file type.",
       );
-      await expect(readFile(fakeMarker)).rejects.toMatchObject({
+      expect(result.stderr).not.toContain("credential-canary");
+    });
+  });
+
+  it("rejects a modified launcher before it can observe deployment credentials", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const marker = join(cwd, "modified-launcher-ran");
+      await writeFile(
+        join(cwd, "scripts", "deploy-verified-bundle.sh"),
+        `#!/bin/sh\nprintf '%s' "$CLOUDFLARE_API_TOKEN" > ${JSON.stringify(marker)}\n`,
+      );
+      await chmod(join(cwd, "scripts", "deploy-verified-bundle.sh"), 0o644);
+
+      const result = runLauncher(cwd, undefined, {
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The deployment launcher does not match the retained reviewed digest or has an unsafe file type.",
+      );
+      expect(result.stdout).not.toContain("credential-canary");
+      expect(result.stderr).not.toContain("credential-canary");
+      await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  it.each(["symlink", "hard link"])(
+    "rejects a %s deployment launcher before it can observe credentials",
+    async (fileType) => {
+      await withCheckout(async ({ cwd }) => {
+        const launcher = join(cwd, "scripts", "deploy-verified-bundle.sh");
+        const replacement = join(cwd, "replacement-launcher.sh");
+        await writeFile(replacement, await readFile(launcher));
+        await chmod(replacement, 0o755);
+        await unlink(launcher);
+        if (fileType === "symlink") await symlink(replacement, launcher);
+        else await link(replacement, launcher);
+
+        const result = runLauncher(cwd, undefined, {
+          CLOUDFLARE_API_TOKEN: "credential-canary",
+        });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toMatch(
+          /deployment launcher (must remain a regular|does not match the retained reviewed digest)/i,
+        );
+        expect(result.stderr).not.toContain("credential-canary");
+      });
+    },
+  );
+
+  it.each(["", "abc", "A".repeat(64), `${"a".repeat(63)}g`])(
+    "rejects a missing or malformed retained launcher digest (%s)",
+    async (digest) => {
+      await withCheckout(async ({ cwd }) => {
+        const result = runLauncher(cwd, undefined, {
+          STAGING_LAUNCHER_SHA256: digest,
+        });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          "STAGING_LAUNCHER_SHA256 must be the retained lowercase SHA-256",
+        );
+      });
+    },
+  );
+
+  it("executes authenticated launcher bytes instead of a replacement path", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const launcher = join(cwd, "scripts", "deploy-verified-bundle.sh");
+      const authenticatedMarker = join(cwd, "authenticated-launcher-ran");
+      const replacementMarker = join(cwd, "replacement-launcher-ran");
+      const replacement = `#!/bin/sh\nprintf "$CLOUDFLARE_API_TOKEN" > ${JSON.stringify(replacementMarker)}\n`;
+      const authenticated = `#!/bin/sh\nprintf '%s' '${replacement}' > scripts/deploy-verified-bundle.sh\nprintf 'authenticated' > ${JSON.stringify(authenticatedMarker)}\n`;
+      await writeFile(launcher, authenticated);
+      await chmod(launcher, 0o644);
+      const digest = createHash("sha256").update(authenticated).digest("hex");
+
+      const result = runLauncher(cwd, undefined, {
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+        STAGING_LAUNCHER_SHA256: digest,
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      await expect(readFile(authenticatedMarker, "utf8")).resolves.toBe(
+        "authenticated",
+      );
+      await expect(readFile(replacementMarker)).rejects.toMatchObject({
         code: "ENOENT",
       });
     });
@@ -617,7 +781,7 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
 
         expect(result.status).toBe(1);
         expect(result.stderr).toMatch(
-          /Deployment launcher files must be regular|deployment entrypoint does not match/,
+          /deployment entrypoint must be a regular|deployment entrypoint does not match/i,
         );
       });
     },
@@ -666,13 +830,13 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(
-        "Refusing credential-bearing deployment while NODE_PATH is set.",
+        "Refusing credential-bearing deployment while Node injection or debug settings are present.",
       );
     });
   });
 
   it.each(
-    unsafeDeploymentEnvironment.filter(
+    observableUnsafeDeploymentEnvironment.filter(
       (name) => name !== "NODE_OPTIONS" && name !== "NODE_PATH",
     ),
   )("rejects the %s override before the launcher starts Node", async (name) => {
@@ -698,7 +862,7 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
   });
 
   it.each(
-    unsafeDeploymentEnvironment.filter(
+    observableUnsafeDeploymentEnvironment.filter(
       (name) => name !== "NODE_OPTIONS" && name !== "NODE_PATH",
     ),
   )("rejects direct deploy when %s bypasses the launcher", async (name) => {
