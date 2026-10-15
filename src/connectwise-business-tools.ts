@@ -323,9 +323,10 @@ async function runAuthorizedTool(
   const startedAtMs = getAuditStartTime(dependencies.audit);
   const requiredScopes = requiredMcpScopes(tool);
   if (!hasMcpScopes(props, requiredScopes)) {
+    const hasReadScope = hasMcpScopes(props, ["mcp:read"]);
     emitToolAudit(
       {
-        props,
+        props: hasReadScope ? props : undefined,
         tool,
         outcome: "denied",
         reason: "insufficient_scope",
