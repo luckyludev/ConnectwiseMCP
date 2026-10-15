@@ -34,7 +34,7 @@ export function whoamiResult(
   if (!hasMcpScopes(props, requiredMcpScopes("whoami"))) {
     emitToolAudit(
       {
-        props,
+        props: undefined,
         tool: "whoami",
         outcome: "denied",
         reason: "insufficient_scope",
@@ -110,7 +110,7 @@ export async function getServiceTicketResult(
   if (!hasMcpScopes(props, requiredMcpScopes("get_service_ticket"))) {
     emitToolAudit(
       {
-        props,
+        props: undefined,
         tool: "get_service_ticket",
         outcome: "denied",
         reason: "insufficient_scope",

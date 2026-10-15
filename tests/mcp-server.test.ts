@@ -141,15 +141,16 @@ describe("whoami", () => {
         isError: true,
         content: [{ type: "text", text: "Insufficient scope" }],
       });
-      expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      const auditEvent = JSON.parse(auditMessages[0]!);
+      expect(auditEvent).toMatchObject({
         tool: "whoami",
         outcome: "denied",
         reason: "insufficient_scope",
         durationMs: 1,
-        tenantId,
-        objectId,
-        profileAlias: "LUIS",
       });
+      expect(auditEvent).not.toHaveProperty("tenantId");
+      expect(auditEvent).not.toHaveProperty("objectId");
+      expect(auditEvent).not.toHaveProperty("profileAlias");
       expect(auditMessages[0]!).not.toContain("scopes");
     },
   );
@@ -558,18 +559,63 @@ describe("get_service_ticket", () => {
       });
       expect(reads).toEqual([]);
       expect(auditMessages).toHaveLength(1);
-      expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      const auditEvent = JSON.parse(auditMessages[0]!);
+      expect(auditEvent).toMatchObject({
         correlationId,
-        tenantId,
-        objectId,
-        profileAlias: "LUIS",
         tool: "get_service_ticket",
         outcome: "denied",
         reason: "insufficient_scope",
         durationMs: 10,
       });
+      expect(auditEvent).not.toHaveProperty("tenantId");
+      expect(auditEvent).not.toHaveProperty("objectId");
+      expect(auditEvent).not.toHaveProperty("profileAlias");
     },
   );
+
+  it("does not access identity metadata when read scope is absent", async () => {
+    const metadataReads: string[] = [];
+    const auditMessages: string[] = [];
+    const props = {
+      scopes: [],
+      get tenantId() {
+        metadataReads.push("tenantId");
+        return tenantId;
+      },
+      get objectId() {
+        metadataReads.push("objectId");
+        return objectId;
+      },
+      get profileAlias() {
+        metadataReads.push("profileAlias");
+        return "LUIS";
+      },
+    };
+
+    const result = await getServiceTicketResult(props, {}, 123, {
+      audit: {
+        logger: (message) => auditMessages.push(message),
+        now: () => 3_000,
+        createCorrelationId: () => correlationId,
+      },
+      createClient: () => {
+        throw new Error("must not construct client");
+      },
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "Insufficient scope" }],
+    });
+    expect(metadataReads).toEqual([]);
+    expect(auditMessages).toHaveLength(1);
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      correlationId,
+      tool: "get_service_ticket",
+      outcome: "denied",
+      reason: "insufficient_scope",
+    });
+  });
 
   it("rejects a stale token after its identity is remapped before reading a profile secret", async () => {
     const reads: string[] = [];
