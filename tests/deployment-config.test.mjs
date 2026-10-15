@@ -600,8 +600,10 @@ describe("staging deployment configuration", () => {
     expect(launcher).toContain("HTTPS_PROXY");
     expect(launcher).toContain("NODE_EXTRA_CA_CERTS");
     expect(launcher).toContain(
-      'exec "$DEPLOY_NODE_PATH" "$wrangler_entrypoint" secret put "$secret_name" --env staging --config "$wrangler_config"',
+      'import(`data:text/javascript;base64,${bytes.toString("base64")}`)',
     );
+    expect(launcher).toContain("STAGING_INTEGRITY_SHA256");
+    expect(launcher).not.toContain("node_modules/wrangler");
     expect(launcherStat.mode & 0o111).not.toBe(0);
   });
 

@@ -25,13 +25,21 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 
 const action = process.argv[2];
-const target = process.argv[3] ?? "staging";
+const secretName = action === "secret" ? process.argv[3] : undefined;
+const target = action === "secret" ? "staging" : (process.argv[3] ?? "staging");
+const approvedSecretName =
+  secretName === "ENTRA_CLIENT_SECRET" ||
+  secretName === "OAUTH_STATE_SECRET" ||
+  secretName === "IDENTITY_PROFILE_MAP" ||
+  /^CW_PROFILE_[A-Z][A-Z0-9_]{0,31}$/u.test(secretName ?? "");
 if (
-  process.argv.length > 4 ||
+  (action === "secret" && (process.argv.length !== 4 || !approvedSecretName)) ||
+  (action !== "secret" && process.argv.length > 4) ||
   (action !== "create" &&
     action !== "verify" &&
     action !== "deploy" &&
-    action !== "dry-run") ||
+    action !== "dry-run" &&
+    action !== "secret") ||
   (target !== "staging" && target !== "production")
 ) {
   process.stderr.write(
@@ -82,8 +90,12 @@ const UNSAFE_DEPLOYMENT_ENVIRONMENT = [
   "CURL_CA_BUNDLE",
 ];
 
+const credentialAction = action === "deploy" || action === "secret";
+for (const name of ["TMPDIR", "TMP", "TEMP"]) {
+  if (credentialAction) delete process.env[name];
+}
 if (
-  action === "deploy" &&
+  credentialAction &&
   UNSAFE_DEPLOYMENT_ENVIRONMENT.some((name) => Object.hasOwn(process.env, name))
 ) {
   process.stderr.write(
@@ -501,7 +513,7 @@ function verifyManifest() {
       `${releaseVariable} must be the approved full 40-character lowercase release commit.`,
     );
   }
-  if (action === "deploy") {
+  if (credentialAction) {
     for (const [name, value] of [
       [bundleDigestVariable, process.env[bundleDigestVariable]],
       [configDigestVariable, process.env[configDigestVariable]],
@@ -512,7 +524,7 @@ function verifyManifest() {
       }
     }
   }
-  if (action !== "deploy" && gitHead() !== approvedRelease) {
+  if (!credentialAction && gitHead() !== approvedRelease) {
     fail(`${releaseVariable} does not match the ${target} bundle checkout.`);
   }
 
@@ -582,7 +594,7 @@ function verifyManifest() {
     fail(`The ${target} bundle manifest is not bound to ${releaseVariable}.`);
   }
   if (
-    action === "deploy" &&
+    credentialAction &&
     (manifest.sha256 !== process.env[bundleDigestVariable] ||
       manifest.configSha256 !== process.env[configDigestVariable] ||
       manifest.runtimeSha256 !== process.env[runtimeDigestVariable])
@@ -608,7 +620,7 @@ function verifyManifest() {
       `The ${target} Wrangler configuration does not match its release manifest.`,
     );
   }
-  if (action !== "deploy") requireReleaseConfig(config, approvedRelease);
+  if (!credentialAction) requireReleaseConfig(config, approvedRelease);
   const lock = readRegularFile(LOCK_PATH, `The ${target} package lock`);
   if (
     lock.length !== manifest.lockSize ||
@@ -865,6 +877,113 @@ function deployVerifiedBundle(
   }
 }
 
+function putVerifiedStagingSecret(
+  config,
+  runtimeSha256,
+  runtimeFileCount,
+  name,
+) {
+  let runtimeDirectory;
+  let temporaryRuntime;
+  let temporaryConfig;
+  let configWriteDescriptor;
+  let runtimeSnapshotDirectories = [];
+  let result;
+  try {
+    runtimeDirectory = mkdtempSync(
+      join(tmpdir(), "connectwise-staging-secret-runtime-"),
+    );
+    temporaryRuntime = join(runtimeDirectory, "node_modules");
+    temporaryConfig = join(runtimeDirectory, "wrangler.jsonc");
+    configWriteDescriptor = openSync(
+      temporaryConfig,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    writeFileSync(configWriteDescriptor, config);
+    fsyncSync(configWriteDescriptor);
+    closeSync(configWriteDescriptor);
+    configWriteDescriptor = undefined;
+
+    const runtimeSnapshot = deploymentRuntimeDigest(
+      temporaryRuntime,
+      runtimeSnapshotDirectories,
+    );
+    if (
+      runtimeSnapshot.sha256 !== runtimeSha256 ||
+      runtimeSnapshot.fileCount !== runtimeFileCount
+    ) {
+      result = {
+        status: 1,
+        error: new Error(
+          "The staging deployment runtime changed before it could be isolated.",
+        ),
+      };
+    }
+
+    chmodSync(temporaryConfig, 0o400);
+    chmodSync(runtimeDirectory, 0o500);
+    if (!result) {
+      const secretEnvironment = { ...process.env };
+      for (const environmentName of [
+        ...NODE_INJECTION_ENVIRONMENT,
+        ...UNSAFE_DEPLOYMENT_ENVIRONMENT,
+      ]) {
+        delete secretEnvironment[environmentName];
+      }
+      result = spawnSync(
+        process.execPath,
+        [
+          join(temporaryRuntime, ".bin", "wrangler"),
+          "secret",
+          "put",
+          name,
+          "--env",
+          "staging",
+          "--config",
+          temporaryConfig,
+        ],
+        { env: secretEnvironment, stdio: "inherit" },
+      );
+    }
+    try {
+      verifyPrivateCopy(temporaryConfig, config, "private configuration");
+    } catch (error) {
+      result = { status: 1, error };
+    }
+  } catch (error) {
+    result = { status: 1, error };
+  } finally {
+    if (configWriteDescriptor !== undefined) closeSync(configWriteDescriptor);
+    let cleanupError;
+    if (runtimeDirectory) {
+      try {
+        const runtimeDirectoryStat = lstatSync(runtimeDirectory);
+        if (
+          !runtimeDirectoryStat.isDirectory() ||
+          runtimeDirectoryStat.isSymbolicLink()
+        ) {
+          throw new Error("Private staging runtime directory type changed");
+        }
+        for (const directory of runtimeSnapshotDirectories) {
+          chmodSync(directory, 0o700);
+        }
+        chmodSync(runtimeDirectory, 0o700);
+        rmSync(runtimeDirectory, { recursive: true, force: true });
+      } catch (error) {
+        if (error?.code !== "ENOENT") cleanupError = error;
+      }
+    }
+    if (cleanupError) result = { status: 1, error: cleanupError };
+  }
+  if (result?.error || result?.status !== 0) {
+    fail("Wrangler did not put the verified staging secret.");
+  }
+}
+
 if (action === "create") createManifest();
 else {
   const verified = verifyManifest();
@@ -876,6 +995,13 @@ else {
       verified.runtimeSha256,
       verified.runtimeFileCount,
       action === "dry-run",
+    );
+  } else if (action === "secret") {
+    putVerifiedStagingSecret(
+      verified.config,
+      verified.runtimeSha256,
+      verified.runtimeFileCount,
+      secretName,
     );
   }
 }

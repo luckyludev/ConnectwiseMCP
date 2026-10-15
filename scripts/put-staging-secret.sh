@@ -97,20 +97,23 @@ esac
 repository=$(pwd -P)
 scripts_directory=$repository/scripts
 launcher_path=$scripts_directory/put-staging-secret.sh
-wrangler_config=$repository/wrangler.jsonc
-wrangler_package=$repository/node_modules/wrangler
-wrangler_bin=$wrangler_package/bin
-wrangler_entrypoint=$wrangler_bin/wrangler.js
+integrity_path=$scripts_directory/staging-bundle-integrity.mjs
 if [ -L "$scripts_directory" ] || [ ! -d "$scripts_directory" ] || \
    [ -L "$launcher_path" ] || [ ! -f "$launcher_path" ] || [ ! -x "$launcher_path" ] || \
-   [ -L "$wrangler_config" ] || [ ! -f "$wrangler_config" ] || \
-   [ -L "$repository/node_modules" ] || [ ! -d "$repository/node_modules" ] || \
-   [ -L "$wrangler_package" ] || [ ! -d "$wrangler_package" ] || \
-   [ -L "$wrangler_bin" ] || [ ! -d "$wrangler_bin" ] || \
-   [ -L "$wrangler_entrypoint" ] || [ ! -f "$wrangler_entrypoint" ]; then
-  printf '%s\n' "The reviewed launcher or lock-installed Wrangler entry point is unavailable or unsafe." >&2
+   [ -L "$integrity_path" ] || [ ! -f "$integrity_path" ]; then
+  printf '%s\n' "The reviewed secret launcher files are unavailable or unsafe." >&2
   exit 1
 fi
+if [ -z "${STAGING_INTEGRITY_SHA256:-}" ] || [ "${#STAGING_INTEGRITY_SHA256}" -ne 64 ]; then
+  printf '%s\n' "STAGING_INTEGRITY_SHA256 must be the retained lowercase SHA-256 of the reviewed integrity entrypoint." >&2
+  exit 1
+fi
+case "$STAGING_INTEGRITY_SHA256" in
+  *[!0-9a-f]*)
+    printf '%s\n' "STAGING_INTEGRITY_SHA256 must be the retained lowercase SHA-256 of the reviewed integrity entrypoint." >&2
+    exit 1
+    ;;
+esac
 
 unset NODE_OPTIONS NODE_PATH CLOUDFLARE_API_BASE_URL CF_API_BASE_URL CLOUDFLARE_BASE_URL
 unset CLOUDFLARE_CONTAINER_REGISTRY WRANGLER_API_ENVIRONMENT CLOUDFLARE_COMPLIANCE_REGION
@@ -120,5 +123,42 @@ unset WRANGLER_LOG WRANGLER_LOG_SANITIZE WRANGLER_LOG_PATH WRANGLER_WRITE_LOGS
 unset WRANGLER_OUTPUT_FILE_PATH WRANGLER_OUTPUT_FILE_DIRECTORY
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy
 unset NODE_EXTRA_CA_CERTS NODE_TLS_REJECT_UNAUTHORIZED OPENSSL_CONF SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE
+unset TMPDIR TMP TEMP
 cd "$repository"
-exec "$DEPLOY_NODE_PATH" "$wrangler_entrypoint" secret put "$secret_name" --env staging --config "$wrangler_config"
+
+# Authenticate the entrypoint bytes and execute those exact bytes in the same
+# approved Node process. Reopening the repository path after verification would
+# permit a replacement race before credential-bearing execution.
+exec "$DEPLOY_NODE_PATH" -e '
+  const { createHash } = require("node:crypto");
+  const { lstatSync, readFileSync } = require("node:fs");
+  const [launcher, entrypoint, expected, secretName] = process.argv.slice(1);
+  function inspect(path) {
+    const value = lstatSync(path);
+    if (!value.isFile() || value.isSymbolicLink() || value.nlink !== 1) {
+      throw new Error("unsafe-file");
+    }
+    return value;
+  }
+  let bytes;
+  try {
+    inspect(launcher);
+    const before = inspect(entrypoint);
+    bytes = readFileSync(entrypoint);
+    const after = inspect(entrypoint);
+    if (before.dev !== after.dev || before.ino !== after.ino ||
+        before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+      throw new Error("changed-file");
+    }
+    const actual = createHash("sha256").update(bytes).digest("hex");
+    if (actual !== expected) throw new Error("digest-mismatch");
+  } catch {
+    process.stderr.write("The integrity entrypoint does not match the retained reviewed digest or has an unsafe file type.\n");
+    process.exit(1);
+  }
+  process.argv = [process.execPath, entrypoint, "secret", secretName];
+  import(`data:text/javascript;base64,${bytes.toString("base64")}`).catch(() => {
+    process.stderr.write("The authenticated integrity entrypoint could not be executed.\n");
+    process.exit(1);
+  });
+' "$launcher_path" "$integrity_path" "$STAGING_INTEGRITY_SHA256" "$secret_name"

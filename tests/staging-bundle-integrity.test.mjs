@@ -164,6 +164,31 @@ function runLauncher(cwd, releaseSha, environmentOverrides = {}) {
   });
 }
 
+function runSecret(
+  cwd,
+  secretName,
+  releaseSha,
+  environmentOverrides = {},
+  additionalArguments = [],
+) {
+  const env = cleanDeploymentEnvironment();
+  for (const name of [
+    "STAGING_RELEASE_SHA",
+    "STAGING_BUNDLE_SHA256",
+    "STAGING_CONFIG_SHA256",
+    "STAGING_DEPLOY_RUNTIME_SHA256",
+  ]) {
+    delete env[name];
+  }
+  Object.assign(env, environmentOverrides);
+  if (releaseSha !== undefined) env.STAGING_RELEASE_SHA = releaseSha;
+  return spawnSync(
+    process.execPath,
+    [integrityPath, "secret", secretName, ...additionalArguments],
+    { cwd, env, encoding: "utf8" },
+  );
+}
+
 async function stagingDeploymentDigests(cwd) {
   const manifest = JSON.parse(
     await readFile(join(cwd, "dist", "staging-bundle-manifest.json"), "utf8"),
@@ -843,6 +868,149 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
       expect(result.stderr).toContain(
         "STAGING_BUNDLE_SHA256 must be an approved lowercase SHA-256 digest.",
       );
+    });
+  });
+
+  it("accepts exactly one approved staging secret name", async () => {
+    await withCheckout(async ({ cwd }) => {
+      for (const [name, additionalArguments] of [
+        ["ARBITRARY_SECRET", []],
+        ["CW_PROFILE_", []],
+        ["CW_PROFILE_lower", []],
+        [`CW_PROFILE_A${"1".repeat(32)}`, []],
+        ["ENTRA_CLIENT_SECRET", ["--env", "production"]],
+      ]) {
+        const result = runSecret(cwd, name, undefined, {}, additionalArguments);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toBe(
+          "Usage: node scripts/staging-bundle-integrity.mjs <create|verify|deploy|dry-run> [staging|production]\n",
+        );
+      }
+    });
+  });
+
+  it("requires externally approved artifact digests for staging secret entry", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      expect(run(cwd, "create").status).toBe(0);
+
+      const result = runSecret(cwd, "ENTRA_CLIENT_SECRET", head);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "STAGING_BUNDLE_SHA256 must be an approved lowercase SHA-256 digest.",
+      );
+    });
+  });
+
+  it("uses approved artifacts and a private read-only runtime and config for secret entry", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const wrangler = join(cwd, "node_modules", ".bin", "wrangler");
+      const marker = join(cwd, "secret-entry.json");
+      await writeFile(
+        wrangler,
+        `#!${process.execPath}
+import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+const args = process.argv.slice(2);
+const config = args[args.indexOf("--config") + 1];
+const runtime = dirname(dirname(process.argv[1]));
+writeFileSync(process.env.SECRET_MARKER, JSON.stringify({
+  args,
+  config,
+  configBytes: readFileSync(config, "utf8"),
+  configMode: statSync(config).mode & 0o777,
+  entrypoint: process.argv[1],
+  runtime,
+  runtimeMode: statSync(runtime).mode & 0o777,
+}));
+`,
+      );
+      await chmod(wrangler, 0o755);
+      expect(run(cwd, "create").status).toBe(0);
+
+      const result = runSecret(cwd, "ENTRA_CLIENT_SECRET", head, {
+        ...(await stagingDeploymentDigests(cwd)),
+        SECRET_MARKER: marker,
+      });
+      const captured = JSON.parse(await readFile(marker, "utf8"));
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(captured.args).toEqual([
+        "secret",
+        "put",
+        "ENTRA_CLIENT_SECRET",
+        "--env",
+        "staging",
+        "--config",
+        captured.config,
+      ]);
+      expect(captured.configBytes).toContain("connectwise-staging-bundle-test");
+      expect(captured.configMode).toBe(0o400);
+      expect(captured.runtimeMode).toBe(0o500);
+      expect(captured.entrypoint).not.toContain(join(cwd, "node_modules"));
+      await expect(readFile(captured.config)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readdir(captured.runtime)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+  });
+
+  it("rejects runtime mutation before exposing secret-entry credentials", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const wrangler = join(cwd, "node_modules", ".bin", "wrangler");
+      const marker = join(cwd, "secret-was-exposed");
+      expect(run(cwd, "create").status).toBe(0);
+      const digests = await stagingDeploymentDigests(cwd);
+      await writeFile(
+        wrangler,
+        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "exposed");\n`,
+      );
+      await chmod(wrangler, 0o755);
+
+      const result = runSecret(cwd, "OAUTH_STATE_SECRET", head, digests);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "The staging deployment runtime does not match its release manifest.",
+      );
+      await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  it("cleans up private secret-entry artifacts when Wrangler fails", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const wrangler = join(cwd, "node_modules", ".bin", "wrangler");
+      const marker = join(cwd, "failed-secret-entry.json");
+      await writeFile(
+        wrangler,
+        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nimport { dirname } from "node:path";\nconst args = process.argv.slice(2);\nconst config = args[args.indexOf("--config") + 1];\nwriteFileSync(process.env.SECRET_MARKER, JSON.stringify({ config, runtime: dirname(dirname(process.argv[1])) }));\nprocess.exit(17);\n`,
+      );
+      await chmod(wrangler, 0o755);
+      expect(run(cwd, "create").status).toBe(0);
+
+      const result = runSecret(cwd, "IDENTITY_PROFILE_MAP", head, {
+        ...(await stagingDeploymentDigests(cwd)),
+        SECRET_MARKER: marker,
+      });
+      const captured = JSON.parse(await readFile(marker, "utf8"));
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Wrangler did not put the verified staging secret.",
+      );
+      await expect(readFile(captured.config)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readdir(captured.runtime)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(
+        (await readdir(cwd)).filter((name) =>
+          name.startsWith(".wrangler.staging-secret-"),
+        ),
+      ).toEqual([]);
     });
   });
 

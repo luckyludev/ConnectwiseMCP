@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -19,11 +20,13 @@ const repository = fileURLToPath(new URL("../", import.meta.url));
 const launcher = fileURLToPath(
   new URL("../scripts/put-staging-secret.sh", import.meta.url),
 );
-const wranglerEntrypoint = join(
+const integrityEntrypoint = join(
   repository,
-  "node_modules/wrangler/bin/wrangler.js",
+  "scripts/staging-bundle-integrity.mjs",
 );
-const wranglerConfig = join(repository, "wrangler.jsonc");
+const reviewedIntegritySha256 = createHash("sha256")
+  .update(await readFile(integrityEntrypoint))
+  .digest("hex");
 let temporaryDirectory;
 let approvedNode;
 let capturePath;
@@ -36,6 +39,7 @@ function run(args, overrides = {}, cwd = repository) {
       PATH: process.env.PATH,
       CAPTURE_PATH: capturePath,
       DEPLOY_NODE_PATH: approvedNode,
+      STAGING_INTEGRITY_SHA256: reviewedIntegritySha256,
       ...overrides,
     },
   });
@@ -49,7 +53,7 @@ beforeEach(async () => {
   capturePath = join(temporaryDirectory, "captured-arguments");
   await writeFile(
     approvedNode,
-    '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$CAPTURE_PATH"\n',
+    '#!/bin/sh\nif [ "${TMPDIR+x}" = x ] || [ "${TMP+x}" = x ] || [ "${TEMP+x}" = x ]; then exit 42; fi\nprintf \'%s\\n\' "$@" > "$CAPTURE_PATH"\n',
     { mode: 0o700 },
   );
 });
@@ -69,15 +73,16 @@ describe("staging secret launcher", () => {
     ]) {
       const result = run([secretName]);
       expect(result.status, result.stderr).toBe(0);
-      expect((await readFile(capturePath, "utf8")).split("\n")).toEqual([
-        wranglerEntrypoint,
-        "secret",
-        "put",
+      const captured = (await readFile(capturePath, "utf8")).split("\n");
+      expect(captured[0]).toBe("-e");
+      expect(captured.join("\n")).toContain(
+        'import(`data:text/javascript;base64,${bytes.toString("base64")}`)',
+      );
+      expect(captured.slice(-5)).toEqual([
+        launcher,
+        integrityEntrypoint,
+        reviewedIntegritySha256,
         secretName,
-        "--env",
-        "staging",
-        "--config",
-        wranglerConfig,
         "",
       ]);
     }
@@ -99,6 +104,44 @@ describe("staging secret launcher", () => {
         code: "ENOENT",
       });
     }
+  });
+
+  it("executes authenticated bytes without reopening the repository entrypoint", async () => {
+    const result = run(["ENTRA_CLIENT_SECRET"], {
+      DEPLOY_NODE_PATH: process.execPath,
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "STAGING_RELEASE_SHA must be the approved full 40-character lowercase release commit.",
+    );
+  });
+
+  it("rejects a missing, malformed, or mismatched retained integrity digest", async () => {
+    for (const digest of [undefined, "abc", "A".repeat(64), "0".repeat(64)]) {
+      const result = run(["ENTRA_CLIENT_SECRET"], {
+        DEPLOY_NODE_PATH: process.execPath,
+        STAGING_INTEGRITY_SHA256: digest,
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(
+        /STAGING_INTEGRITY_SHA256 must be|integrity entrypoint does not match/,
+      );
+      await expect(lstat(capturePath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    }
+  });
+
+  it("clears temporary-directory overrides before invoking authenticated Node", async () => {
+    const result = run(["ENTRA_CLIENT_SECRET"], {
+      TMPDIR: "https://attacker.invalid",
+      TMP: "https://attacker.invalid",
+      TEMP: "https://attacker.invalid",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(await readFile(capturePath, "utf8")).toContain(
+      reviewedIntegritySha256,
+    );
   });
 
   it("rejects non-ASCII profile aliases in a UTF-8 locale", async () => {
@@ -158,8 +201,8 @@ describe("staging secret launcher", () => {
     await symlink(repository, linkedRepository);
     const result = run(["ENTRA_CLIENT_SECRET"], {}, linkedRepository);
     expect(result.status, result.stderr).toBe(0);
-    expect((await readFile(capturePath, "utf8")).split("\n")[0]).toBe(
-      wranglerEntrypoint,
+    expect((await readFile(capturePath, "utf8")).split("\n").at(-3)).toBe(
+      reviewedIntegritySha256,
     );
   });
 
@@ -173,6 +216,7 @@ describe("staging secret launcher", () => {
         PATH: process.env.PATH,
         CAPTURE_PATH: capturePath,
         DEPLOY_NODE_PATH: approvedNode,
+        STAGING_INTEGRITY_SHA256: reviewedIntegritySha256,
       },
     });
     expect(result.status).not.toBe(0);
