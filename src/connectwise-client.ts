@@ -1472,6 +1472,22 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertOpenTicketList(records: unknown): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise ticket response");
+    }
+    for (const record of records) {
+      if (
+        !record ||
+        typeof record !== "object" ||
+        Array.isArray(record) ||
+        (record as Record<string, unknown>).closedFlag !== false
+      ) {
+        throw new Error("ConnectWise returned a non-open ticket");
+      }
+    }
+  }
+
   function verifiedObjectScheduleEntryList(
     records: unknown,
     objectId: number,
@@ -2305,6 +2321,12 @@ export function createConnectWiseClient(
           Number(effectiveParams.memberId),
           route === "service.tickets.byOwner" ? "owner" : "member",
         );
+      }
+      if (
+        route === "service.tickets.byOwner" &&
+        effectiveParams.includeClosed !== "true"
+      ) {
+        assertOpenTicketList(result);
       }
       if (route === "service.tickets.byStatus") {
         assertRequestedReferenceList(
