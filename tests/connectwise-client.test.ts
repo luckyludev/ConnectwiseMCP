@@ -1491,6 +1491,150 @@ describe("ConnectWiseClient", () => {
     expect(additionsUrl.searchParams.getAll("fields")).toHaveLength(1);
   });
 
+  it("applies agreement addition filters before the bounded result page", async () => {
+    let capturedUrl = "";
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        capturedUrl = String(input);
+        return Response.json([
+          {
+            id: 44,
+            product: { id: 8, name: "LUIS'S SERVICE PREMIUM" },
+            effectiveDate: "2026-09-15T00:00:00Z",
+            agreementId: 7,
+          },
+        ]);
+      },
+    });
+
+    await expect(
+      client.searchAgreementAdditions(
+        7,
+        {
+          productName: "Luis's service",
+          dateFrom: "2026-09-01",
+          dateTo: "2026-09-30",
+        },
+        5,
+      ),
+    ).resolves.toEqual([
+      {
+        id: 44,
+        product: { id: 8, name: "LUIS'S SERVICE PREMIUM" },
+        effectiveDate: "2026-09-15T00:00:00Z",
+      },
+    ]);
+
+    const additionsUrl = new URL(capturedUrl);
+    expect(additionsUrl.pathname).toBe(
+      "/v4_6_release/apis/3.0/finance/agreements/7/additions",
+    );
+    expect(Object.fromEntries(additionsUrl.searchParams)).toEqual({
+      conditions:
+        "product/name like '%Luis''s service%' and effectiveDate >= [2026-09-01] and effectiveDate <= [2026-09-30T23:59:59]",
+      fields: agreementAdditionCollectionFields,
+      pageSize: "5",
+      orderBy: "effectiveDate desc",
+    });
+  });
+
+  it("rejects unsafe agreement addition filters before requesting data", async () => {
+    let fetchCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => {
+        fetchCount += 1;
+        return Response.json([]);
+      },
+    });
+
+    const invalidFilters = [
+      { productName: "x" },
+      { productName: "managed%service" },
+      { productName: "managed_service" },
+      { productName: "managed\nservice" },
+      { dateFrom: "2026-02-30" },
+      { dateTo: "09/30/2026" },
+      { dateFrom: "2026-10-01", dateTo: "2026-09-30" },
+    ];
+    for (const filters of invalidFilters) {
+      await expect(
+        client.searchAgreementAdditions(7, filters, 5),
+      ).rejects.toThrow();
+    }
+    expect(fetchCount).toBe(0);
+  });
+
+  it("fails closed when agreement additions do not match requested filters", async () => {
+    const productMismatch = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          {
+            id: 1,
+            product: { name: "Managed service" },
+            effectiveDate: "2026-09-15T00:00:00Z",
+            agreementId: 7,
+          },
+          {
+            id: 2,
+            product: { name: "Cloud backup" },
+            effectiveDate: "2026-09-16T00:00:00Z",
+            agreementId: 7,
+          },
+        ]),
+    });
+    await expect(
+      productMismatch.searchAgreementAdditions(
+        7,
+        { productName: "managed" },
+        5,
+      ),
+    ).rejects.toThrow("does not match requested product");
+
+    const relationshipMismatch = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          {
+            id: 1,
+            product: { name: "Managed service" },
+            agreementId: 7,
+          },
+          {
+            id: 2,
+            product: { name: "Managed service premium" },
+            agreementId: 8,
+          },
+        ]),
+    });
+    await expect(
+      relationshipMismatch.searchAgreementAdditions(
+        7,
+        { productName: "managed" },
+        5,
+      ),
+    ).rejects.toThrow("is not associated with requested agreement");
+
+    for (const effectiveDate of [
+      "2026-08-31T23:59:59Z",
+      "2026-10-01T00:00:00Z",
+      "2026-02-30T00:00:00Z",
+      "2026-09-15-not-a-date",
+      "2026-09-15T99:99:99Z",
+      null,
+    ]) {
+      const dateMismatch = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json([{ id: 1, effectiveDate, agreementId: 7 }]),
+      });
+      await expect(
+        dateMismatch.searchAgreementAdditions(
+          7,
+          { dateFrom: "2026-09-01", dateTo: "2026-09-30" },
+          5,
+        ),
+      ).rejects.toThrow("outside requested effective date range");
+    }
+  });
+
   it("verifies agreement relationships and returns aggregate addition fields", async () => {
     let capturedUrl = "";
     const client = createConnectWiseClient(credentials, {

@@ -1291,7 +1291,7 @@ export function registerConnectWiseBusinessTools(
   const agreementSearchSchema = z
     .object({
       agreementId: positiveId,
-      productName: safeSearchText.optional(),
+      productName: targetedSearchText.optional(),
       dateFrom: date.optional(),
       dateTo: date.optional(),
       maxResults: pageSize,
@@ -1321,25 +1321,17 @@ export function registerConnectWiseBusinessTools(
         "search_agreement_additions",
         async (client) =>
           list(
-            await client.getAgreementAdditions(agreementId, maxResults),
+            await client.searchAgreementAdditions(
+              agreementId,
+              {
+                ...(productName === undefined ? {} : { productName }),
+                ...(dateFrom === undefined ? {} : { dateFrom }),
+                ...(dateTo === undefined ? {} : { dateTo }),
+              },
+              maxResults,
+            ),
             maxResults,
-          )
-            .map(projectAgreementAddition)
-            .filter((entry) => {
-              const name = object(entry.product)?.name;
-              const effectiveDate = entry.effectiveDate;
-              return (
-                (!productName ||
-                  (typeof name === "string" &&
-                    name.toLowerCase().includes(productName.toLowerCase()))) &&
-                (!dateFrom ||
-                  (typeof effectiveDate === "string" &&
-                    effectiveDate.slice(0, 10) >= dateFrom)) &&
-                (!dateTo ||
-                  (typeof effectiveDate === "string" &&
-                    effectiveDate.slice(0, 10) <= dateTo))
-              );
-            }),
+          ).map(projectAgreementAddition),
         dependencies,
       ),
   );
