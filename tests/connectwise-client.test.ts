@@ -43,7 +43,8 @@ const serviceTicketNoteCollectionFields =
   "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact,ticketId";
 const ticketAttachmentCollectionFields =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag,recordType,recordId";
-const ticketTaskCollectionFields = "id,summary,priority,notes,ticketId";
+const ticketTaskCollectionFields =
+  "id,summary,priority,notes,closedFlag,ticketId";
 const serviceBoardCollectionFields = "id,name";
 const boardStatusCollectionFields = "id,name";
 const boardTypeCollectionFields = "id,name";
@@ -433,6 +434,7 @@ describe("ConnectWiseClient", () => {
             summary: "Call customer",
             priority: 1,
             notes: "Confirm maintenance window",
+            closedFlag: false,
             ticketId: 123,
           },
         ]),
@@ -444,6 +446,7 @@ describe("ConnectWiseClient", () => {
         summary: "Call customer",
         priority: 1,
         notes: "Confirm maintenance window",
+        closedFlag: false,
       },
     ]);
   });

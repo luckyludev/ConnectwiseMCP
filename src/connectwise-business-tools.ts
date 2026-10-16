@@ -198,6 +198,7 @@ function task(value: Record<string, unknown>): Record<string, unknown> {
     summary: text(value.summary, 1_000),
     priority: number(value.priority),
     notes: text(value.notes, 4_000),
+    closed: boolean(value.closedFlag),
   });
 }
 

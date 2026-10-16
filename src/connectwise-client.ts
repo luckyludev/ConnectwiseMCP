@@ -565,7 +565,7 @@ const TICKET_ATTACHMENT_COLLECTION_FIELDS =
   "id,title,fileName,size,documentType,owner,createdOnDate,_info,publicFlag,readOnlyFlag,linkFlag,imageFlag";
 const TICKET_ATTACHMENT_RELATIONSHIP_FIELDS = `${TICKET_ATTACHMENT_COLLECTION_FIELDS},recordType,recordId`;
 const TICKET_ATTACHMENT_AUTHORIZATION_FIELDS = "id,recordType,recordId";
-const TICKET_TASK_COLLECTION_FIELDS = "id,summary,priority,notes";
+const TICKET_TASK_COLLECTION_FIELDS = "id,summary,priority,notes,closedFlag";
 const TICKET_TASK_RELATIONSHIP_FIELDS = `${TICKET_TASK_COLLECTION_FIELDS},ticketId`;
 const SERVICE_BOARD_COLLECTION_FIELDS = "id,name";
 const BOARD_STATUS_COLLECTION_FIELDS = "id,name";
