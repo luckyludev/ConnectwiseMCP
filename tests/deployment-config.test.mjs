@@ -649,6 +649,40 @@ describe("legacy rollback image security", () => {
 });
 
 describe("staging deployment configuration", () => {
+  it("uses only the lock-installed Wrangler in the staging runbook", async () => {
+    const document = await readFile(
+      new URL("../docs/cloudflare-workers-staging-howto.md", import.meta.url),
+      "utf8",
+    );
+    const localWrangler = "node node_modules/wrangler/bin/wrangler.js";
+    const expectedDirectCommands = [
+      `${localWrangler} deploy --env staging --keep-vars --dry-run --outdir dist-staging`,
+      `${localWrangler} whoami`,
+      `${localWrangler} kv namespace list`,
+      `${localWrangler} kv namespace list`,
+    ];
+    const bashLines = [...document.matchAll(/```bash\n([\s\S]*?)```/gu)]
+      .flatMap((match) => match[1].split("\n"))
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const directWranglerCommands = bashLines.filter((line) =>
+      line.includes("node_modules/wrangler/bin/wrangler.js"),
+    );
+    const packageOrBareWrangler =
+      /^(?:npx(?:\s+--\S+)*\s+wrangler(?:\s|$)|npm\s+exec(?:\s+--\S+)*\s+wrangler(?:\s|$)|pnpm\s+(?:exec|dlx)\s+wrangler(?:\s|$)|yarn\s+(?:exec|dlx)\s+wrangler(?:\s|$)|bunx\s+wrangler(?:\s|$)|wrangler(?:\s|$))/u;
+
+    expect(directWranglerCommands).toEqual(expectedDirectCommands);
+    expect(
+      bashLines.filter((line) => packageOrBareWrangler.test(line)),
+    ).toEqual([]);
+    expect(document).toContain(
+      "never let a package runner download or execute a registry package after Cloudflare authentication is available",
+    );
+    expect(document).toContain(
+      "does not replace the retained deployment bootstrap or the hardened secret-entry launcher",
+    );
+  });
+
   it("uses the hardened launcher for staging secret entry", async () => {
     const [documents, launcher, launcherStat] = await Promise.all([
       Promise.all(

@@ -19,16 +19,18 @@ The operator first validates the checkout with no Cloudflare credentials or auth
 ```bash
 npm ci --ignore-scripts
 npm run check
-npx wrangler deploy --env staging --keep-vars --dry-run --outdir dist-staging
+node node_modules/wrangler/bin/wrangler.js deploy --env staging --keep-vars --dry-run --outdir dist-staging
 rm -rf dist-staging
 ```
 
 Only after those commands finish may an authorized operator make the approved authentication available to a separate read-only inspection process:
 
 ```bash
-npx wrangler whoami
-npx wrangler kv namespace list
+node node_modules/wrangler/bin/wrangler.js whoami
+node node_modules/wrangler/bin/wrangler.js kv namespace list
 ```
+
+The direct credentialless dry-run and read-only inspection commands in sections 1–2 must use the exact lock-installed executable shown above. If `node_modules/wrangler/bin/wrangler.js` is missing, stop and return to the credentialless preparation environment; never let a package runner download or execute a registry package after Cloudflare authentication is available. This direct-command rule does not replace the retained deployment bootstrap or the hardened secret-entry launcher required below.
 
 `npm run check` runs typechecking, tests, formatting, a moderate-or-higher npm audit, and explicit top-level and staging dry-runs. Pull-request CI additionally builds the production artifact and consumes it through the target-specific integrity wrapper without deployment or canonical-main ancestry claims. Only canonical `main` runs use the guarded production release path and retain release evidence. The staging dry-run validates only the local bundle and selected configuration path; it does not authenticate, inspect remote variables, validate their presence or values, or publish a Worker. `--keep-vars` protects remote variables when the same command is later run without `--dry-run`. Never run dependency installation, lifecycle scripts, tests, or builds in the credential-bearing deployment process.
 
@@ -96,7 +98,7 @@ Every attestation must pass before the offline verifier runs. Keep the download 
 Namespaces are account-scoped, not domain-scoped. Before creating anything, inventory the approved Cloudflare account and the reviewed `env.staging` configuration:
 
 ```bash
-npx wrangler kv namespace list
+node node_modules/wrangler/bin/wrangler.js kv namespace list
 ```
 
 Confirm the `OAUTH_KV` namespace already bound in `wrangler.jsonc` is the approved **runtime** staging namespace. Do not create another runtime namespace or replace that binding merely because this procedure is being followed. Record only sanitized evidence in the secure operations record; do not paste namespace IDs into chat, tickets, or this repository.
