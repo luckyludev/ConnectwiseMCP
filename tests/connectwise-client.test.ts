@@ -2343,12 +2343,17 @@ describe("ConnectWiseClient", () => {
   );
 
   it("verifies every status-filtered ticket matches the requested status", async () => {
+    const matchingTicket = {
+      id: 1,
+      status: { id: 547 },
+      _info: { dateEntered: "2026-10-16T12:00:00Z" },
+    };
     const matchingClient = createConnectWiseClient(credentials, {
-      fetcher: async () => Response.json([{ id: 1, status: { id: 547 } }]),
+      fetcher: async () => Response.json([matchingTicket]),
     });
     await expect(
       matchingClient.catalogGet("service.tickets.byStatus", { statusId: 547 }),
-    ).resolves.toEqual([{ id: 1, status: { id: 547 } }]);
+    ).resolves.toEqual([matchingTicket]);
 
     const laterMismatchClient = createConnectWiseClient(credentials, {
       fetcher: async () =>
@@ -2962,11 +2967,74 @@ describe("ConnectWiseClient", () => {
     }
   });
 
+  it("verifies recent-first ticket catalog windows from upstream", async () => {
+    const ticket = (dateEntered: unknown) => ({
+      id: 912,
+      owner: { id: 149 },
+      status: { id: 547 },
+      closedFlag: false,
+      _info: { dateEntered },
+    });
+    const routes = [
+      ["service.tickets.byOwner", { pageSize: 20 }],
+      ["service.tickets.byStatus", { statusId: 547, pageSize: 20 }],
+    ] as const;
+
+    for (const [route, params] of routes) {
+      const ordered = [
+        ticket("2026-10-16T09:00:00-04:00"),
+        ticket("2026-10-16T12:00:00Z"),
+        ticket("2026-10-16T12:00:00+00:00"),
+        ticket("2026-10-15T12:00:00Z"),
+      ];
+      const orderedClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(ordered),
+      });
+      await expect(orderedClient.catalogGet(route, params)).resolves.toEqual(
+        ordered,
+      );
+
+      const ascendingClient = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json([
+            ticket("2026-10-15T12:00:00Z"),
+            ticket("2026-10-16T12:00:00Z"),
+          ]),
+      });
+      await expect(ascendingClient.catalogGet(route, params)).rejects.toThrow(
+        "ConnectWise tickets are not ordered recent-first",
+      );
+
+      for (const dateEntered of [
+        undefined,
+        null,
+        42,
+        "0",
+        "2026-10-16",
+        "2026-10-16T12:00:00",
+        "Fri, 16 Oct 2026 12:00:00 GMT",
+        "2026-02-30T12:00:00Z",
+        "2026-10-16T12:00:00.0000001Z",
+        "2026-10-16T24:00:00Z",
+        "2026-10-16T12:60:00Z",
+        "2026-10-16T12:00:00+14:01",
+      ]) {
+        const malformedClient = createConnectWiseClient(credentials, {
+          fetcher: async () => Response.json([ticket(dateEntered)]),
+        });
+        await expect(malformedClient.catalogGet(route, params)).rejects.toThrow(
+          "ConnectWise tickets are not ordered recent-first",
+        );
+      }
+    }
+  });
+
   it("allows closed tickets only when byOwner explicitly includes them", async () => {
     const closedTicket = {
       id: 912,
       owner: { id: 149 },
       closedFlag: true,
+      _info: { dateEntered: "2026-10-16T12:00:00Z" },
     };
     const client = createConnectWiseClient(credentials, {
       fetcher: async () => Response.json([closedTicket]),

@@ -909,7 +909,54 @@ function unicodeCaseFold(value: string): string {
 // UTC lets timezone shifts slip in silently (Luis hit exactly this: a 06:30Z
 // recurring meeting landing at 2:30 AM local).
 const ISO_OFFSET_RE =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)$/;
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|([+-])(\d{2})(?::?(\d{2}))?)$/;
+
+function strictIsoTimestampMs(value: unknown): number {
+  if (typeof value !== "string" || value.length > 40) return Number.NaN;
+  const match = ISO_OFFSET_RE.exec(value);
+  if (!match) return Number.NaN;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = match[6] === undefined ? 0 : Number(match[6]);
+  const offsetHour = match[10] === undefined ? 0 : Number(match[10]);
+  const offsetMinute = match[11] === undefined ? 0 : Number(match[11]);
+  const fractionalSecond = match[7];
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [
+    31,
+    leapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth[month - 1]! ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    (fractionalSecond !== undefined && fractionalSecond.length > 3) ||
+    offsetHour > 14 ||
+    offsetMinute > 59 ||
+    (offsetHour === 14 && offsetMinute !== 0)
+  ) {
+    return Number.NaN;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Number.NaN;
+}
 
 function toUtcIso(value: string, label: string): string {
   if (typeof value !== "string" || value.length < 10 || value.length > 40) {
@@ -1485,6 +1532,28 @@ export function createConnectWiseClient(
       ) {
         throw new Error("ConnectWise returned a non-open ticket");
       }
+    }
+  }
+
+  function assertRecentTicketOrder(records: unknown): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise ticket response");
+    }
+    let previousTimestamp = Number.POSITIVE_INFINITY;
+    for (const record of records) {
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        throw new Error("ConnectWise tickets are not ordered recent-first");
+      }
+      const info = (record as Record<string, unknown>)._info;
+      const dateEntered =
+        info && typeof info === "object" && !Array.isArray(info)
+          ? (info as Record<string, unknown>).dateEntered
+          : undefined;
+      const timestamp = strictIsoTimestampMs(dateEntered);
+      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
+        throw new Error("ConnectWise tickets are not ordered recent-first");
+      }
+      previousTimestamp = timestamp;
     }
   }
 
@@ -2334,6 +2403,12 @@ export function createConnectWiseClient(
           "status",
           Number(effectiveParams.statusId),
         );
+      }
+      if (
+        route === "service.tickets.byOwner" ||
+        route === "service.tickets.byStatus"
+      ) {
+        assertRecentTicketOrder(result);
       }
       if (route === "company.configurations") {
         assertTargetedNameList(result, String(effectiveParams.query));
