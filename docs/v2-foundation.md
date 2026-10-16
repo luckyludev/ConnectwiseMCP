@@ -127,7 +127,7 @@ Before production cutover:
 ## Verification
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm run check
 ```
 

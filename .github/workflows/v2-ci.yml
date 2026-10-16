@@ -50,7 +50,7 @@ jobs:
         with:
           node-version: 24.11.0
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run check
       - name: Exercise verified staging deployment path
         env:

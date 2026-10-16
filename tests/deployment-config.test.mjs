@@ -1047,6 +1047,58 @@ describe("staging deployment configuration", () => {
     );
   });
 
+  it("disables dependency lifecycle scripts during reviewed V2 installs", async () => {
+    const workflowSource = await readFile(
+      new URL("../.github/workflows/v2-ci.yml", import.meta.url),
+      "utf8",
+    );
+    const workflow = parseYaml(workflowSource);
+    const installSteps = workflow.jobs.verify.steps
+      .map((step) => step.run)
+      .filter(
+        (command) =>
+          typeof command === "string" &&
+          /\bnpm (?:ci|install|i)\b/u.test(command),
+      );
+    expect(installSteps).toEqual(["npm ci --ignore-scripts"]);
+
+    const packageJson = await readJson("../package.json");
+    const stagingInstallSteps = (packageJson.scripts?.["prepare:staging"] ?? "")
+      .split("&&")
+      .map((command) => command.trim())
+      .filter((command) => /\bnpm (?:ci|install|i)\b/u.test(command));
+    expect(stagingInstallSteps).toEqual(["npm ci --ignore-scripts"]);
+
+    const documentation = await Promise.all(
+      [
+        "../docs/v2-foundation.md",
+        "../docs/cloudflare-workers-staging-howto.md",
+        "../docs/cutover-rollback-runbook.md",
+      ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
+    );
+    for (const document of documentation) {
+      const commandLines = document
+        .split("\n")
+        .filter((line) => /\bnpm (?:ci|install|i)\b/u.test(line));
+      expect(commandLines.length).toBeGreaterThan(0);
+      for (const line of commandLines) {
+        if (line.trim().startsWith("npm ")) {
+          expect(line.trim()).toBe("npm ci --ignore-scripts");
+          continue;
+        }
+        const inlineCommands = [
+          ...line.matchAll(/`([^`]*\bnpm (?:ci|install|i)\b[^`]*)`/gu),
+        ];
+        expect(inlineCommands.map((match) => match[1])).toEqual([
+          "npm ci --ignore-scripts",
+        ]);
+        expect(line.replaceAll(/`[^`]*`/gu, "")).not.toMatch(
+          /\bnpm (?:ci|install|i)\b/u,
+        );
+      }
+    }
+  });
+
   it("preserves remote variables and isolates staging OAuth storage", async () => {
     const [
       config,
@@ -1107,7 +1159,7 @@ describe("staging deployment configuration", () => {
       "wrangler deploy --env staging --keep-vars --strict --dry-run --outdir dist && node scripts/staging-bundle-integrity.mjs create",
     );
     expect(packageJson.scripts?.["prepare:staging"]).toBe(
-      "node scripts/verify-staging-release.mjs && npm ci && npm run check && node scripts/verify-staging-release.mjs",
+      "node scripts/verify-staging-release.mjs && npm ci --ignore-scripts && npm run check && node scripts/verify-staging-release.mjs",
     );
     expect(packageJson.scripts?.["deploy:staging"]).toBeUndefined();
     expect(stagingHowto).toContain(
@@ -1162,7 +1214,9 @@ describe("staging deployment configuration", () => {
       '"$DEPLOY_NODE_PATH" "$integrity_path"',
     );
     expect(deploymentLauncherStat.mode & 0o111).toBe(0);
-    expect(packageJson.scripts?.["prepare:staging"]).toContain("npm ci");
+    expect(packageJson.scripts?.["prepare:staging"]).toContain(
+      "npm ci --ignore-scripts",
+    );
     expect(packageJson.scripts?.["prepare:staging"]).toContain("npm run check");
     expect(productionEnvironment).toHaveLength(0);
     expect(packageJson.scripts?.["build:production"]).toBe(
