@@ -839,7 +839,7 @@ describe("authenticated MCP transport", () => {
     expect(body.match(/\\\"id\\\":/g)).toHaveLength(testCase.expectedIdCount);
   });
 
-  it("fails closed when ticket-note visibility flags are missing or contradictory", async () => {
+  it("fails closed when ticket-note visibility flags are missing, incomplete, or contradictory", async () => {
     const visibilityCalls: Array<{
       includeInternal: boolean;
       includeExternal: boolean;
@@ -855,7 +855,13 @@ describe("authenticated MCP transport", () => {
         visibilityCalls.push(visibility);
         return [
           { id: 1, text: "internal", internalFlag: true, externalFlag: false },
-          { id: 2, text: "external", internalFlag: false, externalFlag: true },
+          {
+            id: 2,
+            text: "external",
+            internalFlag: false,
+            internalAnalysisFlag: false,
+            externalFlag: true,
+          },
           {
             id: 3,
             text: "analysis",
@@ -892,6 +898,19 @@ describe("authenticated MCP transport", () => {
             internalFlag: false,
             internalAnalysisFlag: true,
             externalFlag: false,
+          },
+          {
+            id: 9,
+            text: "missing analysis indicator",
+            internalFlag: false,
+            externalFlag: true,
+          },
+          {
+            id: 10,
+            text: "null primary indicator",
+            internalFlag: null,
+            internalAnalysisFlag: false,
+            externalFlag: true,
           },
         ];
       },
@@ -1002,7 +1021,13 @@ describe("authenticated MCP transport", () => {
         visibilityCalls.push(visibility);
         return [
           { id: 1, text: "known internal", internalFlag: true },
-          { id: 2, text: "known external", externalFlag: true },
+          {
+            id: 2,
+            text: "known external",
+            internalFlag: false,
+            internalAnalysisFlag: false,
+            externalFlag: true,
+          },
           { id: 3, text: "unknown visibility" },
           {
             id: 4,
