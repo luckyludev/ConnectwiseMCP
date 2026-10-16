@@ -1135,13 +1135,27 @@ describe("ConnectWiseClient", () => {
       {
         query: "  Luis's laptop  ",
         records: [
-          { id: 1, summary: "Repair LUIS'S LAPTOP" },
-          { id: 2, summary: "Luis's laptop replacement" },
+          {
+            id: 1,
+            summary: "Repair LUIS'S LAPTOP",
+            _info: { dateEntered: "2026-10-16T12:00:00Z" },
+          },
+          {
+            id: 2,
+            summary: "Luis's laptop replacement",
+            _info: { dateEntered: "2026-10-15T12:00:00Z" },
+          },
         ],
       },
       {
         query: "éx",
-        records: [{ id: 1, summary: "E\u0301xample printer" }],
+        records: [
+          {
+            id: 1,
+            summary: "E\u0301xample printer",
+            _info: { dateEntered: "2026-10-16T12:00:00Z" },
+          },
+        ],
       },
     ] as const) {
       const client = createConnectWiseClient(credentials, {
@@ -1867,11 +1881,16 @@ describe("ConnectWiseClient", () => {
   });
 
   it("verifies every board-ticket result belongs to the requested board", async () => {
+    const matchingTicket = {
+      id: 1,
+      board: { id: 32 },
+      _info: { dateEntered: "2026-10-16T12:00:00Z" },
+    };
     const matchingClient = createConnectWiseClient(credentials, {
-      fetcher: async () => Response.json([{ id: 1, board: { id: 32 } }]),
+      fetcher: async () => Response.json([matchingTicket]),
     });
     await expect(matchingClient.listBoardTickets(32, 10)).resolves.toEqual([
-      { id: 1, board: { id: 32 } },
+      matchingTicket,
     ]);
 
     const laterMismatchClient = createConnectWiseClient(credentials, {
@@ -3026,6 +3045,71 @@ describe("ConnectWiseClient", () => {
           "ConnectWise tickets are not ordered recent-first",
         );
       }
+    }
+  });
+
+  it("verifies recent-first dedicated ticket windows from upstream", async () => {
+    const ticket = (dateEntered: unknown) => ({
+      id: 912,
+      board: { id: 32 },
+      summary: "Printer outage",
+      _info: { dateEntered },
+    });
+    const reads = [
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.listBoardTickets(32, 20),
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.searchServiceTickets("printer", 20),
+    ];
+
+    for (const read of reads) {
+      const auditOutcome = (logs: string[], outcome: string) => {
+        expect(logs).toHaveLength(1);
+        expect(JSON.parse(logs[0]!)).toEqual(
+          expect.objectContaining({
+            event: "cw_request",
+            method: "GET",
+            status: 200,
+            outcome,
+          }),
+        );
+      };
+      const ordered = [
+        ticket("2026-10-16T09:00:00-04:00"),
+        ticket("2026-10-16T12:00:00Z"),
+        ticket("2026-10-15T12:00:00Z"),
+      ];
+      const orderedLogs: string[] = [];
+      const orderedClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(ordered),
+        log: (line) => orderedLogs.push(line),
+      });
+      await expect(read(orderedClient)).resolves.toEqual(ordered);
+      auditOutcome(orderedLogs, "success");
+
+      const ascendingLogs: string[] = [];
+      const ascendingClient = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json([
+            ticket("2026-10-15T12:00:00Z"),
+            ticket("2026-10-16T12:00:00Z"),
+          ]),
+        log: (line) => ascendingLogs.push(line),
+      });
+      await expect(read(ascendingClient)).rejects.toThrow(
+        "ConnectWise tickets are not ordered recent-first",
+      );
+      auditOutcome(ascendingLogs, "upstream_error");
+
+      const malformedLogs: string[] = [];
+      const malformedClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([ticket(undefined)]),
+        log: (line) => malformedLogs.push(line),
+      });
+      await expect(read(malformedClient)).rejects.toThrow(
+        "ConnectWise tickets are not ordered recent-first",
+      );
+      auditOutcome(malformedLogs, "upstream_error");
     }
   });
 

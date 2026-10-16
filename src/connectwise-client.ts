@@ -1187,6 +1187,7 @@ export function createConnectWiseClient(
     path: string,
     query: Readonly<Record<string, string | number>>,
     maxItems: number,
+    validateList?: (result: unknown) => void,
   ): Promise<unknown> {
     return requestJson(
       "GET",
@@ -1210,6 +1211,7 @@ export function createConnectWiseClient(
         ) {
           throw new Error("Invalid ConnectWise list response");
         }
+        validateList?.(result);
       },
     );
   }
@@ -1986,8 +1988,11 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (records) => {
+          assertRequestedReferenceList(records, "board", boardId);
+          assertRecentTicketOrder(records);
+        },
       );
-      assertRequestedReferenceList(result, "board", boardId);
       return result;
     },
 
@@ -2445,8 +2450,11 @@ export function createConnectWiseClient(
           orderBy: "dateEntered desc",
         },
         pageSize,
+        (records) => {
+          assertTargetedTicketSummaryList(records, searchText);
+          assertRecentTicketOrder(records);
+        },
       );
-      assertTargetedTicketSummaryList(result, searchText);
       return result;
     },
 
