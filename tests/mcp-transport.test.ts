@@ -158,6 +158,7 @@ function businessClient(
     searchServiceTickets: unused,
     getAgreement: unused,
     getAgreementAdditions: unused,
+    searchAgreementAdditions: unused,
     getAgreementAdditionSummary: unused,
     createAgreementAddition: unused,
     getRecentAgreementInvoices: unused,
@@ -4476,16 +4477,38 @@ describe("authenticated MCP transport", () => {
     expect(businessCalls).toBe(0);
   });
 
-  it("rejects reversed agreement search dates before a ConnectWise call", async () => {
-    let searchCalls = 0;
+  it("validates and delegates agreement addition search filters", async () => {
+    const searches: Array<{
+      agreementId: number;
+      filters: {
+        productName?: string;
+        dateFrom?: string;
+        dateTo?: string;
+      };
+      pageSize: number;
+    }> = [];
     const handler = createMcpHandler(
       () =>
         createMcpServer(env, {
           createBusinessClient: () =>
             businessClient({
-              async getAgreementAdditions() {
-                searchCalls += 1;
-                return [];
+              async searchAgreementAdditions(agreementId, filters, pageSize) {
+                searches.push({ agreementId, filters, pageSize });
+                return filters.productName
+                  ? [
+                      {
+                        id: 44,
+                        product: {
+                          id: 8,
+                          name: "Managed service",
+                          forbiddenProductField: "hidden",
+                        },
+                        unitPrice: 25,
+                        agreementId,
+                        forbiddenField: "hidden",
+                      },
+                    ]
+                  : [];
               },
             }),
         }),
@@ -4499,7 +4522,11 @@ describe("authenticated MCP transport", () => {
     );
     const post = async (
       id: number,
-      dates: { dateFrom?: string; dateTo?: string },
+      filters: {
+        productName?: string;
+        dateFrom?: string;
+        dateTo?: string;
+      },
     ) => {
       const response = await handler.fetch(
         new Request("http://localhost/mcp", {
@@ -4516,7 +4543,7 @@ describe("authenticated MCP transport", () => {
             method: "tools/call",
             params: {
               name: "search_agreement_additions",
-              arguments: { agreementId: 17, maxResults: 10, ...dates },
+              arguments: { agreementId: 17, maxResults: 10, ...filters },
             },
           }),
         }),
@@ -4529,15 +4556,42 @@ describe("authenticated MCP transport", () => {
       dateTo: "2026-09-01",
     });
     expect(reversed).toContain("dateFrom must not be after dateTo");
-    expect(searchCalls).toBe(0);
+    expect(searches).toEqual([]);
 
     const equal = await post(9, {
+      productName: "Managed service",
       dateFrom: "2026-09-02",
       dateTo: "2026-09-02",
     });
     const oneSided = await post(10, { dateFrom: "2026-09-02" });
-    expect(equal).toContain('"text":"[]"');
+    const equalResponse = parseSseJsonRpcResponse(equal, 9) as {
+      result: { content: Array<{ text: string }> };
+    };
+    expect(JSON.parse(equalResponse.result.content[0]!.text)).toEqual([
+      {
+        id: 44,
+        product: { id: 8, name: "Managed service" },
+        unitPrice: 25,
+      },
+    ]);
+    expect(equal).not.toContain("forbiddenField");
+    expect(equal).not.toContain("forbiddenProductField");
     expect(oneSided).toContain('"text":"[]"');
-    expect(searchCalls).toBe(2);
+    expect(searches).toEqual([
+      {
+        agreementId: 17,
+        filters: {
+          productName: "Managed service",
+          dateFrom: "2026-09-02",
+          dateTo: "2026-09-02",
+        },
+        pageSize: 10,
+      },
+      {
+        agreementId: 17,
+        filters: { dateFrom: "2026-09-02" },
+        pageSize: 10,
+      },
+    ]);
   });
 });

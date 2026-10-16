@@ -151,6 +151,15 @@ export type ConnectWiseClient = {
     agreementId: number,
     pageSize: number,
   ): Promise<unknown>;
+  searchAgreementAdditions(
+    agreementId: number,
+    filters: {
+      productName?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    },
+    pageSize: number,
+  ): Promise<unknown>;
   getAgreementAdditionSummary(
     agreementId: number,
     pageSize: number,
@@ -857,6 +866,38 @@ function targetedSearchString(value: string): string {
   return conditionString(targetedSearchTerm(value));
 }
 
+function agreementAdditionSearchConditions(filters: {
+  productName?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): string[] {
+  const conditions: string[] = [];
+  if (filters.productName !== undefined) {
+    conditions.push(
+      `product/name like '%${targetedSearchString(filters.productName)}%'`,
+    );
+  }
+
+  const fromMs =
+    filters.dateFrom === undefined
+      ? undefined
+      : isoDateToUtcMs(filters.dateFrom, "dateFrom");
+  const toMs =
+    filters.dateTo === undefined
+      ? undefined
+      : isoDateToUtcMs(filters.dateTo, "dateTo");
+  if (fromMs !== undefined) {
+    conditions.push(`effectiveDate >= [${filters.dateFrom}]`);
+  }
+  if (toMs !== undefined) {
+    conditions.push(`effectiveDate <= [${filters.dateTo}T23:59:59]`);
+  }
+  if (fromMs !== undefined && toMs !== undefined && fromMs > toMs) {
+    throw new Error("dateFrom must not be after dateTo");
+  }
+  return conditions;
+}
+
 function unicodeCaseFold(value: string): string {
   // Uppercasing avoids context-sensitive lowercase mappings (for example,
   // Greek final sigma). NFC makes canonically equivalent names comparable.
@@ -1319,6 +1360,85 @@ export function createConnectWiseClient(
       >;
       return item;
     });
+  }
+
+  function verifiedAgreementAdditionSearchList(
+    records: unknown,
+    agreementId: number,
+    filters: {
+      productName?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    },
+  ): Array<Record<string, unknown>> {
+    const additions = verifiedAgreementAdditionList(records, agreementId);
+    const expectedProduct =
+      filters.productName === undefined
+        ? undefined
+        : unicodeCaseFold(filters.productName.trim());
+    const fromMs =
+      filters.dateFrom === undefined
+        ? undefined
+        : isoDateToUtcMs(filters.dateFrom, "dateFrom");
+    const toMs =
+      filters.dateTo === undefined
+        ? undefined
+        : isoDateToUtcMs(filters.dateTo, "dateTo") + 86_400_000 - 1;
+
+    for (const addition of additions) {
+      if (expectedProduct !== undefined) {
+        const product = addition.product;
+        const name =
+          product && typeof product === "object" && !Array.isArray(product)
+            ? (product as Record<string, unknown>).name
+            : undefined;
+        if (
+          typeof name !== "string" ||
+          !unicodeCaseFold(name).includes(expectedProduct)
+        ) {
+          throw new Error(
+            "ConnectWise addition does not match requested product",
+          );
+        }
+      }
+      if (fromMs !== undefined || toMs !== undefined) {
+        const effectiveDate = addition.effectiveDate;
+        if (typeof effectiveDate !== "string" || effectiveDate.length < 10) {
+          throw new Error(
+            "ConnectWise addition is outside requested effective date range",
+          );
+        }
+        const isDateOnly = ISO_DATE.test(effectiveDate);
+        const isOffsetDateTime =
+          ISO_OFFSET_RE.test(effectiveDate) &&
+          Number.isFinite(Date.parse(effectiveDate));
+        if (!isDateOnly && !isOffsetDateTime) {
+          throw new Error(
+            "ConnectWise addition is outside requested effective date range",
+          );
+        }
+        let effectiveMs: number;
+        try {
+          effectiveMs = isoDateToUtcMs(
+            effectiveDate.slice(0, 10),
+            "addition effectiveDate",
+          );
+        } catch {
+          throw new Error(
+            "ConnectWise addition is outside requested effective date range",
+          );
+        }
+        if (
+          (fromMs !== undefined && effectiveMs < fromMs) ||
+          (toMs !== undefined && effectiveMs > toMs)
+        ) {
+          throw new Error(
+            "ConnectWise addition is outside requested effective date range",
+          );
+        }
+      }
+    }
+    return additions;
   }
 
   function assertMappedMember(
@@ -2260,6 +2380,37 @@ export function createConnectWiseClient(
         pageSize,
       );
       return verifiedAgreementAdditionList(additions, agreementId);
+    },
+
+    async searchAgreementAdditions(
+      agreementId: number,
+      filters: {
+        productName?: string;
+        dateFrom?: string;
+        dateTo?: string;
+      },
+      pageSize: number,
+    ): Promise<unknown> {
+      positiveId(agreementId, "agreement ID");
+      boundedPageSize(pageSize);
+      const conditions = agreementAdditionSearchConditions(filters);
+      const additions = await requestBoundedList(
+        `/finance/agreements/${agreementId}/additions`,
+        {
+          ...(conditions.length > 0
+            ? { conditions: conditions.join(" and ") }
+            : {}),
+          fields: AGREEMENT_ADDITION_COLLECTION_FIELDS,
+          pageSize,
+          orderBy: "effectiveDate desc",
+        },
+        pageSize,
+      );
+      return verifiedAgreementAdditionSearchList(
+        additions,
+        agreementId,
+        filters,
+      );
     },
 
     async getAgreementAdditionSummary(

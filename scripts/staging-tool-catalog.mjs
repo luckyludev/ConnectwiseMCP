@@ -33,7 +33,7 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   create_agreement_addition:
     "716295afeda93d88f342ec82dfa51a4e9e13518c3e32b20c9c92074005b26641",
   search_agreement_additions:
-    "f4f7ed1c620aabedf2cf3aea0c5a034e653d5bd09220cd683dc7c8969327194e",
+    "e4db99f9ccdd47181e97fda1c0c7f2e21bf7e28b3c0781626d8f5d9012f16cc5",
   get_agreement_billing_summary:
     "af42c2c66fe4e7abfd06e2c44fe34bdb2ed7d96786b4f32387b5d43b695372cf",
   get_service_boards:
