@@ -376,7 +376,8 @@ describe("ConnectWiseClient", () => {
 
     expect(urls).toHaveLength(3);
     expect(Object.fromEntries(new URL(urls[0]!).searchParams)).toEqual({
-      conditions: "externalFlag=true",
+      conditions:
+        "externalFlag=true AND internalFlag=false AND internalAnalysisFlag=false",
       fields: serviceTicketNoteCollectionFields,
       pageSize: "7",
       orderBy: "dateCreated desc",
