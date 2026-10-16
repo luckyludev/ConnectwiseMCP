@@ -85,7 +85,11 @@ export type ConnectWiseClientDependencies = {
 export type ConnectWiseClient = {
   getServiceTicket(ticketId: number): Promise<unknown>;
   getServiceTicketStatus(ticketId: number): Promise<unknown>;
-  getTicketNotes(ticketId: number, pageSize: number): Promise<unknown>;
+  getTicketNotes(
+    ticketId: number,
+    pageSize: number,
+    visibility: { includeInternal: boolean; includeExternal: boolean },
+  ): Promise<unknown>;
   getTicketAttachments(ticketId: number, pageSize: number): Promise<unknown>;
   getTicketAttachment(ticketId: number, documentId: number): Promise<unknown>;
   getTicketTasks(ticketId: number, pageSize: number): Promise<unknown>;
@@ -1535,12 +1539,24 @@ export function createConnectWiseClient(
       return verifiedRecordIdentity(ticket, ticketId, "service ticket");
     },
 
-    async getTicketNotes(ticketId: number, pageSize: number): Promise<unknown> {
+    async getTicketNotes(
+      ticketId: number,
+      pageSize: number,
+      visibility: { includeInternal: boolean; includeExternal: boolean },
+    ): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
       boundedPageSize(pageSize);
+      if (!visibility.includeInternal && !visibility.includeExternal) return [];
+
+      const conditions = visibility.includeInternal
+        ? visibility.includeExternal
+          ? "(internalFlag=true OR internalAnalysisFlag=true OR externalFlag=true)"
+          : "(internalFlag=true OR internalAnalysisFlag=true)"
+        : "externalFlag=true";
       const notes = await requestBoundedList(
         `/service/tickets/${ticketId}/notes`,
         {
+          conditions,
           fields: SERVICE_TICKET_NOTE_RELATIONSHIP_FIELDS,
           pageSize,
           orderBy: "dateCreated desc",

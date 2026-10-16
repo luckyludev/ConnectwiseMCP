@@ -877,7 +877,13 @@ export function registerConnectWiseBusinessTools(
         env,
         "get_ticket_notes_with_content",
         async (client) =>
-          list(await client.getTicketNotes(ticketId, maxResults), maxResults)
+          list(
+            await client.getTicketNotes(ticketId, maxResults, {
+              includeInternal,
+              includeExternal,
+            }),
+            maxResults,
+          )
             .map(note)
             .filter(
               (entry) =>
@@ -974,7 +980,10 @@ export function registerConnectWiseBusinessTools(
           const [details, notes, attachments, tasks, timeEntries] =
             await Promise.all([
               client.getServiceTicket(ticketId),
-              client.getTicketNotes(ticketId, maxResultsPerSection),
+              client.getTicketNotes(ticketId, maxResultsPerSection, {
+                includeInternal,
+                includeExternal,
+              }),
               client.getTicketAttachments(ticketId, maxResultsPerSection),
               client.getTicketTasks(ticketId, maxResultsPerSection),
               client.getTicketTimeEntries(ticketId, maxResultsPerSection),

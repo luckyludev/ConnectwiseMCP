@@ -840,10 +840,19 @@ describe("authenticated MCP transport", () => {
   });
 
   it("fails closed when ticket-note visibility flags are missing or contradictory", async () => {
+    const visibilityCalls: Array<{
+      includeInternal: boolean;
+      includeExternal: boolean;
+    }> = [];
     const client = businessClient({
-      async getTicketNotes(ticketId: number, maxResults: number) {
+      async getTicketNotes(
+        ticketId: number,
+        maxResults: number,
+        visibility: { includeInternal: boolean; includeExternal: boolean },
+      ) {
         expect(ticketId).toBe(123);
         expect(maxResults).toBe(20);
+        visibilityCalls.push(visibility);
         return [
           { id: 1, text: "internal", internalFlag: true, externalFlag: false },
           { id: 2, text: "external", internalFlag: false, externalFlag: true },
@@ -967,14 +976,30 @@ describe("authenticated MCP transport", () => {
     expect(defaultVisibility.map(({ id }) => id)).toEqual([2]);
 
     await expect(call(24, false, false)).resolves.toEqual([]);
+    expect(visibilityCalls).toEqual([
+      { includeInternal: true, includeExternal: false },
+      { includeInternal: false, includeExternal: true },
+      { includeInternal: true, includeExternal: true },
+      { includeInternal: false, includeExternal: true },
+      { includeInternal: false, includeExternal: false },
+    ]);
   });
 
   it("excludes unclassified notes from the complete ticket view", async () => {
+    const visibilityCalls: Array<{
+      includeInternal: boolean;
+      includeExternal: boolean;
+    }> = [];
     const client = businessClient({
       async getServiceTicket() {
         return { id: 123, summary: "Safe summary" };
       },
-      async getTicketNotes() {
+      async getTicketNotes(
+        _ticketId: number,
+        _maxResults: number,
+        visibility: { includeInternal: boolean; includeExternal: boolean },
+      ) {
+        visibilityCalls.push(visibility);
         return [
           { id: 1, text: "known internal", internalFlag: true },
           { id: 2, text: "known external", externalFlag: true },
@@ -1067,6 +1092,11 @@ describe("authenticated MCP transport", () => {
       includeExternal: false,
     });
     expect(noNotes.notes).toEqual([]);
+    expect(visibilityCalls).toEqual([
+      { includeInternal: false, includeExternal: true },
+      { includeInternal: true, includeExternal: false },
+      { includeInternal: false, includeExternal: false },
+    ]);
   });
 
   it("projects the ConnectWise dateEntered field from bounded time entries", async () => {
