@@ -2938,6 +2938,48 @@ describe("ConnectWiseClient", () => {
     ).rejects.toThrow("includeClosed must be 'true' or 'false'");
   });
 
+  it("fails closed when open-only byOwner reads return non-open tickets", async () => {
+    for (const includeClosed of [undefined, "false"] as const) {
+      for (const closedFlag of [true, undefined, null, "false"]) {
+        const client = createConnectWiseClient(credentials, {
+          fetcher: async () =>
+            Response.json([
+              {
+                id: 912,
+                owner: { id: 149 },
+                ...(closedFlag === undefined ? {} : { closedFlag }),
+              },
+            ]),
+        });
+
+        await expect(
+          client.catalogGet("service.tickets.byOwner", {
+            memberId: 149,
+            ...(includeClosed === undefined ? {} : { includeClosed }),
+          }),
+        ).rejects.toThrow("ConnectWise returned a non-open ticket");
+      }
+    }
+  });
+
+  it("allows closed tickets only when byOwner explicitly includes them", async () => {
+    const closedTicket = {
+      id: 912,
+      owner: { id: 149 },
+      closedFlag: true,
+    };
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json([closedTicket]),
+    });
+
+    await expect(
+      client.catalogGet("service.tickets.byOwner", {
+        memberId: 149,
+        includeClosed: "true",
+      }),
+    ).resolves.toEqual([closedTicket]);
+  });
+
   it("fails closed when member-scoped reads return missing or mismatched ownership", async () => {
     const exerciseMemberScopedReads = async (
       client: ReturnType<typeof createConnectWiseClient>,
