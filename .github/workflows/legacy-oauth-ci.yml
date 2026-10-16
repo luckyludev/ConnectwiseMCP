@@ -78,7 +78,7 @@ jobs:
           pip-audit -r deploy/cwm-mcp/requirements.txt
       - name: Verify legacy Node dependencies
         run: |
-          npm ci --prefix deploy/cwm-mcp
+          npm ci --prefix deploy/cwm-mcp --ignore-scripts
           npm audit --prefix deploy/cwm-mcp --audit-level=moderate
       - name: Seed ignored build-context canaries
         run: |

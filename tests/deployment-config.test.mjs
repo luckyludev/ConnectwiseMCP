@@ -1047,20 +1047,42 @@ describe("staging deployment configuration", () => {
     );
   });
 
-  it("disables dependency lifecycle scripts during reviewed V2 installs", async () => {
-    const workflowSource = await readFile(
-      new URL("../.github/workflows/v2-ci.yml", import.meta.url),
-      "utf8",
-    );
-    const workflow = parseYaml(workflowSource);
-    const installSteps = workflow.jobs.verify.steps
-      .map((step) => step.run)
-      .filter(
-        (command) =>
-          typeof command === "string" &&
-          /\bnpm (?:ci|install|i)\b/u.test(command),
+  it("disables dependency lifecycle scripts during reviewed installs", async () => {
+    const workflowPaths = [
+      "../.github/workflows/v2-ci.yml",
+      "../.github/workflows/legacy-oauth-ci.yml",
+    ];
+    const approvedInstallCommands = new Set([
+      "npm ci --ignore-scripts",
+      "npm ci --prefix deploy/cwm-mcp --ignore-scripts",
+    ]);
+    const installCommands = [];
+    for (const workflowPath of workflowPaths) {
+      const workflowSource = await readFile(
+        new URL(workflowPath, import.meta.url),
+        "utf8",
       );
-    expect(installSteps).toEqual(["npm ci --ignore-scripts"]);
+      const workflow = parseYaml(workflowSource);
+      for (const job of Object.values(workflow.jobs)) {
+        for (const step of job.steps ?? []) {
+          if (typeof step.run !== "string") {
+            continue;
+          }
+          const commandLines = step.run
+            .replace(/\\\r?\n\s*/gu, " ")
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) =>
+              /\bnpm\b.*(?:\bci\b|\binstall\b|(?:^|\s)i(?:\s|$))/u.test(line),
+            );
+          installCommands.push(...commandLines);
+        }
+      }
+    }
+    expect(installCommands).toHaveLength(2);
+    for (const command of installCommands) {
+      expect(approvedInstallCommands.has(command)).toBe(true);
+    }
 
     const packageJson = await readJson("../package.json");
     const stagingInstallSteps = (packageJson.scripts?.["prepare:staging"] ?? "")
