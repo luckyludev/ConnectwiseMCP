@@ -327,6 +327,12 @@ describe("legacy read-surface classification", () => {
     expect(classification).toContain(
       "requesting neither class performs no note request",
     );
+    expect(classification).toContain(
+      "classifies a note as external only when its external indicator is true and both internal indicators are explicitly false",
+    );
+    expect(classification).toContain(
+      "incomplete or otherwise unclassified visibility is excluded, and any internal classification is authoritative",
+    );
   });
 
   it("keeps the attachment-download contract aligned with the runtime bound", () => {
