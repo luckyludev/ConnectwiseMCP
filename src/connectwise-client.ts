@@ -1552,7 +1552,7 @@ export function createConnectWiseClient(
         ? visibility.includeExternal
           ? "(internalFlag=true OR internalAnalysisFlag=true OR externalFlag=true)"
           : "(internalFlag=true OR internalAnalysisFlag=true)"
-        : "externalFlag=true";
+        : "externalFlag=true AND internalFlag=false AND internalAnalysisFlag=false";
       const notes = await requestBoundedList(
         `/service/tickets/${ticketId}/notes`,
         {
