@@ -608,6 +608,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     query: (p) => ({
       conditions: `status/id=${p.statusId}`,
       fields: SERVICE_TICKET_READ_FIELDS,
+      orderBy: "dateEntered desc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["statusId"],
@@ -630,6 +631,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
           ...(p.includeClosed === "true" ? [] : ["closedFlag=false"]),
         ].join(" and "),
         fields: SERVICE_TICKET_READ_FIELDS,
+        orderBy: "dateEntered desc",
         pageSize: p.pageSize ?? 20,
       };
     },
