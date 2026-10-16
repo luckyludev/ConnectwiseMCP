@@ -317,9 +317,15 @@ describe("legacy read-surface classification", () => {
     );
   });
 
-  it("documents recent-note selection and chronological presentation", () => {
+  it("documents upstream visibility selection and chronological presentation", () => {
     expect(classification).toContain(
-      "Ticket-note bounds retain the most recent notes and present that retained window in chronological order.",
+      "Fixed server-owned visibility-indicator conditions are applied before the ticket-note result cap",
+    );
+    expect(classification).toContain(
+      "The bound retains the most recent indicator-matching notes and presents the safely projected window in chronological order.",
+    );
+    expect(classification).toContain(
+      "requesting neither class performs no note request",
     );
   });
 

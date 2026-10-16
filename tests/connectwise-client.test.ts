@@ -318,7 +318,12 @@ describe("ConnectWiseClient", () => {
       },
     });
 
-    await expect(client.getTicketNotes(123, 20)).resolves.toEqual([]);
+    await expect(
+      client.getTicketNotes(123, 20, {
+        includeInternal: true,
+        includeExternal: true,
+      }),
+    ).resolves.toEqual([]);
     await expect(client.getTicketTasks(123, 20)).resolves.toEqual([]);
 
     expect(urls).toHaveLength(2);
@@ -328,6 +333,8 @@ describe("ConnectWiseClient", () => {
       serviceNotesUrl.pathname.endsWith("/service/tickets/123/notes"),
     ).toBe(true);
     expect(Object.fromEntries(serviceNotesUrl.searchParams)).toEqual({
+      conditions:
+        "(internalFlag=true OR internalAnalysisFlag=true OR externalFlag=true)",
       fields: serviceTicketNoteCollectionFields,
       pageSize: "20",
       orderBy: "dateCreated desc",
@@ -343,6 +350,68 @@ describe("ConnectWiseClient", () => {
     expect(tasksUrl.searchParams.getAll("fields")).toEqual([
       ticketTaskCollectionFields,
     ]);
+  });
+
+  it("applies ticket-note visibility before the upstream result bound", async () => {
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json([]);
+      },
+    });
+
+    await client.getTicketNotes(123, 7, {
+      includeInternal: false,
+      includeExternal: true,
+    });
+    await client.getTicketNotes(123, 8, {
+      includeInternal: true,
+      includeExternal: false,
+    });
+    await client.getTicketNotes(123, 9, {
+      includeInternal: true,
+      includeExternal: true,
+    });
+
+    expect(urls).toHaveLength(3);
+    expect(Object.fromEntries(new URL(urls[0]!).searchParams)).toEqual({
+      conditions: "externalFlag=true",
+      fields: serviceTicketNoteCollectionFields,
+      pageSize: "7",
+      orderBy: "dateCreated desc",
+    });
+    expect(Object.fromEntries(new URL(urls[1]!).searchParams)).toEqual({
+      conditions: "(internalFlag=true OR internalAnalysisFlag=true)",
+      fields: serviceTicketNoteCollectionFields,
+      pageSize: "8",
+      orderBy: "dateCreated desc",
+    });
+    expect(Object.fromEntries(new URL(urls[2]!).searchParams)).toEqual({
+      conditions:
+        "(internalFlag=true OR internalAnalysisFlag=true OR externalFlag=true)",
+      fields: serviceTicketNoteCollectionFields,
+      pageSize: "9",
+      orderBy: "dateCreated desc",
+    });
+  });
+
+  it("does not fetch ticket notes when neither visibility class is requested", async () => {
+    let fetchCount = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => {
+        fetchCount += 1;
+        return Response.json([]);
+      },
+    });
+
+    await expect(
+      client.getTicketNotes(123, 20, {
+        includeInternal: false,
+        includeExternal: false,
+      }),
+    ).resolves.toEqual([]);
+    expect(fetchCount).toBe(0);
   });
 
   it("returns the bounded recent-note window in chronological order", async () => {
@@ -367,7 +436,12 @@ describe("ConnectWiseClient", () => {
         ]),
     });
 
-    await expect(client.getTicketNotes(123, 3)).resolves.toEqual([
+    await expect(
+      client.getTicketNotes(123, 3, {
+        includeInternal: true,
+        includeExternal: true,
+      }),
+    ).resolves.toEqual([
       { id: 301, dateCreated: "2026-10-15T10:00:00Z" },
       { id: 302, dateCreated: "2026-10-15T11:00:00Z" },
       { id: 303, dateCreated: "2026-10-15T12:00:00Z" },
@@ -386,7 +460,12 @@ describe("ConnectWiseClient", () => {
         ]),
     });
 
-    await expect(client.getTicketNotes(123, 20)).resolves.toEqual([
+    await expect(
+      client.getTicketNotes(123, 20, {
+        includeInternal: true,
+        includeExternal: true,
+      }),
+    ).resolves.toEqual([
       {
         id: 301,
         text: "Customer update",
@@ -405,7 +484,12 @@ describe("ConnectWiseClient", () => {
         fetcher: async () => Response.json([note]),
       });
 
-      await expect(client.getTicketNotes(123, 20)).rejects.toThrow(
+      await expect(
+        client.getTicketNotes(123, 20, {
+          includeInternal: true,
+          includeExternal: true,
+        }),
+      ).rejects.toThrow(
         "ConnectWise note is not associated with requested ticket",
       );
     },
@@ -420,7 +504,12 @@ describe("ConnectWiseClient", () => {
         ]),
     });
 
-    await expect(client.getTicketNotes(123, 20)).rejects.toThrow(
+    await expect(
+      client.getTicketNotes(123, 20, {
+        includeInternal: true,
+        includeExternal: true,
+      }),
+    ).rejects.toThrow(
       "ConnectWise note is not associated with requested ticket",
     );
   });
@@ -491,9 +580,12 @@ describe("ConnectWiseClient", () => {
       },
     });
 
-    await expect(client.getTicketNotes(123, 20)).rejects.toThrow(
-      "ConnectWise request failed (404)",
-    );
+    await expect(
+      client.getTicketNotes(123, 20, {
+        includeInternal: true,
+        includeExternal: true,
+      }),
+    ).rejects.toThrow("ConnectWise request failed (404)");
     expect(urls).toHaveLength(1);
     expect(
       new URL(urls[0]!).pathname.endsWith("/service/tickets/123/notes"),
