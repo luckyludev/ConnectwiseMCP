@@ -2116,6 +2116,9 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[0]!).searchParams.get("fields")).toBe(
       serviceTicketReadFields,
     );
+    expect(new URL(urls[0]!).searchParams.get("orderBy")).toBe(
+      "dateEntered desc",
+    );
 
     await client.catalogGet("system.documents", {
       recordType: "Ticket",
@@ -2369,6 +2372,9 @@ describe("ConnectWiseClient", () => {
     );
     expect(new URL(urls[0]!).searchParams.get("fields")).toBe(
       serviceTicketReadFields,
+    );
+    expect(new URL(urls[0]!).searchParams.get("orderBy")).toBe(
+      "dateEntered desc",
     );
     expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
       "member/id=149",
@@ -2770,7 +2776,7 @@ describe("ConnectWiseClient", () => {
         "dateResolved",
       ]),
     );
-    expect(first.searchParams.has("orderBy")).toBe(false);
+    expect(first.searchParams.get("orderBy")).toBe("dateEntered desc");
 
     await client.catalogGet("service.tickets.byOwner", {
       memberId: 149,
