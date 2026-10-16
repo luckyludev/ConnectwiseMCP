@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { readFile, readdir, stat } from "node:fs/promises";
 
-import { parse } from "jsonc-parser";
+import { parse as parseJsonc } from "jsonc-parser";
 import { describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 
 async function readJson(relativePath) {
   const path = new URL(relativePath, import.meta.url);
@@ -13,13 +14,92 @@ async function readWranglerConfig() {
   const path = new URL("../wrangler.jsonc", import.meta.url);
   const source = await readFile(path, "utf8");
   const errors = [];
-  const config = parse(source, errors, { allowTrailingComma: true });
+  const config = parseJsonc(source, errors, { allowTrailingComma: true });
 
   expect(errors).toEqual([]);
   return config;
 }
 
+function workflowUses(source) {
+  const workflow = parseYaml(source);
+  const jobs = workflow?.jobs;
+  if (!jobs || typeof jobs !== "object" || Array.isArray(jobs)) {
+    throw new TypeError("workflow must define a jobs mapping");
+  }
+
+  const references = [];
+  for (const job of Object.values(jobs)) {
+    if (!job || typeof job !== "object" || Array.isArray(job)) continue;
+    if (Object.hasOwn(job, "uses")) references.push(job.uses);
+    if (!Array.isArray(job.steps)) continue;
+    for (const step of job.steps) {
+      if (
+        step &&
+        typeof step === "object" &&
+        !Array.isArray(step) &&
+        Object.hasOwn(step, "uses")
+      ) {
+        references.push(step.uses);
+      }
+    }
+  }
+  return references;
+}
+
+function mutableWorkflowUses(source) {
+  return workflowUses(source).filter(
+    (reference) =>
+      typeof reference !== "string" ||
+      (!reference.startsWith("./") &&
+        !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[^\s@]+)*@[0-9a-f]{40}$/u.test(
+          reference,
+        )),
+  );
+}
+
 describe("dependency maintenance configuration", () => {
+  it("pins every external GitHub Action to an immutable commit SHA", async () => {
+    const workflowsDirectory = new URL(
+      "../.github/workflows/",
+      import.meta.url,
+    );
+    const workflowNames = (await readdir(workflowsDirectory))
+      .filter((name) => /\.ya?ml$/u.test(name))
+      .sort();
+
+    expect(workflowNames.length).toBeGreaterThan(0);
+    for (const name of workflowNames) {
+      const workflow = await readFile(
+        new URL(name, workflowsDirectory),
+        "utf8",
+      );
+      expect(mutableWorkflowUses(workflow), name).toEqual([]);
+    }
+  });
+
+  it("detects mutable action references without rejecting local actions", () => {
+    const pinned = "a".repeat(40);
+    const source = `
+      jobs:
+        inline:
+          steps: [{ "uses": "actions/checkout@main" }]
+        local:
+          steps:
+            - uses: ./actions/build
+            - uses: owner/action/subpath@${pinned}
+        reusable:
+          uses: owner/workflows/.github/workflows/build.yml@feature
+        run-only:
+          steps:
+            - run: npm test
+    `;
+
+    expect(mutableWorkflowUses(source)).toEqual([
+      "actions/checkout@main",
+      "owner/workflows/.github/workflows/build.yml@feature",
+    ]);
+  });
+
   it("covers maintained dependency surfaces without unsafe Python lock updates", async () => {
     const [source, v2Workflow, legacyWorkflow, npmConfig, v2Package] =
       await Promise.all([
@@ -54,6 +134,7 @@ describe("dependency maintenance configuration", () => {
     expect(source).not.toContain('package-ecosystem: "pip"');
     expect(v2Workflow.match(/- "config\/\*\*"/gu)).toHaveLength(1);
     expect(v2Workflow.match(/- "\.github\/dependabot\.yml"/gu)).toHaveLength(1);
+    expect(v2Workflow.match(/- "\.github\/workflows\/\*\*"/gu)).toHaveLength(1);
     expect(
       legacyWorkflow.match(/- "\.github\/dependabot\.yml"/gu),
     ).toHaveLength(1);
@@ -188,9 +269,7 @@ describe("legacy rollback deployment surface", () => {
     ]);
     expect(legacyWorkflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(1);
     expect(v2Workflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(1);
-    expect(
-      v2Workflow.match(/- "\.github\/workflows\/legacy-oauth-ci\.yml"/gu),
-    ).toHaveLength(1);
+    expect(v2Workflow.match(/- "\.github\/workflows\/\*\*"/gu)).toHaveLength(1);
 
     const legacyPushTrigger = legacyWorkflow.match(
       /^  push:\n(?<body>(?:    [^\n]*\n)*)/mu,
