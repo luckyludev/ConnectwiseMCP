@@ -25,8 +25,7 @@ on:
       - "docs/**"
       - "deploy/**"
       - ".github/dependabot.yml"
-      - ".github/workflows/legacy-oauth-ci.yml"
-      - ".github/workflows/v2-ci.yml"
+      - ".github/workflows/**"
   push:
     branches: [main]
 
