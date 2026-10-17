@@ -243,6 +243,57 @@ describe("dependency maintenance configuration", () => {
 });
 
 describe("legacy rollback deployment surface", () => {
+  it("quarantines the broad legacy MCP core behind the reviewed rollback image", async () => {
+    const [readme, requirements, setup, generatedRequirements, packageInfo] =
+      await Promise.all([
+        readFile(
+          new URL("../deploy/cwm-mcp/README.md", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL("../deploy/cwm-mcp/requirements.txt", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL("../deploy/cwm-mcp/setup.py", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../deploy/cwm-mcp/cwm_api_gateway_mcp.egg-info/requires.txt",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../deploy/cwm-mcp/cwm_api_gateway_mcp.egg-info/PKG-INFO",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ]);
+
+    expect(readme).toContain("**Rollback-only component:**");
+    expect(readme).toContain(
+      "must not be installed or exposed as a standalone MCP server",
+    );
+    expect(readme).toContain("docs/cutover-rollback-runbook.md");
+    expect(readme).toContain(
+      "successful canonical `main` `legacy-oauth-ci` run",
+    );
+    expect(readme).not.toMatch(/npm install|-g jasondsmith72|pip install -e/iu);
+    expect(readme).not.toMatch(
+      /CONNECTWISE_(?:PRIVATE_KEY|PUBLIC_KEY|API_URL)/u,
+    );
+    expect(readme).not.toContain("0.0.0.0");
+
+    expect(requirements).toMatch(/^mcp>=1\.3\.0,<2$/mu);
+    expect(setup).toContain('"mcp>=1.3.0,<2"');
+    expect(generatedRequirements).toMatch(/^mcp<2,>=1\.3\.0$/mu);
+    expect(packageInfo).toMatch(/^Requires-Dist: mcp<2,>=1\.3\.0$/mu);
+  });
+
   it("allows only the CI-verified Docker/FastAPI rollback descriptors", async () => {
     const [deploymentFiles, legacyWorkflow, v2Workflow] = await Promise.all([
       readdir(new URL("../deploy/", import.meta.url), { recursive: true }),
