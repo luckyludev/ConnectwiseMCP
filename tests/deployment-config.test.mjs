@@ -734,34 +734,60 @@ describe("staging deployment configuration", () => {
     );
   });
 
-  it("uses the hardened launcher for staging secret entry", async () => {
-    const [documents, launcher, launcherStat] = await Promise.all([
-      Promise.all(
-        ["v2-foundation.md", "cloudflare-workers-staging-howto.md"].map(
-          (file) =>
-            readFile(new URL(`../docs/${file}`, import.meta.url), "utf8"),
+  it("uses an independently retained authenticated launcher for staging secret entry", async () => {
+    const [documents, launcher, launcherStat, bootstrap, bootstrapStat] =
+      await Promise.all([
+        Promise.all(
+          ["v2-foundation.md", "cloudflare-workers-staging-howto.md"].map(
+            (file) =>
+              readFile(new URL(`../docs/${file}`, import.meta.url), "utf8"),
+          ),
         ),
-      ),
-      readFile(
-        new URL("../scripts/put-staging-secret.sh", import.meta.url),
-        "utf8",
-      ),
-      stat(new URL("../scripts/put-staging-secret.sh", import.meta.url)),
-    ]);
+        readFile(
+          new URL("../scripts/put-staging-secret.sh", import.meta.url),
+          "utf8",
+        ),
+        stat(new URL("../scripts/put-staging-secret.sh", import.meta.url)),
+        readFile(
+          new URL(
+            "../scripts/bootstrap-verified-secret-entry.sh",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+        stat(
+          new URL(
+            "../scripts/bootstrap-verified-secret-entry.sh",
+            import.meta.url,
+          ),
+        ),
+      ]);
     const secretCommandPrefix =
-      "DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh ";
+      "DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node /approved/operator/bootstrap-verified-secret-entry.sh ";
 
     for (const document of documents) {
       const secretCommands = document
         .split("\n")
         .filter((line) => line.startsWith(secretCommandPrefix));
       expect(secretCommands).toHaveLength(4);
+      expect(document).toContain("STAGING_SECRET_LAUNCHER_SHA256");
+      expect(document).toContain("bootstrap-verified-secret-entry.sh");
+      expect(document).toContain(
+        "Never execute `scripts/put-staging-secret.sh` directly",
+      );
       expect(document).not.toContain(
         "node node_modules/wrangler/bin/wrangler.js secret put",
       );
     }
     expect(documents[0]).toContain(
       "Production secret entry requires the separate approved production procedure",
+    );
+    expect(bootstrap).toContain("STAGING_SECRET_LAUNCHER_SHA256");
+    expect(bootstrap).toContain(
+      "openSync(launcher, constants.O_RDONLY | constants.O_NOFOLLOW)",
+    );
+    expect(bootstrap).toContain(
+      'spawnSync("/bin/sh", ["-s", "--", secretName]',
     );
     expect(launcher).toContain(
       'if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_PATH+x}" = x ]; then',
@@ -774,7 +800,8 @@ describe("staging deployment configuration", () => {
     );
     expect(launcher).toContain("STAGING_INTEGRITY_SHA256");
     expect(launcher).not.toContain("node_modules/wrangler");
-    expect(launcherStat.mode & 0o111).not.toBe(0);
+    expect(launcherStat.mode & 0o111).toBe(0);
+    expect(bootstrapStat.mode & 0o111).not.toBe(0);
   });
 
   it("exercises the verified staging artifact without deploying it", async () => {

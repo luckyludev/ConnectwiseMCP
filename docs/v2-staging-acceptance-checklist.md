@@ -29,7 +29,7 @@
 
 ## 3. Secret and identity-mapping control
 
-- [ ] Enter secrets only through an approved Cloudflare secret-management workflow. Do not put secrets in `wrangler.jsonc`, `.dev.vars`, shell history, CI logs, screenshots, or evidence records.
+- [ ] Before Cloudflare authentication is available, review and copy `scripts/bootstrap-verified-secret-entry.sh` to an independently controlled absolute path and retain the lowercase SHA-256 of the non-executable `scripts/put-staging-secret.sh` launcher. Enter secrets only through that retained bootstrap with `STAGING_SECRET_LAUNCHER_SHA256` and the release-evidence digests set; confirm it authenticates and executes the launcher bytes through one descriptor before repository code can observe authenticated state. Do not invoke the repository launcher directly or put secrets in `wrangler.jsonc`, `.dev.vars`, shell history, CI logs, screenshots, or evidence records.
 - [ ] Provision a unique high-entropy `OAUTH_STATE_SECRET` of at least 32 random bytes.
 - [ ] Provision the Entra client secret and confirm it is valid for the staging application without recording its value.
 - [ ] Create `IDENTITY_PROFILE_MAP` using immutable Entra `<tid>:<oid>` keys only. Verify exactly the approved six test identities map to approved aliases; do not use names or emails as keys.

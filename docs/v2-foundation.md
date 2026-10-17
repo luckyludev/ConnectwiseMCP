@@ -35,20 +35,25 @@ Set non-secret variables in `wrangler.jsonc` or environment-specific Wrangler co
 Provision these as Worker secrets; do not place values in Git, `.dev.vars`, command arguments, or ordinary request headers. The following example is staging-only and deliberately names the environment so it cannot mutate the top-level production Worker. Production secret entry requires the separate approved production procedure and its explicit approval boundary.
 
 ```bash
+# Before Cloudflare authentication is available, retain the launcher digest and
+# copy the reviewed bootstrap to an independently controlled absolute path.
+export STAGING_SECRET_LAUNCHER_SHA256=<retained-reviewed-secret-launcher-sha256>
+install -m 500 scripts/bootstrap-verified-secret-entry.sh /approved/operator/bootstrap-verified-secret-entry.sh
+
 # Set these from the retained, separately reviewed staging release evidence.
 export STAGING_RELEASE_SHA=<40-character-release-commit>
 export STAGING_BUNDLE_SHA256=<approved-bundle-sha256>
 export STAGING_CONFIG_SHA256=<approved-wrangler-config-sha256>
 export STAGING_DEPLOY_RUNTIME_SHA256=<approved-lock-installed-runtime-sha256>
 export STAGING_INTEGRITY_SHA256=<retained-reviewed-integrity-entrypoint-sha256>
-DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh ENTRA_CLIENT_SECRET
-DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh OAUTH_STATE_SECRET
-DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh IDENTITY_PROFILE_MAP
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node /approved/operator/bootstrap-verified-secret-entry.sh ENTRA_CLIENT_SECRET
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node /approved/operator/bootstrap-verified-secret-entry.sh OAUTH_STATE_SECRET
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node /approved/operator/bootstrap-verified-secret-entry.sh IDENTITY_PROFILE_MAP
 # Repeat once per configured alias, for example:
-DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node scripts/put-staging-secret.sh CW_PROFILE_LUIS
+DEPLOY_NODE_PATH=/absolute/path/to/reviewed/node /approved/operator/bootstrap-verified-secret-entry.sh CW_PROFILE_LUIS
 ```
 
-The launcher accepts only these fixed names and valid `CW_PROFILE_<ALIAS>` bindings, pins staging, rejects inherited Node preload, Wrangler logging, API-endpoint, account-routing, proxy, and TLS overrides, and clears inherited temporary-directory overrides before isolation. Run it from the reviewed repository root. It authenticates the integrity entrypoint against `STAGING_INTEGRITY_SHA256`; that entrypoint verifies the approved release, bundle, configuration, and lock-installed runtime digests before copying the manifest-bound configuration and runtime to private read-only locations. Wrangler executes only from that snapshot, which is removed with the private configuration after success or failure. `DEPLOY_NODE_PATH` must identify the reviewed absolute, canonical, regular executable through a path with no symlink components.
+Copy and inspect the bootstrap while credentialless, and retain it as a regular owner-controlled executable that is not writable during secret entry. Never execute `scripts/put-staging-secret.sh` directly. The external bootstrap rejects inherited shell startup, Node injection/debug, dynamic-loader, Wrangler logging, API-endpoint, account-routing, proxy, and TLS overrides before repository code can observe authenticated state. It authenticates the non-executable launcher through one descriptor against `STAGING_SECRET_LAUNCHER_SHA256` and executes only those exact bytes. The launcher accepts only the fixed names and valid `CW_PROFILE_<ALIAS>` bindings, pins staging, and clears inherited temporary-directory overrides before isolation. Run the retained bootstrap from the physical reviewed repository root. The launcher authenticates the integrity entrypoint against `STAGING_INTEGRITY_SHA256`; that entrypoint verifies the approved release, bundle, configuration, and lock-installed runtime digests before copying the manifest-bound configuration and runtime to private read-only locations. Wrangler executes only from that snapshot, which is removed with the private configuration after success or failure. `DEPLOY_NODE_PATH` must identify the reviewed absolute, canonical, regular executable through a path with no symlink components.
 
 `OAUTH_STATE_SECRET` must contain at least 32 random bytes. `IDENTITY_PROFILE_MAP` is JSON such as:
 

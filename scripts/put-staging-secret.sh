@@ -101,19 +101,12 @@ if [ "$DEPLOY_NODE_PATH" != "$physical_node_path" ]; then
   exit 1
 fi
 
-case "$0" in
-  scripts/put-staging-secret.sh|./scripts/put-staging-secret.sh) ;;
-  *)
-    printf '%s\n' "Invoke the reviewed launcher from the repository root." >&2
-    exit 1
-    ;;
-esac
 repository=$(pwd -P)
 scripts_directory=$repository/scripts
 launcher_path=$scripts_directory/put-staging-secret.sh
 integrity_path=$scripts_directory/staging-bundle-integrity.mjs
 if [ -L "$scripts_directory" ] || [ ! -d "$scripts_directory" ] || \
-   [ -L "$launcher_path" ] || [ ! -f "$launcher_path" ] || [ ! -x "$launcher_path" ] || \
+   [ -L "$launcher_path" ] || [ ! -f "$launcher_path" ] || [ -x "$launcher_path" ] || \
    [ -L "$integrity_path" ] || [ ! -f "$integrity_path" ]; then
   printf '%s\n' "The reviewed secret launcher files are unavailable or unsafe." >&2
   exit 1
@@ -142,8 +135,9 @@ cd "$repository"
 
 # Authenticate the entrypoint bytes and execute those exact bytes in the same
 # approved Node process. Reopening the repository path after verification would
-# permit a replacement race before credential-bearing execution.
-exec "$DEPLOY_NODE_PATH" -e '
+# permit a replacement race before credential-bearing execution. The same exec
+# atomically restores original operator stdin from fd 3 for Wrangler prompts.
+exec 0<&3 3<&- "$DEPLOY_NODE_PATH" -e '
   const { createHash } = require("node:crypto");
   const { lstatSync, readFileSync } = require("node:fs");
   const [launcher, entrypoint, expected, secretName] = process.argv.slice(1);
