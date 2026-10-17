@@ -2,7 +2,9 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmod,
+  link,
   lstat,
+  mkdir,
   mkdtemp,
   readFile,
   realpath,
@@ -20,25 +22,35 @@ const repository = fileURLToPath(new URL("../", import.meta.url));
 const launcher = fileURLToPath(
   new URL("../scripts/put-staging-secret.sh", import.meta.url),
 );
+const bootstrap = fileURLToPath(
+  new URL("../scripts/bootstrap-verified-secret-entry.sh", import.meta.url),
+);
 const integrityEntrypoint = join(
   repository,
   "scripts/staging-bundle-integrity.mjs",
 );
+const reviewedLauncherSha256 = createHash("sha256")
+  .update(await readFile(launcher))
+  .digest("hex");
 const reviewedIntegritySha256 = createHash("sha256")
   .update(await readFile(integrityEntrypoint))
   .digest("hex");
 let temporaryDirectory;
 let approvedNode;
 let capturePath;
+let stdinCapturePath;
 
-function run(args, overrides = {}, cwd = repository) {
-  return spawnSync("scripts/put-staging-secret.sh", args, {
+function run(args, overrides = {}, cwd = repository, input) {
+  return spawnSync(bootstrap, args, {
     cwd,
     encoding: "utf8",
+    input,
     env: {
       PATH: process.env.PATH,
       CAPTURE_PATH: capturePath,
+      STDIN_CAPTURE_PATH: stdinCapturePath,
       DEPLOY_NODE_PATH: approvedNode,
+      STAGING_SECRET_LAUNCHER_SHA256: reviewedLauncherSha256,
       STAGING_INTEGRITY_SHA256: reviewedIntegritySha256,
       ...overrides,
     },
@@ -51,9 +63,11 @@ beforeEach(async () => {
   );
   approvedNode = join(temporaryDirectory, "approved-node");
   capturePath = join(temporaryDirectory, "captured-arguments");
+  stdinCapturePath = join(temporaryDirectory, "captured-stdin");
+  const realNode = process.execPath.replaceAll("'", "'\\''");
   await writeFile(
     approvedNode,
-    '#!/bin/sh\nif [ "${TMPDIR+x}" = x ] || [ "${TMP+x}" = x ] || [ "${TEMP+x}" = x ]; then exit 42; fi\nprintf \'%s\\n\' "$@" > "$CAPTURE_PATH"\n',
+    `#!/bin/sh\ncase "$2" in\n  *'The secret-entry launcher does not match'*) exec '${realNode}' "$@" ;;\n  *)\n    if [ "\${TMPDIR+x}" = x ] || [ "\${TMP+x}" = x ] || [ "\${TEMP+x}" = x ]; then exit 42; fi\n    IFS= read -r prompt_input || true\n    printf '%s\\n' "$@" > "$CAPTURE_PATH"\n    printf '%s' "$prompt_input" > "$STDIN_CAPTURE_PATH"\n    ;;\nesac\n`,
     { mode: 0o700 },
   );
 });
@@ -86,6 +100,20 @@ describe("staging secret launcher", () => {
         "",
       ]);
     }
+  });
+
+  it("preserves operator stdin for the authenticated secret prompt chain", async () => {
+    const result = run(
+      ["ENTRA_CLIENT_SECRET"],
+      {},
+      repository,
+      "secret-input-canary\n",
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(await readFile(stdinCapturePath, "utf8")).toBe(
+      "secret-input-canary",
+    );
   });
 
   it("rejects arbitrary names and arguments before invoking Node", async () => {
@@ -218,21 +246,69 @@ describe("staging secret launcher", () => {
     );
   });
 
-  it("rejects invocation through a launcher symlink", async () => {
-    const linkedLauncher = join(temporaryDirectory, "linked-launcher");
-    await symlink(launcher, linkedLauncher);
-    const result = spawnSync(linkedLauncher, ["ENTRA_CLIENT_SECRET"], {
-      cwd: repository,
-      encoding: "utf8",
-      env: {
-        PATH: process.env.PATH,
-        CAPTURE_PATH: capturePath,
-        DEPLOY_NODE_PATH: approvedNode,
-        STAGING_INTEGRITY_SHA256: reviewedIntegritySha256,
-      },
-    });
+  it("rejects missing, malformed, or mismatched launcher digests before executing launcher bytes", async () => {
+    for (const digest of [undefined, "abc", "A".repeat(64), "0".repeat(64)]) {
+      const result = run(["ENTRA_CLIENT_SECRET"], {
+        CLOUDFLARE_API_TOKEN: "credential-canary",
+        STAGING_SECRET_LAUNCHER_SHA256: digest,
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(
+        /STAGING_SECRET_LAUNCHER_SHA256 must be|secret-entry launcher does not match/,
+      );
+      await expect(lstat(capturePath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    }
+  });
+
+  it("rejects modified launcher bytes before they can observe credentials", async () => {
+    const checkout = join(temporaryDirectory, "modified-checkout");
+    const scripts = join(checkout, "scripts");
+    const canaryPath = join(temporaryDirectory, "credential-observed");
+    await mkdir(scripts, { recursive: true });
+    await writeFile(
+      join(scripts, "put-staging-secret.sh"),
+      `#!/bin/sh\nprintf '%s' "$CLOUDFLARE_API_TOKEN" > ${JSON.stringify(canaryPath)}\n${await readFile(launcher, "utf8")}`,
+      { mode: 0o600 },
+    );
+
+    const result = run(
+      ["ENTRA_CLIENT_SECRET"],
+      { CLOUDFLARE_API_TOKEN: "credential-canary" },
+      checkout,
+    );
     expect(result.status).not.toBe(0);
-    await expect(lstat(capturePath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(result.stderr).toContain(
+      "The secret-entry launcher does not match the retained reviewed digest",
+    );
+    await expect(lstat(canaryPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects symlinked and hard-linked repository launchers", async () => {
+    for (const kind of ["symlink", "hardlink"]) {
+      const checkout = join(temporaryDirectory, `${kind}-checkout`);
+      const scripts = join(checkout, "scripts");
+      const expectedLauncher = join(scripts, "put-staging-secret.sh");
+      await mkdir(scripts, { recursive: true });
+      if (kind === "symlink") {
+        await symlink(launcher, expectedLauncher);
+      } else {
+        const source = join(temporaryDirectory, "hardlink-source");
+        await writeFile(source, await readFile(launcher), { mode: 0o600 });
+        await link(source, expectedLauncher);
+      }
+
+      const result = run(
+        ["ENTRA_CLIENT_SECRET"],
+        { CLOUDFLARE_API_TOKEN: "credential-canary" },
+        checkout,
+      );
+      expect(result.status).not.toBe(0);
+      await expect(lstat(capturePath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    }
   });
 
   it("requires an absolute canonical executable path without symlinks", async () => {
