@@ -2375,61 +2375,74 @@ export function createConnectWiseClient(
       } else {
         boundedPageSize(requestedPageSize);
       }
-      const result = await requestBoundedList(path, query, requestedPageSize);
-      if (
-        route === "service.boards.statuses" ||
-        route === "service.boards.types"
-      ) {
-        assertReferenceCollectionIdentities(result);
-      }
+      const result = await requestBoundedList(
+        path,
+        query,
+        requestedPageSize,
+        (records) => {
+          if (
+            route === "service.boards.statuses" ||
+            route === "service.boards.types"
+          ) {
+            assertReferenceCollectionIdentities(records);
+          }
+          if (route === "system.documents") {
+            verifiedDocumentList(
+              records,
+              String(effectiveParams.recordType ?? "Ticket"),
+              Number(effectiveParams.recordId),
+            );
+          }
+          if (MEMBER_SCOPED_CATALOG_ROUTES.has(route as CatalogRouteId)) {
+            assertMappedMemberList(
+              records,
+              Number(effectiveParams.memberId),
+              route === "service.tickets.byOwner" ? "owner" : "member",
+            );
+          }
+          if (
+            route === "service.tickets.byOwner" &&
+            effectiveParams.includeClosed !== "true"
+          ) {
+            assertOpenTicketList(records);
+          }
+          if (route === "service.tickets.byStatus") {
+            assertRequestedReferenceList(
+              records,
+              "status",
+              Number(effectiveParams.statusId),
+            );
+          }
+          if (
+            route === "service.tickets.byOwner" ||
+            route === "service.tickets.byStatus"
+          ) {
+            assertRecentTicketOrder(records);
+          }
+          if (route === "company.configurations") {
+            assertTargetedNameList(records, String(effectiveParams.query));
+          }
+          if (route === "finance.agreements.byName") {
+            assertTargetedNameList(records, String(effectiveParams.name));
+          }
+          if (
+            route === "schedule.entries.byMember" &&
+            effectiveParams.startDate !== undefined &&
+            effectiveParams.endDate !== undefined
+          ) {
+            assertScheduleDateRange(
+              records,
+              String(effectiveParams.startDate),
+              String(effectiveParams.endDate),
+            );
+          }
+        },
+      );
       if (route === "system.documents") {
         return verifiedDocumentList(
           result,
           String(effectiveParams.recordType ?? "Ticket"),
           Number(effectiveParams.recordId),
-        );
-      }
-      if (MEMBER_SCOPED_CATALOG_ROUTES.has(route as CatalogRouteId)) {
-        assertMappedMemberList(
-          result,
-          Number(effectiveParams.memberId),
-          route === "service.tickets.byOwner" ? "owner" : "member",
-        );
-      }
-      if (
-        route === "service.tickets.byOwner" &&
-        effectiveParams.includeClosed !== "true"
-      ) {
-        assertOpenTicketList(result);
-      }
-      if (route === "service.tickets.byStatus") {
-        assertRequestedReferenceList(
-          result,
-          "status",
-          Number(effectiveParams.statusId),
-        );
-      }
-      if (
-        route === "service.tickets.byOwner" ||
-        route === "service.tickets.byStatus"
-      ) {
-        assertRecentTicketOrder(result);
-      }
-      if (route === "company.configurations") {
-        assertTargetedNameList(result, String(effectiveParams.query));
-      }
-      if (route === "finance.agreements.byName") {
-        assertTargetedNameList(result, String(effectiveParams.name));
-      }
-      if (
-        route === "schedule.entries.byMember" &&
-        effectiveParams.startDate !== undefined &&
-        effectiveParams.endDate !== undefined
-      ) {
-        assertScheduleDateRange(
-          result,
-          String(effectiveParams.startDate),
-          String(effectiveParams.endDate),
         );
       }
       return definition.transform ? definition.transform(result) : result;

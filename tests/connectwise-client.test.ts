@@ -3174,6 +3174,88 @@ describe("ConnectWiseClient", () => {
     }
   });
 
+  it("audits catalog response validation before reporting request success", async () => {
+    const cases = [
+      {
+        route: "service.tickets.byOwner",
+        params: { pageSize: 20 },
+        response: [
+          {
+            id: 1,
+            owner: { id: 150 },
+            closedFlag: false,
+            _info: { dateEntered: "2026-10-16T12:00:00Z" },
+          },
+        ],
+        error: "ConnectWise record is not assigned to mapped member",
+      },
+      {
+        route: "service.tickets.byStatus",
+        params: { statusId: 547, pageSize: 20 },
+        response: [
+          {
+            id: 2,
+            status: { id: 548 },
+            _info: { dateEntered: "2026-10-16T12:00:00Z" },
+          },
+        ],
+        error: "ConnectWise record does not match requested status",
+      },
+      {
+        route: "company.configurations",
+        params: { query: "router", pageSize: 20 },
+        response: [{ id: 3, name: "Unrelated server" }],
+        error: "ConnectWise record does not match targeted name search",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(testCase.response),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(
+        client.catalogGet(testCase.route, testCase.params),
+      ).rejects.toThrow(testCase.error);
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual(
+        expect.objectContaining({
+          event: "cw_request",
+          method: "GET",
+          status: 200,
+          outcome: "upstream_error",
+        }),
+      );
+    }
+
+    const successLogs: string[] = [];
+    const validTicket = {
+      id: 4,
+      owner: { id: 149 },
+      closedFlag: false,
+      _info: { dateEntered: "2026-10-16T12:00:00Z" },
+    };
+    const validClient = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json([validTicket]),
+      log: (line) => successLogs.push(line),
+    });
+
+    await expect(
+      validClient.catalogGet("service.tickets.byOwner", { pageSize: 20 }),
+    ).resolves.toEqual([validTicket]);
+    expect(successLogs).toHaveLength(1);
+    expect(JSON.parse(successLogs[0]!)).toEqual(
+      expect.objectContaining({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        outcome: "success",
+      }),
+    );
+  });
+
   it("verifies a created service ticket before adding its initial description", async () => {
     const calls: Array<{ method: string; url: string }> = [];
     const client = createConnectWiseClient(credentials, {
