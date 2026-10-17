@@ -36,7 +36,9 @@ const reviewedIntegritySha256 = createHash("sha256")
   .update(await readFile(integrityEntrypoint))
   .digest("hex");
 let temporaryDirectory;
+let approvedNodeDirectory;
 let approvedNode;
+let approvedNodeSha256;
 let capturePath;
 let stdinCapturePath;
 
@@ -50,6 +52,7 @@ function run(args, overrides = {}, cwd = repository, input) {
       CAPTURE_PATH: capturePath,
       STDIN_CAPTURE_PATH: stdinCapturePath,
       DEPLOY_NODE_PATH: approvedNode,
+      DEPLOY_NODE_SHA256: approvedNodeSha256,
       STAGING_SECRET_LAUNCHER_SHA256: reviewedLauncherSha256,
       STAGING_INTEGRITY_SHA256: reviewedIntegritySha256,
       ...overrides,
@@ -61,18 +64,25 @@ beforeEach(async () => {
   temporaryDirectory = await mkdtemp(
     join(await realpath(tmpdir()), "cw-staging-secret-"),
   );
-  approvedNode = join(temporaryDirectory, "approved-node");
+  approvedNodeDirectory = join(temporaryDirectory, "approved-runtime");
+  await mkdir(approvedNodeDirectory);
+  approvedNode = join(approvedNodeDirectory, "approved-node");
   capturePath = join(temporaryDirectory, "captured-arguments");
   stdinCapturePath = join(temporaryDirectory, "captured-stdin");
   const realNode = process.execPath.replaceAll("'", "'\\''");
   await writeFile(
     approvedNode,
-    `#!/bin/sh\ncase "$2" in\n  *'The secret-entry launcher does not match'*) exec '${realNode}' "$@" ;;\n  *)\n    if [ "\${TMPDIR+x}" = x ] || [ "\${TMP+x}" = x ] || [ "\${TEMP+x}" = x ]; then exit 42; fi\n    IFS= read -r prompt_input || true\n    printf '%s\\n' "$@" > "$CAPTURE_PATH"\n    printf '%s' "$prompt_input" > "$STDIN_CAPTURE_PATH"\n    ;;\nesac\n`,
-    { mode: 0o700 },
+    `#!/bin/sh\nif [ "\${RUN_REAL_NODE:-}" = 1 ]; then exec '${realNode}' "$@"; fi\ncase "$2" in\n  *'The secret-entry launcher does not match'*) exec '${realNode}' "$@" ;;\n  *)\n    if [ "\${TMPDIR+x}" = x ] || [ "\${TMP+x}" = x ] || [ "\${TEMP+x}" = x ]; then exit 42; fi\n    IFS= read -r prompt_input || true\n    printf '%s\\n' "$@" > "$CAPTURE_PATH"\n    printf '%s' "$prompt_input" > "$STDIN_CAPTURE_PATH"\n    ;;\nesac\n`,
+    { mode: 0o500 },
   );
+  approvedNodeSha256 = createHash("sha256")
+    .update(await readFile(approvedNode))
+    .digest("hex");
+  await chmod(approvedNodeDirectory, 0o500);
 });
 
 afterEach(async () => {
+  await chmod(approvedNodeDirectory, 0o700).catch(() => {});
   await rm(temporaryDirectory, { recursive: true, force: true });
 });
 
@@ -146,10 +156,23 @@ describe("staging secret launcher", () => {
     await expect(lstat(capturePath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("rejects a missing, malformed, or mismatched retained Node digest before execution", async () => {
+    for (const digest of [undefined, "abc", "A".repeat(64), "0".repeat(64)]) {
+      const result = run(["ENTRA_CLIENT_SECRET"], {
+        DEPLOY_NODE_SHA256: digest,
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(
+        /DEPLOY_NODE_SHA256 must be|approved Node executable does not match/,
+      );
+      await expect(lstat(capturePath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    }
+  });
+
   it("executes authenticated bytes without reopening the repository entrypoint", async () => {
-    const result = run(["ENTRA_CLIENT_SECRET"], {
-      DEPLOY_NODE_PATH: process.execPath,
-    });
+    const result = run(["ENTRA_CLIENT_SECRET"], { RUN_REAL_NODE: "1" });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(
       /STAGING_RELEASE_SHA must be the approved|The staging bundle directory is missing/,
@@ -159,7 +182,7 @@ describe("staging secret launcher", () => {
   it("rejects a missing, malformed, or mismatched retained integrity digest", async () => {
     for (const digest of [undefined, "abc", "A".repeat(64), "0".repeat(64)]) {
       const result = run(["ENTRA_CLIENT_SECRET"], {
-        DEPLOY_NODE_PATH: process.execPath,
+        RUN_REAL_NODE: "1",
         STAGING_INTEGRITY_SHA256: digest,
       });
       expect(result.status).not.toBe(0);
@@ -172,11 +195,13 @@ describe("staging secret launcher", () => {
     }
   });
 
-  it("clears temporary-directory overrides before invoking authenticated Node", async () => {
+  it("clears temporary-directory and hash-helper overrides before authenticated Node", async () => {
     const result = run(["ENTRA_CLIENT_SECRET"], {
       TMPDIR: "https://attacker.invalid",
       TMP: "https://attacker.invalid",
       TEMP: "https://attacker.invalid",
+      PERL5OPT: "-MThisModuleMustNotLoad",
+      PERL5LIB: "/attacker-controlled",
     });
     expect(result.status, result.stderr).toBe(0);
     expect(await readFile(capturePath, "utf8")).toContain(

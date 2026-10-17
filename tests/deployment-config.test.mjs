@@ -771,6 +771,7 @@ describe("staging deployment configuration", () => {
         .filter((line) => line.startsWith(secretCommandPrefix));
       expect(secretCommands).toHaveLength(4);
       expect(document).toContain("STAGING_SECRET_LAUNCHER_SHA256");
+      expect(document).toContain("DEPLOY_NODE_SHA256");
       expect(document).toContain("bootstrap-verified-secret-entry.sh");
       expect(document).toContain(
         "Never execute `scripts/put-staging-secret.sh` directly",
