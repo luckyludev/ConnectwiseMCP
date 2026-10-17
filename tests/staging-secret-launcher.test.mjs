@@ -219,6 +219,8 @@ describe("staging secret launcher", () => {
     for (const variable of [
       "NODE_OPTIONS",
       "NODE_PATH",
+      "LD_AUDIT",
+      "GLIBC_TUNABLES",
       "CLOUDFLARE_API_BASE_URL",
       "CF_API_BASE_URL",
       "CLOUDFLARE_BASE_URL",

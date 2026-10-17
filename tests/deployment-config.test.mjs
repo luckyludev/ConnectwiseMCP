@@ -784,6 +784,7 @@ describe("staging deployment configuration", () => {
       "Production secret entry requires the separate approved production procedure",
     );
     expect(bootstrap).toContain("STAGING_SECRET_LAUNCHER_SHA256");
+    expect(bootstrap).toContain("${!LD_@} ${!DYLD_@}");
     expect(bootstrap).toContain(
       "openSync(launcher, constants.O_RDONLY | constants.O_NOFOLLOW)",
     );
