@@ -2887,9 +2887,44 @@ describe("ConnectWiseClient", () => {
     }
     await expect(
       client.catalogGet("schedule.entries.byMember", { memberId: 149 }),
-    ).resolves.toEqual([
-      { id: 10, member: { id: 149 }, dateStart: "not-a-date" },
-    ]);
+    ).rejects.toThrow("ConnectWise schedule entry has invalid dateStart");
+  });
+
+  it.each([
+    ["missing", { id: 1, member: { id: 149 } }],
+    ["non-string", { id: 1, member: { id: 149 }, dateStart: 123 }],
+    [
+      "invalid calendar date",
+      {
+        id: 1,
+        member: { id: 149 },
+        dateStart: "2026-02-30T12:00:00Z",
+      },
+    ],
+    [
+      "offsetless",
+      { id: 1, member: { id: 149 }, dateStart: "2026-08-01T12:00:00" },
+    ],
+    [
+      "mixed with a valid entry",
+      [
+        {
+          id: 1,
+          member: { id: 149 },
+          dateStart: "2026-08-01T12:00:00Z",
+        },
+        { id: 2, member: { id: 149 }, dateStart: "garbage" },
+      ],
+    ],
+  ])("rejects %s schedule dateStart values", async (_label, response) => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json(Array.isArray(response) ? response : [response]),
+    });
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", { memberId: 149 }),
+    ).rejects.toThrow("ConnectWise schedule entry has invalid dateStart");
   });
 
   it("orders schedule entries by chronological instant across offsets", async () => {
