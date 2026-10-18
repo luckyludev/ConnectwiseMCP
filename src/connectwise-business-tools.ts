@@ -256,17 +256,29 @@ function invoice(value: Record<string, unknown>): Record<string, unknown> {
 }
 
 export function summarizeAgreementAdditions(values: Record<string, unknown>[]) {
-  const sanitized = values.map(projectAgreementAddition);
+  let totalExtendedPrice = 0;
+  let totalCost = 0;
+
+  for (const value of values) {
+    const sanitized = projectAgreementAddition(value);
+    const extendedPrice = number(sanitized.extendedPrice);
+    const extendedCost = number(sanitized.extendedCost);
+    if (extendedPrice === undefined || extendedCost === undefined) {
+      throw new Error("Invalid agreement addition summary commercial fields");
+    }
+    totalExtendedPrice += extendedPrice;
+    totalCost += extendedCost;
+    if (!Number.isFinite(totalExtendedPrice) || !Number.isFinite(totalCost)) {
+      throw new Error(
+        "Agreement addition summary totals exceed numeric limits",
+      );
+    }
+  }
+
   return {
-    count: sanitized.length,
-    totalExtendedPrice: sanitized.reduce(
-      (sum, item) => sum + (number(item.extendedPrice) ?? 0),
-      0,
-    ),
-    totalCost: sanitized.reduce(
-      (sum, item) => sum + (number(item.extendedCost) ?? 0),
-      0,
-    ),
+    count: values.length,
+    totalExtendedPrice,
+    totalCost,
   };
 }
 

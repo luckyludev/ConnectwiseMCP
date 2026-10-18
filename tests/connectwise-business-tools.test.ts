@@ -46,6 +46,28 @@ describe("agreement addition projection", () => {
       ]),
     ).toEqual({ count: 2, totalExtendedPrice: 87, totalCost: 36 });
   });
+
+  it.each([
+    { additions: [{ extCost: 7 }] },
+    { additions: [{ extPrice: 12, extCost: null }] },
+    { additions: [{ extPrice: "12", extCost: 7 }] },
+  ])(
+    "rejects malformed commercial summary fields: $additions",
+    ({ additions }) => {
+      expect(() => summarizeAgreementAdditions(additions)).toThrow(
+        "Invalid agreement addition summary commercial fields",
+      );
+    },
+  );
+
+  it("rejects non-finite aggregate totals", () => {
+    expect(() =>
+      summarizeAgreementAdditions([
+        { extPrice: Number.MAX_VALUE, extCost: 1 },
+        { extPrice: Number.MAX_VALUE, extCost: 1 },
+      ]),
+    ).toThrow("Agreement addition summary totals exceed numeric limits");
+  });
 });
 
 describe("bounded tool output", () => {
