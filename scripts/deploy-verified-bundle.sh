@@ -10,6 +10,7 @@ if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_PATH+x}" = x ] || [ "${NODE_DEBUG+x}
   exit 1
 fi
 if [ "${LD_PRELOAD+x}" = x ] || [ "${LD_LIBRARY_PATH+x}" = x ] || \
+   [ "${LD_AUDIT+x}" = x ] || [ "${GLIBC_TUNABLES+x}" = x ] || \
    [ "${DYLD_INSERT_LIBRARIES+x}" = x ] || [ "${DYLD_LIBRARY_PATH+x}" = x ] || \
    [ "${DYLD_FRAMEWORK_PATH+x}" = x ] || [ "${DYLD_FALLBACK_LIBRARY_PATH+x}" = x ] || \
    [ "${DYLD_FALLBACK_FRAMEWORK_PATH+x}" = x ]; then
@@ -115,8 +116,8 @@ esac
 # Remove guarded routing/injection settings before the approved Node executable
 # receives credentials. The inline verifier opens the entrypoint once and
 # imports those exact authenticated bytes, never reopening its mutable path.
-unset NODE_OPTIONS NODE_PATH NODE_DEBUG LD_PRELOAD LD_LIBRARY_PATH
-unset DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
+unset NODE_OPTIONS NODE_PATH NODE_DEBUG LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT
+unset GLIBC_TUNABLES DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
 unset DYLD_FALLBACK_LIBRARY_PATH DYLD_FALLBACK_FRAMEWORK_PATH
 unset CLOUDFLARE_API_BASE_URL CF_API_BASE_URL CLOUDFLARE_BASE_URL
 unset CLOUDFLARE_CONTAINER_REGISTRY WRANGLER_API_ENVIRONMENT CLOUDFLARE_COMPLIANCE_REGION

@@ -1311,6 +1311,7 @@ describe("staging deployment configuration", () => {
       "STAGING_INTEGRITY_SHA256=<approved-deployment-entrypoint-sha256>",
     );
     for (const guide of [stagingHowto, stagingChecklist]) {
+      expect(guide).toContain("DEPLOY_NODE_SHA256");
       expect(guide).toContain("STAGING_LAUNCHER_SHA256");
       expect(guide).toContain("STAGING_INTEGRITY_SHA256");
       expect(guide).toContain("bootstrap-verified-deployment.sh");
@@ -1326,6 +1327,10 @@ describe("staging deployment configuration", () => {
     );
     expect(stagingHowto).not.toContain("npm run deploy:staging");
     expect(deploymentBootstrap).toContain("STAGING_LAUNCHER_SHA256");
+    expect(deploymentBootstrap).toContain("DEPLOY_NODE_SHA256");
+    expect(deploymentBootstrap).toContain(
+      '/usr/bin/shasum -a 256 "$DEPLOY_NODE_PATH"',
+    );
     expect(deploymentBootstrap).toContain(
       "openSync(launcher, constants.O_RDONLY | constants.O_NOFOLLOW)",
     );
@@ -1338,7 +1343,7 @@ describe("staging deployment configuration", () => {
       'if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_PATH+x}" = x ] || [ "${NODE_DEBUG+x}" = x ]; then',
     );
     expect(deploymentLauncher).toContain(
-      'if [ "${LD_PRELOAD+x}" = x ] || [ "${LD_LIBRARY_PATH+x}" = x ] || \\',
+      '[ "${LD_AUDIT+x}" = x ] || [ "${GLIBC_TUNABLES+x}" = x ]',
     );
     expect(deploymentLauncher).toContain(
       'if [ -z "${DEPLOY_NODE_PATH:-}" ]; then',
