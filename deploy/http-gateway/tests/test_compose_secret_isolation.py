@@ -46,6 +46,19 @@ def test_accepts_exact_service_environment_allowlists():
     validate_compose_config(compose_config())
 
 
+def test_rejects_unreviewed_additional_service():
+    config = compose_config()
+    config["services"]["unreviewed-sidecar"] = {
+        "image": "example.invalid/unreviewed:latest",
+        "privileged": True,
+        "network_mode": "host",
+        "environment": {"CONNECTWISE_PRIVATE_KEY": "must-not-leak"},
+    }
+
+    with pytest.raises(ValueError, match="rollback allowlist.*unreviewed-sidecar"):
+        validate_compose_config(config)
+
+
 @pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
 @pytest.mark.parametrize(
     ("field", "value", "error"),

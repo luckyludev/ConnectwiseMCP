@@ -29,6 +29,7 @@ GATEWAY_ENVIRONMENT = {
     "SERVER_URL",
 }
 TUNNEL_ENVIRONMENT = {"TUNNEL_TOKEN"}
+EXPECTED_SERVICES = {"mcp-gateway", "cloudflared"}
 CANARY_VALUES = {
     name: "compose-canary-" + name.lower().replace("_", "-")
     for name in GATEWAY_ENVIRONMENT
@@ -79,6 +80,13 @@ def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> No
     if not isinstance(config, dict) or not isinstance(config.get("services"), dict):
         raise ValueError("Compose config must contain services")
     services = config["services"]
+    service_names = set(services)
+    if service_names != EXPECTED_SERVICES:
+        raise ValueError(
+            "Compose services differ from the rollback allowlist: "
+            f"missing={sorted(EXPECTED_SERVICES - service_names)}, "
+            f"unexpected={sorted(service_names - EXPECTED_SERVICES)}"
+        )
     gateway = services.get("mcp-gateway")
     tunnel = services.get("cloudflared")
     gateway_keys = _environment_keys(gateway, "mcp-gateway")
