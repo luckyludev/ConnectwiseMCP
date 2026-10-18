@@ -3236,6 +3236,72 @@ describe("ConnectWiseClient", () => {
     }
   });
 
+  it("audits dedicated member response validation before reporting request success", async () => {
+    const reads = [
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.listTimeEntries(20),
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.listScheduleEntries(20),
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.getTimeSheets(20),
+    ];
+
+    for (const returnedMemberId of [undefined, 150]) {
+      for (const read of reads) {
+        let requestCount = 0;
+        const logs: string[] = [];
+        const client = createConnectWiseClient(credentials, {
+          fetcher: async () => {
+            requestCount += 1;
+            return Response.json([
+              {
+                id: 1,
+                ...(returnedMemberId === undefined
+                  ? {}
+                  : { member: { id: returnedMemberId } }),
+              },
+            ]);
+          },
+          log: (line) => logs.push(line),
+        });
+
+        await expect(read(client)).rejects.toThrow(
+          "ConnectWise record is not assigned to mapped member",
+        );
+        expect(requestCount).toBe(1);
+        expect(logs).toHaveLength(1);
+        expect(JSON.parse(logs[0]!)).toEqual(
+          expect.objectContaining({
+            event: "cw_request",
+            method: "GET",
+            status: 200,
+            outcome: "upstream_error",
+          }),
+        );
+      }
+    }
+
+    for (const read of reads) {
+      const validRecord = { id: 1, member: { id: 149 } };
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([validRecord]),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(read(client)).resolves.toEqual([validRecord]);
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual(
+        expect.objectContaining({
+          event: "cw_request",
+          method: "GET",
+          status: 200,
+          outcome: "success",
+        }),
+      );
+    }
+  });
+
   it("audits catalog response validation before reporting request success", async () => {
     const cases = [
       {
