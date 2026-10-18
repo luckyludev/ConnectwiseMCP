@@ -1559,6 +1559,26 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertRecentTicketNoteOrder(records: unknown): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise ticket note response");
+    }
+    let previousTimestamp = Number.POSITIVE_INFINITY;
+    for (const record of records) {
+      const dateCreated =
+        record && typeof record === "object" && !Array.isArray(record)
+          ? (record as Record<string, unknown>).dateCreated
+          : undefined;
+      const timestamp = strictIsoTimestampMs(dateCreated);
+      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
+        throw new Error(
+          "ConnectWise ticket notes are not ordered recent-first",
+        );
+      }
+      previousTimestamp = timestamp;
+    }
+  }
+
   function verifiedObjectScheduleEntryList(
     records: unknown,
     objectId: number,
@@ -1771,6 +1791,7 @@ export function createConnectWiseClient(
           orderBy: "dateCreated desc",
         },
         pageSize,
+        assertRecentTicketNoteOrder,
       );
       return (notes as Array<Record<string, unknown>>)
         .map((note) => {
