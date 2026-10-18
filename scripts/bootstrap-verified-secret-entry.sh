@@ -28,6 +28,12 @@ if [ "${CLOUDFLARE_API_BASE_URL+x}" = x ] || [ "${CF_API_BASE_URL+x}" = x ] || \
    [ "${WRANGLER_API_ENVIRONMENT+x}" = x ] || [ "${CLOUDFLARE_COMPLIANCE_REGION+x}" = x ] || \
    [ "${WRANGLER_AUTH_DOMAIN+x}" = x ] || [ "${WRANGLER_AUTH_URL+x}" = x ] || \
    [ "${WRANGLER_TOKEN_URL+x}" = x ] || [ "${WRANGLER_REVOKE_URL+x}" = x ] || \
+   [ "${WRANGLER_CLIENT_ID+x}" = x ] || [ "${CLOUDFLARE_CLIENT_ID+x}" = x ] || \
+   [ "${CLOUDFLARE_ACCESS_CLIENT_ID+x}" = x ] || [ "${CLOUDFLARE_ACCESS_CLIENT_SECRET+x}" = x ] || \
+   [ "${CLOUDFLARE_AUTH_USE_KEYRING+x}" = x ] || \
+   [ "${WRANGLER_CF_AUTHORIZATION_TOKEN+x}" = x ] || \
+   [ "${CLOUDFLARE_INCLUDE_PROCESS_ENV+x}" = x ] || \
+   [ "${CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV+x}" = x ] || \
    [ "${CLOUDFLARE_ACCOUNT_ID+x}" = x ] || [ "${CF_ACCOUNT_ID+x}" = x ]; then
   printf '%s\n' "Refusing credential-bearing secret entry while a Cloudflare endpoint or account override is present." >&2
   exit 1
