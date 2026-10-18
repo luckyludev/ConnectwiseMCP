@@ -565,10 +565,17 @@ async def lifespan(app: FastAPI):
     _static_token()
     _jwt_secret()
 
-    # Initialize MCP server internals
-    setup_config()
-    initialize_database()
-    initialize_fast_memory()
+    # Initialize MCP server internals. Each initializer reports recoverable
+    # failures with False; never advertise a healthy rollback target unless all
+    # required ConnectWise state is ready.
+    initializers = (
+        (setup_config, "ConnectWise configuration"),
+        (initialize_database, "API database"),
+        (initialize_fast_memory, "fast-memory database"),
+    )
+    for initializer, component in initializers:
+        if initializer() is not True:
+            raise RuntimeError(f"Legacy rollback initialization failed: {component}")
 
     # Warm session manager / streamable app
     mcp.streamable_http_app()
