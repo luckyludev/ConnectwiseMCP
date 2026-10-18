@@ -2,6 +2,7 @@ import pytest
 
 from verify_compose_secret_isolation import (
     CANARY_VALUES,
+    EXPECTED_GATEWAY_BUILD_CONTEXT,
     GATEWAY_ENVIRONMENT,
     TUNNEL_ENVIRONMENT,
     validate_compose_config,
@@ -12,9 +13,16 @@ def compose_config() -> dict:
     return {
         "services": {
             "mcp-gateway": {
+                "build": {
+                    "context": str(EXPECTED_GATEWAY_BUILD_CONTEXT),
+                    "dockerfile": "http-gateway/Dockerfile",
+                },
+                "command": None,
+                "entrypoint": None,
                 "environment": {name: f"gateway-{name}" for name in GATEWAY_ENVIRONMENT},
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
+                "networks": {"default": None},
                 "ports": [
                     {
                         "mode": "ingress",
@@ -28,9 +36,12 @@ def compose_config() -> dict:
             "cloudflared": {
                 "image": "cloudflare/cloudflared:latest@sha256:"
                 + "a" * 64,
+                "command": ["tunnel", "run"],
+                "entrypoint": None,
                 "environment": {name: f"tunnel-{name}" for name in TUNNEL_ENVIRONMENT},
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
+                "networks": {"default": None},
                 "depends_on": {
                     "mcp-gateway": {
                         "condition": "service_healthy",
@@ -38,7 +49,10 @@ def compose_config() -> dict:
                     }
                 },
             },
-        }
+        },
+        "networks": {
+            "default": {"ipam": {}, "name": "http-gateway_default"}
+        },
     }
 
 
@@ -93,6 +107,178 @@ def test_rejects_host_networking(service):
     config["services"][service]["network_mode"] = "host"
 
     with pytest.raises(ValueError, match="must not use host networking"):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("privileged", True, "must not run in privileged mode"),
+        ("cap_add", ["SYS_ADMIN"], "must not add Linux capabilities"),
+        ("pid", "host", "must not share a PID namespace"),
+        ("pid", "service:mcp-gateway", "must not share a PID namespace"),
+        ("ipc", "host", "must not share an IPC namespace"),
+        ("ipc", "shareable", "must not share an IPC namespace"),
+        (
+            "volumes",
+            [{"type": "bind", "source": "/", "target": "/host"}],
+            "must not mount host or named volumes",
+        ),
+        (
+            "volumes",
+            [{"type": "volume", "source": "shared", "target": "/shared"}],
+            "must not mount host or named volumes",
+        ),
+        (
+            "devices",
+            [{"source": "/dev/kvm", "target": "/dev/kvm", "permissions": "rwm"}],
+            "must not access host devices",
+        ),
+        (
+            "pre_start",
+            [
+                {
+                    "command": ["sh", "-c", "true"],
+                    "privileged": True,
+                    "user": "root",
+                }
+            ],
+            "must not define lifecycle containers",
+        ),
+        (
+            "post_start",
+            [{"command": ["sh", "-c", "true"]}],
+            "must not define lifecycle containers",
+        ),
+        (
+            "pre_stop",
+            [{"command": ["sh", "-c", "true"]}],
+            "must not define lifecycle containers",
+        ),
+        (
+            "use_api_socket",
+            True,
+            "must not access the container engine API socket",
+        ),
+        (
+            "volumes_from",
+            ["container:host-helper"],
+            "must not inherit another container's volumes",
+        ),
+        ("gpus", "all", "must not access host GPUs"),
+        (
+            "deploy",
+            {
+                "resources": {
+                    "reservations": {
+                        "devices": [{"capabilities": ["gpu"], "count": -1}]
+                    }
+                }
+            },
+            "must not define deployment-level runtime access",
+        ),
+    ],
+)
+def test_rejects_host_access_and_namespace_overrides(service, field, value, error):
+    config = compose_config()
+    config["services"][service][field] = value
+
+    with pytest.raises(ValueError, match=error):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
+def test_rejects_every_non_allowlisted_service_field(service):
+    config = compose_config()
+    config["services"][service]["future_compose_escape_hatch"] = True
+
+    with pytest.raises(ValueError, match="non-allowlisted service fields"):
+        validate_compose_config(config)
+
+
+def test_rejects_gateway_command_or_entrypoint_override():
+    for field in ("command", "entrypoint"):
+        config = compose_config()
+        config["services"]["mcp-gateway"][field] = ["sh", "-c", "true"]
+
+        with pytest.raises(ValueError, match="must come from its image"):
+            validate_compose_config(config)
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        {
+            "context": str(EXPECTED_GATEWAY_BUILD_CONTEXT),
+            "dockerfile": "http-gateway/Dockerfile",
+            "network": "host",
+        },
+        {
+            "context": "/tmp/unreviewed-build-context",
+            "dockerfile": "http-gateway/Dockerfile",
+        },
+        {
+            "context": str(EXPECTED_GATEWAY_BUILD_CONTEXT),
+            "dockerfile": "unreviewed.Dockerfile",
+        },
+    ],
+)
+def test_rejects_unreviewed_gateway_build_controls(build):
+    config = compose_config()
+    config["services"]["mcp-gateway"]["build"] = build
+
+    with pytest.raises(ValueError, match="build|Dockerfile"):
+        validate_compose_config(config)
+
+
+def test_rejects_cloudflared_command_or_entrypoint_override():
+    config = compose_config()
+    config["services"]["cloudflared"]["command"] = ["proxy-dns"]
+    with pytest.raises(ValueError, match="command must be exactly"):
+        validate_compose_config(config)
+
+    config = compose_config()
+    config["services"]["cloudflared"]["entrypoint"] = ["sh"]
+    with pytest.raises(ValueError, match="entrypoint must come from"):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
+def test_rejects_alternate_service_network_attachments(service):
+    config = compose_config()
+    config["services"][service]["networks"] = {"hostnet": None}
+    config["networks"] = {"hostnet": {"external": True, "name": "host"}}
+
+    with pytest.raises(ValueError, match="attach only to the default"):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize(
+    "networks",
+    [
+        {"default": {"external": True, "name": "host"}},
+        {"default": {"ipam": {}, "name": "host"}},
+        {"default": {"ipam": {}, "name": "none"}},
+        {"default": {"ipam": {}, "name": "bridge"}},
+        {
+            "default": {
+                "ipam": {"config": [{"subnet": "169.254.0.0/16"}]},
+                "name": "http-gateway_default",
+            }
+        },
+        {"default": {"driver": "host", "name": "unsafe"}},
+        {
+            "default": {"name": "http-gateway_default"},
+            "extra": {"name": "unexpected"},
+        },
+    ],
+)
+def test_rejects_external_host_or_nondefault_network_definitions(networks):
+    config = compose_config()
+    config["networks"] = networks
+
+    with pytest.raises(ValueError, match="default.*network|network name"):
         validate_compose_config(config)
 
 
