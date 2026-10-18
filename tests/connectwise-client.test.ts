@@ -449,6 +449,58 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
+  it.each([
+    {
+      name: "ascending",
+      notes: [
+        {
+          id: 301,
+          dateCreated: "2026-10-15T10:00:00Z",
+          ticketId: 123,
+        },
+        {
+          id: 302,
+          dateCreated: "2026-10-15T11:00:00Z",
+          ticketId: 123,
+        },
+      ],
+    },
+    {
+      name: "missing timestamp",
+      notes: [{ id: 301, ticketId: 123 }],
+    },
+    {
+      name: "malformed timestamp",
+      notes: [{ id: 301, dateCreated: "not-a-date", ticketId: 123 }],
+    },
+  ])(
+    "rejects $name ticket-note order before auditing success",
+    async ({ notes }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(notes),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(
+        client.getTicketNotes(123, 20, {
+          includeInternal: true,
+          includeExternal: true,
+        }),
+      ).rejects.toThrow(
+        "ConnectWise ticket notes are not ordered recent-first",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
+
   it("verifies and strips ticket relationships from note results", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
@@ -456,6 +508,7 @@ describe("ConnectWiseClient", () => {
           {
             id: 301,
             text: "Customer update",
+            dateCreated: "2026-10-15T12:00:00Z",
             ticketId: 123,
           },
         ]),
@@ -470,14 +523,15 @@ describe("ConnectWiseClient", () => {
       {
         id: 301,
         text: "Customer update",
+        dateCreated: "2026-10-15T12:00:00Z",
       },
     ]);
   });
 
   it.each([
-    { id: 301, ticketId: 124 },
-    { id: 301 },
-    { id: 301, ticketId: "123" },
+    { id: 301, dateCreated: "2026-10-15T12:00:00Z", ticketId: 124 },
+    { id: 301, dateCreated: "2026-10-15T12:00:00Z" },
+    { id: 301, dateCreated: "2026-10-15T12:00:00Z", ticketId: "123" },
   ])(
     "rejects a note without the exact requested ticket relationship: %j",
     async (note) => {
@@ -500,8 +554,16 @@ describe("ConnectWiseClient", () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
         Response.json([
-          { id: 301, ticketId: 123 },
-          { id: 302, ticketId: 124 },
+          {
+            id: 301,
+            dateCreated: "2026-10-15T12:00:00Z",
+            ticketId: 123,
+          },
+          {
+            id: 302,
+            dateCreated: "2026-10-15T11:00:00Z",
+            ticketId: 124,
+          },
         ]),
     });
 
