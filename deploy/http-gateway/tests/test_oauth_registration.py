@@ -19,9 +19,9 @@ def gateway_module():
     package.__path__ = []
     server = types.ModuleType("api_gateway.server")
     server.mcp = object()
-    server.setup_config = lambda: None
-    server.initialize_database = lambda: None
-    server.initialize_fast_memory = lambda: None
+    server.setup_config = lambda: True
+    server.initialize_database = lambda: True
+    server.initialize_fast_memory = lambda: True
     sys.modules["api_gateway"] = package
     sys.modules["api_gateway.server"] = server
 
@@ -50,6 +50,58 @@ def client(gateway_module):
 CALLBACK_URI = "https://client.example.com/callback"
 RESOURCE_URI = "https://gateway.example.com"
 PKCE_VERIFIER = "A" * 43
+
+
+@pytest.mark.parametrize(
+    ("failed_initializer", "expected_calls", "component"),
+    [
+        ("setup_config", ["setup_config"], "ConnectWise configuration"),
+        (
+            "initialize_database",
+            ["setup_config", "initialize_database"],
+            "API database",
+        ),
+        (
+            "initialize_fast_memory",
+            ["setup_config", "initialize_database", "initialize_fast_memory"],
+            "fast-memory database",
+        ),
+    ],
+)
+def test_lifespan_fails_closed_when_required_initialization_fails(
+    gateway_module,
+    monkeypatch,
+    failed_initializer,
+    expected_calls,
+    component,
+):
+    calls = []
+
+    def initializer(name):
+        def run():
+            calls.append(name)
+            return name != failed_initializer
+
+        return run
+
+    for name in (
+        "setup_config",
+        "initialize_database",
+        "initialize_fast_memory",
+    ):
+        monkeypatch.setattr(gateway_module, name, initializer(name))
+
+    async def start_gateway():
+        async with gateway_module.lifespan(gateway_module.app):
+            pytest.fail("Gateway started after required initialization failed")
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"^Legacy rollback initialization failed: {component}$",
+    ):
+        asyncio.run(start_gateway())
+
+    assert calls == expected_calls
 
 
 def test_connectwise_config_logging_exposes_presence_only():
