@@ -1705,6 +1705,49 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertTicketRelationshipList(
+    records: unknown,
+    expectedTicketId: number,
+    recordType: "note" | "task",
+  ): void {
+    if (
+      !Array.isArray(records) ||
+      records.some(
+        (record) =>
+          !record ||
+          typeof record !== "object" ||
+          Array.isArray(record) ||
+          (record as Record<string, unknown>).ticketId !== expectedTicketId,
+      )
+    ) {
+      throw new Error(
+        `ConnectWise ${recordType} is not associated with requested ticket`,
+      );
+    }
+  }
+
+  function assertTicketTimeEntryRelationshipList(
+    records: unknown,
+    expectedTicketId: number,
+  ): void {
+    if (
+      !Array.isArray(records) ||
+      records.some(
+        (record) =>
+          !record ||
+          typeof record !== "object" ||
+          Array.isArray(record) ||
+          (record as Record<string, unknown>).chargeToType !==
+            "ServiceTicket" ||
+          (record as Record<string, unknown>).chargeToId !== expectedTicketId,
+      )
+    ) {
+      throw new Error(
+        "ConnectWise time entry is not associated with requested ticket",
+      );
+    }
+  }
+
   function verifiedDocumentList(
     records: unknown,
     expectedRecordType: string,
@@ -1791,18 +1834,13 @@ export function createConnectWiseClient(
           orderBy: "dateCreated desc",
         },
         pageSize,
-        assertRecentTicketNoteOrder,
+        (records) => {
+          assertRecentTicketNoteOrder(records);
+          assertTicketRelationshipList(records, ticketId, "note");
+        },
       );
       return (notes as Array<Record<string, unknown>>)
-        .map((note) => {
-          if (note.ticketId !== ticketId) {
-            throw new Error(
-              "ConnectWise note is not associated with requested ticket",
-            );
-          }
-          const { ticketId: _ticketId, ...item } = note;
-          return item;
-        })
+        .map(({ ticketId: _ticketId, ...note }) => note)
         .reverse();
     },
 
@@ -1821,6 +1859,9 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (records) => {
+          verifiedDocumentList(records, "Ticket", ticketId);
+        },
       );
       return verifiedDocumentList(attachments, "Ticket", ticketId);
     },
@@ -1835,6 +1876,17 @@ export function createConnectWiseClient(
         "GET",
         `/system/documents/${documentId}`,
         { fields: TICKET_ATTACHMENT_AUTHORIZATION_FIELDS },
+        undefined,
+        undefined,
+        undefined,
+        (record) => {
+          const verified = verifiedRecordIdentity(
+            record,
+            documentId,
+            "document",
+          );
+          verifiedDocumentList([verified], "Ticket", ticketId);
+        },
       );
       const verifiedDocument = verifiedRecordIdentity(
         document,
@@ -1851,16 +1903,13 @@ export function createConnectWiseClient(
         `/service/tickets/${ticketId}/tasks`,
         { fields: TICKET_TASK_RELATIONSHIP_FIELDS, pageSize },
         pageSize,
+        (records) => {
+          assertTicketRelationshipList(records, ticketId, "task");
+        },
       );
-      return (tasks as Array<Record<string, unknown>>).map((task) => {
-        if (task.ticketId !== ticketId) {
-          throw new Error(
-            "ConnectWise task is not associated with requested ticket",
-          );
-        }
-        const { ticketId: _ticketId, ...item } = task;
-        return item;
-      });
+      return (tasks as Array<Record<string, unknown>>).map(
+        ({ ticketId: _ticketId, ...task }) => task,
+      );
     },
 
     async getTicketTimeEntries(
@@ -1878,23 +1927,14 @@ export function createConnectWiseClient(
           orderBy: "dateEntered desc",
         },
         pageSize,
+        (records) => {
+          assertTicketTimeEntryRelationshipList(records, ticketId);
+        },
       );
-      return (entries as Array<Record<string, unknown>>).map((entry) => {
-        if (
-          entry.chargeToType !== "ServiceTicket" ||
-          entry.chargeToId !== ticketId
-        ) {
-          throw new Error(
-            "ConnectWise time entry is not associated with requested ticket",
-          );
-        }
-        const {
-          chargeToType: _chargeToType,
-          chargeToId: _chargeToId,
-          ...item
-        } = entry;
-        return item;
-      });
+      return (entries as Array<Record<string, unknown>>).map(
+        ({ chargeToType: _chargeToType, chargeToId: _chargeToId, ...entry }) =>
+          entry,
+      );
     },
 
     async createTicketNote(ticketId, input): Promise<unknown> {
