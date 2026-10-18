@@ -708,6 +708,119 @@ describe("ConnectWiseClient", () => {
     },
   );
 
+  it("audits ticket-child relationship validation before reporting request success", async () => {
+    type Client = ReturnType<typeof createConnectWiseClient>;
+    const cases: Array<{
+      name: string;
+      validResponse: unknown;
+      invalidResponse: unknown;
+      exercise: (client: Client) => Promise<unknown>;
+      expected: unknown;
+      error: string;
+    }> = [
+      {
+        name: "notes",
+        validResponse: [
+          {
+            id: 301,
+            dateCreated: "2026-10-15T12:00:00Z",
+            ticketId: 123,
+          },
+        ],
+        invalidResponse: [
+          {
+            id: 301,
+            dateCreated: "2026-10-15T12:00:00Z",
+            ticketId: 124,
+          },
+        ],
+        exercise: (client) =>
+          client.getTicketNotes(123, 20, {
+            includeInternal: true,
+            includeExternal: true,
+          }),
+        expected: [{ id: 301, dateCreated: "2026-10-15T12:00:00Z" }],
+        error: "ConnectWise note is not associated with requested ticket",
+      },
+      {
+        name: "attachment list",
+        validResponse: [{ id: 400, recordType: "Ticket", recordId: 123 }],
+        invalidResponse: [{ id: 400, recordType: "Ticket", recordId: 124 }],
+        exercise: (client) => client.getTicketAttachments(123, 20),
+        expected: [{ id: 400 }],
+        error: "ConnectWise document is not associated with requested record",
+      },
+      {
+        name: "exact attachment",
+        validResponse: { id: 400, recordType: "Ticket", recordId: 123 },
+        invalidResponse: { id: 400, recordType: "Ticket", recordId: 124 },
+        exercise: (client) => client.getTicketAttachment(123, 400),
+        expected: { id: 400 },
+        error: "ConnectWise document is not associated with requested record",
+      },
+      {
+        name: "tasks",
+        validResponse: [{ id: 401, ticketId: 123 }],
+        invalidResponse: [{ id: 401, ticketId: 124 }],
+        exercise: (client) => client.getTicketTasks(123, 20),
+        expected: [{ id: 401 }],
+        error: "ConnectWise task is not associated with requested ticket",
+      },
+      {
+        name: "time entries",
+        validResponse: [
+          { id: 501, chargeToType: "ServiceTicket", chargeToId: 123 },
+        ],
+        invalidResponse: [
+          { id: 501, chargeToType: "ServiceTicket", chargeToId: 124 },
+        ],
+        exercise: (client) => client.getTicketTimeEntries(123, 20),
+        expected: [{ id: 501 }],
+        error: "ConnectWise time entry is not associated with requested ticket",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const failureLogs: string[] = [];
+      const failingClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(testCase.invalidResponse),
+        log: (line) => failureLogs.push(line),
+      });
+
+      await expect(
+        testCase.exercise(failingClient),
+        testCase.name,
+      ).rejects.toThrow(testCase.error);
+      expect(failureLogs, testCase.name).toHaveLength(1);
+      expect(JSON.parse(failureLogs[0]!), testCase.name).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+
+      const successLogs: string[] = [];
+      const successfulClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(testCase.validResponse),
+        log: (line) => successLogs.push(line),
+      });
+
+      await expect(
+        testCase.exercise(successfulClient),
+        testCase.name,
+      ).resolves.toEqual(testCase.expected);
+      expect(successLogs, testCase.name).toHaveLength(1);
+      expect(JSON.parse(successLogs[0]!), testCase.name).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "success",
+      });
+    }
+  });
+
   it("rejects an invalid ticket ID without making a request", async () => {
     let requests = 0;
     const client = createConnectWiseClient(credentials, {
