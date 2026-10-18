@@ -908,13 +908,22 @@ describe("staging smoke output safety", () => {
     await new Promise((resolve) => mock.listen(0, "127.0.0.1", resolve));
     baseUrl = `http://127.0.0.1:${mock.address().port}`;
 
+    const suppliedToken = [
+      Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString(
+        "base64url",
+      ),
+      Buffer.from(JSON.stringify({ scope: "mcp:read mcp:write" })).toString(
+        "base64url",
+      ),
+      "unsigned",
+    ].join(".");
     const smokeEnv = {
       ...process.env,
       SMOKE_BASE_URL: baseUrl,
       SMOKE_EXPECT_RESOURCE: `${baseUrl}/mcp`,
       NODE_ENV: "test",
       SMOKE_ALLOW_INSECURE_LOCALHOST: "1",
-      SMOKE_ACCESS_TOKEN: `TOKEN_${canary}`,
+      SMOKE_ACCESS_TOKEN: suppliedToken,
       SMOKE_EXPECT_PROFILE_ALIAS: "TEST_PROFILE",
       SMOKE_TICKET_ID: "1234",
       SMOKE_EXPECT_MEMBER_ID: "2468",
@@ -1103,7 +1112,7 @@ describe("staging smoke output safety", () => {
     expect(paginatedOutput).not.toContain("CANARY_UNREAD_PAGE");
     expect(paginatedOutput).not.toContain("PAGINATED_CANARY");
     expect(exitCode).toBe(0);
-    expect(mcpIdsByAuthorization.get(`Bearer TOKEN_${canary}`)).toEqual([
+    expect(mcpIdsByAuthorization.get(`Bearer ${suppliedToken}`)).toEqual([
       1, 2, 3, 4, 5, 6, 7,
     ]);
     expect(capturedWhoamiArguments).toEqual({});
@@ -1127,9 +1136,16 @@ describe("staging smoke output safety", () => {
       "using supplied access token; skipping DCR, consent, and Entra login",
     );
     expect(output).toContain(
+      "supplied token scope not independently verified; interactive exact-scope gate remains required",
+    );
+    expect(output).not.toContain(
+      "token response did not grant exactly mcp:read",
+    );
+    expect(output).toContain(
       "Manual staging acceptance checklist remains required.",
     );
     expect(output).not.toContain("fully operational");
+    expect(output).not.toContain(suppliedToken);
     expect(output).not.toContain(canary);
     expect(output).not.toContain(baseUrl);
     expect(output).not.toContain("safe-session");

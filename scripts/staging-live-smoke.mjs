@@ -367,10 +367,10 @@ log("unauthenticated MCP OAuth challenge ok");
 // Fast path: when SMOKE_ACCESS_TOKEN is set (CI / no-browser runs), reuse it
 // directly and skip the DCR + consent flow below.
 let token;
-if (process.env.SMOKE_ACCESS_TOKEN) {
+const suppliedAccessToken = Boolean(process.env.SMOKE_ACCESS_TOKEN);
+if (suppliedAccessToken) {
   token = {
     access_token: process.env.SMOKE_ACCESS_TOKEN,
-    scope: "mcp:read",
   };
   log("using supplied access token; skipping DCR, consent, and Entra login");
 } else {
@@ -484,7 +484,11 @@ if (!token?.access_token) {
     "no access token available (set SMOKE_ACCESS_TOKEN or complete the consent flow)",
   );
 }
-if (!hasExactReadScope(token.scope)) {
+if (suppliedAccessToken) {
+  log(
+    "supplied token scope not independently verified; interactive exact-scope gate remains required",
+  );
+} else if (!hasExactReadScope(token.scope)) {
   fail("token response did not grant exactly mcp:read");
 }
 
@@ -820,7 +824,7 @@ log("schedule.entries.byMember ok (ownership, range, and order matched)");
 // 15. Done. This smoke remains read-only and does not satisfy the remaining
 // manual staging acceptance gates.
 server.close();
-if (process.env.SMOKE_ACCESS_TOKEN) {
+if (suppliedAccessToken) {
   log(
     "PASS: supplied-token read-only staging subset passed (OAuth login and token issuance not tested).",
   );
