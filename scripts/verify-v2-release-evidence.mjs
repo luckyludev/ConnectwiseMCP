@@ -429,6 +429,7 @@ if (
 
 const lockPackages = new Set();
 const requiredLockPackages = new Set();
+const includedLockPackagePaths = new Set([""]);
 const lockPackageRecords = new Map();
 for (const [packagePath, packageRecord] of Object.entries(lock.packages)) {
   if (packagePath === "") {
@@ -442,6 +443,7 @@ for (const [packagePath, packageRecord] of Object.entries(lock.packages)) {
     !/^(?:node_modules\/(?:@[^/]+\/)?[^/]+)(?:\/node_modules\/(?:@[^/]+\/)?[^/]+)*$/u.test(
       packagePath,
     ) ||
+    packagePath.split("/").some((part) => part === "." || part === "..") ||
     packageRecord === null ||
     typeof packageRecord !== "object" ||
     Array.isArray(packageRecord) ||
@@ -462,8 +464,15 @@ for (const [packagePath, packageRecord] of Object.entries(lock.packages)) {
     identity: packageIdentity,
     record: packageRecord,
   });
-  if (packageRecord.optional !== true)
+  const runtimePackagePath = packagePath.slice("node_modules/".length);
+  if (
+    packageRecord.optional !== true ||
+    directories.has(runtimePackagePath) ||
+    links.has(runtimePackagePath)
+  ) {
     requiredLockPackages.add(packageIdentity);
+    includedLockPackagePaths.add(packagePath);
+  }
 }
 
 const sbom = parseJson(sbomName);
@@ -551,7 +560,9 @@ if (
     (identity) => !componentIdentities.has(identity),
   )
 ) {
-  fail(`${sbomName} omits a non-optional package-lock.json package`);
+  fail(
+    `${sbomName} omits an installed or non-optional package-lock.json package`,
+  );
 }
 
 const expectedDependencies = new Map(
@@ -577,6 +588,7 @@ for (const [
   packagePath,
   { identity: sourceIdentity, record },
 ] of lockPackageRecords) {
+  if (!includedLockPackagePaths.has(packagePath)) continue;
   const sourceReference = componentReferences.get(sourceIdentity);
   if (sourceReference === undefined) continue;
   for (const field of [

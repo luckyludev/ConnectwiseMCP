@@ -50,6 +50,9 @@ async function makeEvidence(target = "staging") {
     join(cwd, "scripts", "deploy-verified-bundle.sh"),
   );
   await mkdir(join(cwd, "node_modules", "package"), { recursive: true });
+  await mkdir(join(cwd, "node_modules", "optional-installed"), {
+    recursive: true,
+  });
   await writeFile(join(cwd, "dist", "index.js"), "export default {};\n");
   await writeFile(join(cwd, "wrangler.jsonc"), '{"name":"evidence-test"}\n');
   await writeFile(
@@ -63,12 +66,33 @@ async function makeEvidence(target = "staging") {
           name: "evidence-test",
           version: "1.0.0",
           dependencies: { package: "1.0.0" },
+          optionalDependencies: {
+            "optional-absent": "1.0.0",
+            "optional-installed": "1.0.0",
+            "package-directory-link": "1.0.0",
+          },
+        },
+        "node_modules/optional-absent": {
+          version: "1.0.0",
+          optional: true,
+        },
+        "node_modules/optional-installed": {
+          version: "1.0.0",
+          optional: true,
+        },
+        "node_modules/package-directory-link": {
+          version: "1.0.0",
+          optional: true,
         },
         "node_modules/package": { version: "1.0.0" },
       },
     })}\n`,
   );
   await writeFile(join(cwd, "node_modules", "package", "index.js"), "ok\n");
+  await writeFile(
+    join(cwd, "node_modules", "optional-installed", "index.js"),
+    "optional\n",
+  );
   await symlink("package/index.js", join(cwd, "node_modules", "package-link"));
   await symlink("package", join(cwd, "node_modules", "package-directory-link"));
   await symlink("package", join(cwd, "node_modules", "package-alias"));
@@ -126,10 +150,31 @@ async function makeEvidence(target = "staging") {
             name: "package",
             version: "1.0.0",
           },
+          {
+            "bom-ref": "optional-installed@1.0.0",
+            type: "library",
+            name: "optional-installed",
+            version: "1.0.0",
+          },
+          {
+            "bom-ref": "package-directory-link@1.0.0",
+            type: "library",
+            name: "package-directory-link",
+            version: "1.0.0",
+          },
         ],
         dependencies: [
-          { ref: "evidence-test@1.0.0", dependsOn: ["package@1.0.0"] },
+          {
+            ref: "evidence-test@1.0.0",
+            dependsOn: [
+              "optional-installed@1.0.0",
+              "package-directory-link@1.0.0",
+              "package@1.0.0",
+            ],
+          },
           { ref: "package@1.0.0", dependsOn: [] },
+          { ref: "optional-installed@1.0.0", dependsOn: [] },
+          { ref: "package-directory-link@1.0.0", dependsOn: [] },
         ],
       },
       null,
@@ -159,6 +204,19 @@ async function bindInventory(fixture, mutate) {
   manifest.runtimeInventorySha256 = createHash("sha256")
     .update(bytes)
     .digest("hex");
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+async function bindLock(fixture, mutate) {
+  const lockPath = join(fixture.evidence, "package-lock.json");
+  const manifestPath = join(fixture.evidence, fixture.manifestName);
+  const lock = JSON.parse(await readFile(lockPath, "utf8"));
+  mutate(lock);
+  const bytes = Buffer.from(`${JSON.stringify(lock)}\n`);
+  await writeFile(lockPath, bytes);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.lockSize = bytes.length;
+  manifest.lockSha256 = createHash("sha256").update(bytes).digest("hex");
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
@@ -241,6 +299,19 @@ describe("offline V2 release evidence verifier", () => {
     expect(verify(fixture).stderr).toContain("malformed file record");
   });
 
+  it("rejects a non-canonical package-lock path before inventory matching", async () => {
+    const fixture = await makeEvidence();
+    await bindLock(fixture, (lock) => {
+      lock.packages["node_modules/../node_modules/optional-installed"] = {
+        version: "1.0.0",
+        optional: true,
+      };
+    });
+    expect(verify(fixture).stderr).toContain(
+      "package-lock.json contains an invalid package record",
+    );
+  });
+
   it("rejects an inventory symlink that escapes the runtime", async () => {
     const fixture = await makeEvidence();
     await bindInventory(fixture, (inventory) => {
@@ -297,13 +368,74 @@ describe("offline V2 release evidence verifier", () => {
     );
   });
 
+  it("rejects an SBOM missing an installed optional lock package", async () => {
+    const fixture = await makeEvidence();
+    await mutateSbom(fixture, (sbom) => {
+      sbom.components = sbom.components.filter(
+        (component) => component.name !== "optional-installed",
+      );
+      sbom.dependencies = sbom.dependencies
+        .filter((dependency) => dependency.ref !== "optional-installed@1.0.0")
+        .map((dependency) => ({
+          ...dependency,
+          dependsOn: dependency.dependsOn.filter(
+            (reference) => reference !== "optional-installed@1.0.0",
+          ),
+        }));
+    });
+    expect(verify(fixture).stderr).toContain(
+      "omits an installed or non-optional package-lock.json package",
+    );
+  });
+
+  it("rejects an SBOM missing a symlink-installed optional lock package", async () => {
+    const fixture = await makeEvidence();
+    await mutateSbom(fixture, (sbom) => {
+      sbom.components = sbom.components.filter(
+        (component) => component.name !== "package-directory-link",
+      );
+      sbom.dependencies = sbom.dependencies
+        .filter(
+          (dependency) => dependency.ref !== "package-directory-link@1.0.0",
+        )
+        .map((dependency) => ({
+          ...dependency,
+          dependsOn: dependency.dependsOn.filter(
+            (reference) => reference !== "package-directory-link@1.0.0",
+          ),
+        }));
+    });
+    expect(verify(fixture).stderr).toContain(
+      "omits an installed or non-optional package-lock.json package",
+    );
+  });
+
+  it("allows an absent platform-optional lock package to be omitted", async () => {
+    const fixture = await makeEvidence();
+    const lock = JSON.parse(
+      await readFile(join(fixture.evidence, "package-lock.json"), "utf8"),
+    );
+    const sbom = JSON.parse(
+      await readFile(
+        join(fixture.evidence, `connectwise-v2-${fixture.target}.cdx.json`),
+        "utf8",
+      ),
+    );
+
+    expect(lock.packages["node_modules/optional-absent"].optional).toBe(true);
+    expect(
+      sbom.components.some((component) => component.name === "optional-absent"),
+    ).toBe(false);
+    expect(verify(fixture).status).toBe(0);
+  });
+
   it("rejects an SBOM missing a non-optional lock package", async () => {
     const fixture = await makeEvidence();
     await mutateSbom(fixture, (sbom) => {
       sbom.components = [];
     });
     expect(verify(fixture).stderr).toContain(
-      "omits a non-optional package-lock.json package",
+      "omits an installed or non-optional package-lock.json package",
     );
   });
 
