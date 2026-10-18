@@ -1633,6 +1633,38 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertRecentAgreementInvoiceList(
+    records: unknown,
+    agreementId: number,
+  ): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise invoice response");
+    }
+    let previousTimestamp = Number.POSITIVE_INFINITY;
+    for (const record of records) {
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        throw new Error("Invalid ConnectWise invoice response");
+      }
+      const invoice = record as Record<string, unknown>;
+      const agreement = invoice.agreement;
+      if (
+        !agreement ||
+        typeof agreement !== "object" ||
+        Array.isArray(agreement) ||
+        (agreement as Record<string, unknown>).id !== agreementId
+      ) {
+        throw new Error(
+          "ConnectWise invoice is not associated with requested agreement",
+        );
+      }
+      const timestamp = strictIsoTimestampMs(invoice.date);
+      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
+        throw new Error("ConnectWise invoices are not ordered recent-first");
+      }
+      previousTimestamp = timestamp;
+    }
+  }
+
   function verifiedObjectScheduleEntryList(
     records: unknown,
     objectId: number,
@@ -2704,19 +2736,11 @@ export function createConnectWiseClient(
           orderBy: "date desc",
         },
         pageSize,
+        (records) => {
+          assertRecentAgreementInvoiceList(records, agreementId);
+        },
       )) as Array<Record<string, unknown>>;
       return invoices.map((invoice) => {
-        const agreement = invoice.agreement;
-        if (
-          !agreement ||
-          typeof agreement !== "object" ||
-          Array.isArray(agreement) ||
-          (agreement as Record<string, unknown>).id !== agreementId
-        ) {
-          throw new Error(
-            "ConnectWise invoice is not associated with requested agreement",
-          );
-        }
         const { agreement: _agreement, ...item } = invoice;
         return item;
       });

@@ -1934,9 +1934,17 @@ describe("ConnectWiseClient", () => {
         urls.push(String(input));
         return Response.json([
           {
+            id: 92,
+            invoiceNumber: "INV-92",
+            total: 150,
+            date: "2026-10-18T09:00:00-04:00",
+            agreement: { id: 7 },
+          },
+          {
             id: 91,
             invoiceNumber: "INV-91",
             total: 125,
+            date: "2026-10-18T13:00:00Z",
             agreement: { id: 7 },
           },
         ]);
@@ -1944,7 +1952,18 @@ describe("ConnectWiseClient", () => {
     });
 
     await expect(client.getRecentAgreementInvoices(7, 5)).resolves.toEqual([
-      { id: 91, invoiceNumber: "INV-91", total: 125 },
+      {
+        id: 92,
+        invoiceNumber: "INV-92",
+        total: 150,
+        date: "2026-10-18T09:00:00-04:00",
+      },
+      {
+        id: 91,
+        invoiceNumber: "INV-91",
+        total: 125,
+        date: "2026-10-18T13:00:00Z",
+      },
     ]);
 
     const invoicesUrl = new URL(urls[0]!);
@@ -1961,21 +1980,86 @@ describe("ConnectWiseClient", () => {
   });
 
   it.each([
-    { id: 91, agreement: { id: 8 } },
-    { id: 91 },
-    { id: 91, agreement: null },
-    { id: 91, agreement: [] },
-    { id: 91, agreement: { id: "7" } },
+    {
+      name: "ascending timestamps",
+      invoices: [
+        {
+          id: 91,
+          date: "2026-10-18T12:00:00Z",
+          agreement: { id: 7 },
+        },
+        {
+          id: 92,
+          date: "2026-10-18T13:00:00Z",
+          agreement: { id: 7 },
+        },
+      ],
+    },
+    {
+      name: "a missing timestamp",
+      invoices: [{ id: 91, agreement: { id: 7 } }],
+    },
+    {
+      name: "a malformed timestamp",
+      invoices: [{ id: 91, date: "October 18, 2026", agreement: { id: 7 } }],
+    },
+    {
+      name: "a non-string timestamp",
+      invoices: [{ id: 91, date: 123, agreement: { id: 7 } }],
+    },
+  ])(
+    "rejects recent invoices with $name before reporting success",
+    async ({ invoices }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(invoices),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.getRecentAgreementInvoices(7, 5)).rejects.toThrow(
+        "ConnectWise invoices are not ordered recent-first",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
+
+  it.each([
+    { id: 91, date: "2026-10-18T13:00:00Z", agreement: { id: 8 } },
+    { id: 91, date: "2026-10-18T13:00:00Z" },
+    { id: 91, date: "2026-10-18T13:00:00Z", agreement: null },
+    { id: 91, date: "2026-10-18T13:00:00Z", agreement: [] },
+    {
+      id: 91,
+      date: "2026-10-18T13:00:00Z",
+      agreement: { id: "7" },
+    },
   ])(
     "rejects an invoice without the exact requested agreement relationship: %j",
     async (invoice) => {
+      const logs: string[] = [];
       const client = createConnectWiseClient(credentials, {
         fetcher: async () => Response.json([invoice]),
+        log: (line) => logs.push(line),
       });
 
       await expect(client.getRecentAgreementInvoices(7, 5)).rejects.toThrow(
         "ConnectWise invoice is not associated with requested agreement",
       );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
     },
   );
 
