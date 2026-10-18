@@ -140,7 +140,7 @@ describe("dependency maintenance configuration", () => {
     ).toHaveLength(1);
     expect(legacyWorkflow).toContain("node-version: 24.11.0");
     expect(npmConfig).toBe("engine-strict=true\n");
-    expect(v2Package.engines).toEqual({ node: "^24.11.0 || >=26.0.0" });
+    expect(v2Package.engines).toEqual({ node: "^24.11.0" });
     expect(v2Workflow.match(/- "\.npmrc"/gu)).toHaveLength(1);
   });
 
