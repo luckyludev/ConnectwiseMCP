@@ -489,18 +489,21 @@ type CatalogRoute = {
   transform?: (value: unknown) => unknown;
 };
 
-// CW rejects orderBy on schedule entries, so order them in the worker.
+// CW rejects orderBy on schedule entries, so order them in the worker. Fail
+// closed when an entry cannot participate in the promised chronological order.
 function sortByDateStart(value: unknown): unknown {
   if (!Array.isArray(value) || value.length === 0) return value;
   const items = value as Array<Record<string, unknown>>;
-  if (!items.every((entry) => entry && typeof entry.dateStart === "string")) {
-    return value;
-  }
-  const timestamps = items.map((entry) => Date.parse(String(entry.dateStart)));
-  if (timestamps.some((timestamp) => !Number.isFinite(timestamp))) return value;
-  return [...items].sort(
-    (a, b) => Date.parse(String(a.dateStart)) - Date.parse(String(b.dateStart)),
+  const timestamps = items.map((entry) =>
+    strictIsoTimestampMs(entry?.dateStart),
   );
+  if (timestamps.some((timestamp) => !Number.isFinite(timestamp))) {
+    throw new Error("ConnectWise schedule entry has invalid dateStart");
+  }
+  return items
+    .map((entry, index) => ({ entry, timestamp: timestamps[index]! }))
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .map(({ entry }) => entry);
 }
 
 const CATALOG_DOCUMENT_RECORD_TYPES = new Set([
