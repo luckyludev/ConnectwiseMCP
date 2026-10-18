@@ -2131,7 +2131,7 @@ export function createConnectWiseClient(
     async listTimeEntries(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
       const memberId = mappedMemberId("list_time_entries");
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/time/entries",
         {
           conditions: `member/id=${memberId}`,
@@ -2140,16 +2140,15 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (result) => assertMappedMemberList(result, memberId),
       );
-      assertMappedMemberList(result, memberId);
-      return result;
     },
 
     async listScheduleEntries(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
       const memberId = mappedMemberId("list_schedule_entries");
       // CW rejects orderBy on /schedule/entries; do not imply recency here.
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/schedule/entries",
         {
           conditions: `member/id=${memberId}`,
@@ -2157,15 +2156,14 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (result) => assertMappedMemberList(result, memberId),
       );
-      assertMappedMemberList(result, memberId);
-      return result;
     },
 
     async getTimeSheets(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
       const memberId = mappedMemberId("get_time_sheets");
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/time/sheets",
         {
           conditions: `member/id=${memberId}`,
@@ -2174,9 +2172,8 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (result) => assertMappedMemberList(result, memberId),
       );
-      assertMappedMemberList(result, memberId);
-      return result;
     },
 
     async downloadDocument(
