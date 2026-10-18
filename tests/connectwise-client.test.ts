@@ -1848,6 +1848,63 @@ describe("ConnectWiseClient", () => {
   });
 
   it.each([
+    { name: "missing price", addition: { extCost: 10, agreementId: 7 } },
+    {
+      name: "null cost",
+      addition: { extPrice: 25, extCost: null, agreementId: 7 },
+    },
+    {
+      name: "string price",
+      addition: { extPrice: "25", extCost: 10, agreementId: 7 },
+    },
+  ])(
+    "rejects $name in agreement addition summaries before auditing success",
+    async ({ addition }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([addition]),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.getAgreementAdditionSummary(7, 5)).rejects.toThrow(
+        "ConnectWise agreement addition summary has invalid commercial fields",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
+
+  it("rejects overflowing agreement addition totals before auditing success", async () => {
+    const logs: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          { extPrice: Number.MAX_VALUE, extCost: 1, agreementId: 7 },
+          { extPrice: Number.MAX_VALUE, extCost: 1, agreementId: 7 },
+        ]),
+      log: (line) => logs.push(line),
+    });
+
+    await expect(client.getAgreementAdditionSummary(7, 5)).rejects.toThrow(
+      "ConnectWise agreement addition summary totals exceed numeric limits",
+    );
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "upstream_error",
+    });
+  });
+
+  it.each([
     {},
     { agreementId: null },
     { agreementId: "7" },

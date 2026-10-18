@@ -1414,6 +1414,37 @@ export function createConnectWiseClient(
     });
   }
 
+  function verifiedAgreementAdditionSummaryList(
+    records: unknown,
+    agreementId: number,
+  ): Array<Record<string, unknown>> {
+    const additions = verifiedAgreementAdditionList(records, agreementId);
+    let totalExtendedPrice = 0;
+    let totalCost = 0;
+    for (const addition of additions) {
+      const extendedPrice = addition.extPrice;
+      const extendedCost = addition.extCost;
+      if (
+        typeof extendedPrice !== "number" ||
+        !Number.isFinite(extendedPrice) ||
+        typeof extendedCost !== "number" ||
+        !Number.isFinite(extendedCost)
+      ) {
+        throw new Error(
+          "ConnectWise agreement addition summary has invalid commercial fields",
+        );
+      }
+      totalExtendedPrice += extendedPrice;
+      totalCost += extendedCost;
+      if (!Number.isFinite(totalExtendedPrice) || !Number.isFinite(totalCost)) {
+        throw new Error(
+          "ConnectWise agreement addition summary totals exceed numeric limits",
+        );
+      }
+    }
+    return additions;
+  }
+
   function verifiedAgreementAdditionSearchList(
     records: unknown,
     agreementId: number,
@@ -2605,8 +2636,11 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (records) => {
+          verifiedAgreementAdditionSummaryList(records, agreementId);
+        },
       );
-      return verifiedAgreementAdditionList(additions, agreementId);
+      return verifiedAgreementAdditionSummaryList(additions, agreementId);
     },
 
     async createAgreementAddition(agreementId, input): Promise<unknown> {
