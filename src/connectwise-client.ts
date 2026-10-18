@@ -1613,6 +1613,26 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertRecentTimeEntryOrder(records: unknown): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise time entry response");
+    }
+    let previousTimestamp = Number.POSITIVE_INFINITY;
+    for (const record of records) {
+      const dateEntered =
+        record && typeof record === "object" && !Array.isArray(record)
+          ? (record as Record<string, unknown>).dateEntered
+          : undefined;
+      const timestamp = strictIsoTimestampMs(dateEntered);
+      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
+        throw new Error(
+          "ConnectWise time entries are not ordered recent-first",
+        );
+      }
+      previousTimestamp = timestamp;
+    }
+  }
+
   function verifiedObjectScheduleEntryList(
     records: unknown,
     objectId: number,
@@ -2214,7 +2234,10 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
-        (result) => assertMappedMemberList(result, memberId),
+        (result) => {
+          assertMappedMemberList(result, memberId);
+          assertRecentTimeEntryOrder(result);
+        },
       );
     },
 

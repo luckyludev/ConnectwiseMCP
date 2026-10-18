@@ -2109,8 +2109,90 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[6]!).searchParams.getAll("fields")).toEqual([
       timeEntryReadFields,
     ]);
+    expect(new URL(urls[6]!).searchParams.get("orderBy")).toBe(
+      "dateEntered desc",
+    );
     expect(new URL(urls[6]!).searchParams.get("pageSize")).toBe("5");
   });
+
+  it("accepts recent-first mapped-member time entries", async () => {
+    const entries = [
+      {
+        id: 2,
+        member: { id: 149 },
+        dateEntered: "2026-10-18T12:00:00Z",
+      },
+      {
+        id: 1,
+        member: { id: 149 },
+        dateEntered: "2026-10-18T11:00:00Z",
+      },
+    ];
+    const logs: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json(entries),
+      log: (line) => logs.push(line),
+    });
+
+    await expect(client.listTimeEntries(5)).resolves.toEqual(entries);
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "success",
+    });
+  });
+
+  it.each([
+    {
+      name: "ascending timestamps",
+      entries: [
+        {
+          id: 1,
+          member: { id: 149 },
+          dateEntered: "2026-10-18T11:00:00Z",
+        },
+        {
+          id: 2,
+          member: { id: 149 },
+          dateEntered: "2026-10-18T12:00:00Z",
+        },
+      ],
+    },
+    {
+      name: "missing timestamp",
+      entries: [{ id: 1, member: { id: 149 } }],
+    },
+    {
+      name: "malformed timestamp",
+      entries: [
+        { id: 1, member: { id: 149 }, dateEntered: "October 18, 2026" },
+      ],
+    },
+  ])(
+    "rejects time entries with $name before reporting success",
+    async ({ entries }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(entries),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.listTimeEntries(5)).rejects.toThrow(
+        "ConnectWise time entries are not ordered recent-first",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
 
   it("verifies every board-ticket result belongs to the requested board", async () => {
     const matchingTicket = {
@@ -3487,7 +3569,11 @@ describe("ConnectWiseClient", () => {
     }
 
     for (const read of reads) {
-      const validRecord = { id: 1, member: { id: 149 } };
+      const validRecord = {
+        id: 1,
+        member: { id: 149 },
+        dateEntered: "2026-10-18T12:00:00Z",
+      };
       const logs: string[] = [];
       const client = createConnectWiseClient(credentials, {
         fetcher: async () => Response.json([validRecord]),
