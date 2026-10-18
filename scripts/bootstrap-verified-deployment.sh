@@ -13,10 +13,12 @@ if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_PATH+x}" = x ] || [ "${NODE_DEBUG+x}
   printf '%s\n' "Refusing credential-bearing deployment while Node injection or debug settings are present." >&2
   exit 1
 fi
-if [ "${LD_PRELOAD+x}" = x ] || [ "${LD_LIBRARY_PATH+x}" = x ] || \
-   [ "${DYLD_INSERT_LIBRARIES+x}" = x ] || [ "${DYLD_LIBRARY_PATH+x}" = x ] || \
-   [ "${DYLD_FRAMEWORK_PATH+x}" = x ] || [ "${DYLD_FALLBACK_LIBRARY_PATH+x}" = x ] || \
-   [ "${DYLD_FALLBACK_FRAMEWORK_PATH+x}" = x ]; then
+loader_override=
+for loader_name in ${!LD_@} ${!DYLD_@}; do
+  loader_override=1
+  break
+done
+if [ -n "$loader_override" ] || [ "${GLIBC_TUNABLES+x}" = x ]; then
   printf '%s\n' "Refusing credential-bearing deployment while dynamic-loader overrides are present." >&2
   exit 1
 fi
@@ -87,6 +89,20 @@ if [ "$DEPLOY_NODE_PATH" != "$physical_node_path" ]; then
   printf '%s\n' "DEPLOY_NODE_PATH must not contain symlinked or non-canonical path components." >&2
   exit 1
 fi
+if [ -w "$DEPLOY_NODE_PATH" ] || [ -w "$node_parent" ]; then
+  printf '%s\n' "DEPLOY_NODE_PATH and its parent directory must not be writable during deployment." >&2
+  exit 1
+fi
+if [ -z "${DEPLOY_NODE_SHA256:-}" ] || [ "${#DEPLOY_NODE_SHA256}" -ne 64 ]; then
+  printf '%s\n' "DEPLOY_NODE_SHA256 must be the retained lowercase SHA-256 of the reviewed Node executable." >&2
+  exit 1
+fi
+case "$DEPLOY_NODE_SHA256" in
+  *[!0-9a-f]*)
+    printf '%s\n' "DEPLOY_NODE_SHA256 must be the retained lowercase SHA-256 of the reviewed Node executable." >&2
+    exit 1
+    ;;
+esac
 
 repository_root=$(pwd -P)
 if [ "${PWD:-}" != "$repository_root" ]; then
@@ -113,9 +129,11 @@ esac
 # path before credentials are made available. Its inline verifier opens the
 # repository launcher once, authenticates that descriptor, and gives the exact
 # authenticated bytes to /bin/sh over stdin; it never executes the mutable path.
-unset BASH_ENV ENV NODE_OPTIONS NODE_PATH NODE_DEBUG LD_PRELOAD LD_LIBRARY_PATH
-unset DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
-unset DYLD_FALLBACK_LIBRARY_PATH DYLD_FALLBACK_FRAMEWORK_PATH
+unset BASH_ENV ENV NODE_OPTIONS NODE_PATH NODE_DEBUG
+for loader_name in ${!LD_@} ${!DYLD_@}; do
+  unset "$loader_name"
+done
+unset GLIBC_TUNABLES
 unset CLOUDFLARE_API_BASE_URL CF_API_BASE_URL CLOUDFLARE_BASE_URL
 unset CLOUDFLARE_CONTAINER_REGISTRY WRANGLER_API_ENVIRONMENT CLOUDFLARE_COMPLIANCE_REGION
 unset WRANGLER_AUTH_DOMAIN WRANGLER_AUTH_URL WRANGLER_TOKEN_URL WRANGLER_REVOKE_URL
@@ -125,6 +143,18 @@ unset WRANGLER_OUTPUT_FILE_PATH WRANGLER_OUTPUT_FILE_DIRECTORY
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy
 unset NODE_EXTRA_CA_CERTS NODE_TLS_REJECT_UNAUTHORIZED OPENSSL_CONF SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE
 unset TMPDIR TMP TEMP
+
+# Re-authenticate the reviewed non-writable runtime immediately before execution.
+# The operational procedure additionally forbids concurrent writers.
+actual_node_sha256=$(
+  /usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/shasum -a 256 "$DEPLOY_NODE_PATH"
+)
+actual_node_sha256=${actual_node_sha256%% *}
+if [ "$actual_node_sha256" != "$DEPLOY_NODE_SHA256" ]; then
+  printf '%s\n' "The approved Node executable does not match its retained reviewed digest." >&2
+  exit 1
+fi
+
 exec "$DEPLOY_NODE_PATH" -e '
   const { spawnSync } = require("node:child_process");
   const { createHash, timingSafeEqual } = require("node:crypto");

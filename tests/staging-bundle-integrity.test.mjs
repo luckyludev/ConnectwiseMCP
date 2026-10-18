@@ -2,10 +2,12 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmod,
+  copyFile,
   link,
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   readdir,
   rename,
   rm,
@@ -17,7 +19,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const integrityPath = fileURLToPath(
   new URL("../scripts/staging-bundle-integrity.mjs", import.meta.url),
@@ -43,6 +45,9 @@ const unsafeDeploymentEnvironment = [
   "NODE_DEBUG",
   "LD_PRELOAD",
   "LD_LIBRARY_PATH",
+  "LD_AUDIT",
+  "LD_HERMES_TEST",
+  "GLIBC_TUNABLES",
   "DYLD_INSERT_LIBRARIES",
   "DYLD_LIBRARY_PATH",
   "DYLD_FRAMEWORK_PATH",
@@ -87,6 +92,50 @@ const observableUnsafeDeploymentEnvironment =
   unsafeDeploymentEnvironment.filter(
     (name) => !(process.platform === "darwin" && name.startsWith("DYLD_")),
   );
+let approvedNodeDirectory;
+let approvedNodePath;
+let approvedNodeSha256;
+
+beforeAll(async () => {
+  approvedNodeDirectory = await realpath(
+    await mkdtemp(join(tmpdir(), "cw-approved-node-")),
+  );
+  const approvedBinDirectory = join(approvedNodeDirectory, "bin");
+  const approvedLibDirectory = join(approvedNodeDirectory, "lib");
+  await mkdir(approvedBinDirectory);
+  approvedNodePath = join(approvedBinDirectory, "node");
+  await copyFile(process.execPath, approvedNodePath);
+  if (process.platform === "darwin") {
+    const sourceLibDirectory = join(dirname(process.execPath), "..", "lib");
+    await mkdir(approvedLibDirectory);
+    for (const name of await readdir(sourceLibDirectory)) {
+      if (/^libnode\..*\.dylib$/u.test(name)) {
+        await copyFile(
+          join(sourceLibDirectory, name),
+          join(approvedLibDirectory, name),
+        );
+      }
+    }
+    await chmod(approvedLibDirectory, 0o555);
+  }
+  await chmod(approvedNodePath, 0o555);
+  approvedNodeSha256 = createHash("sha256")
+    .update(await readFile(approvedNodePath))
+    .digest("hex");
+  await chmod(approvedBinDirectory, 0o555);
+  await chmod(approvedNodeDirectory, 0o555);
+});
+
+afterAll(async () => {
+  if (approvedNodeDirectory) {
+    await chmod(approvedNodeDirectory, 0o700);
+    await chmod(join(approvedNodeDirectory, "bin"), 0o700);
+    if (process.platform === "darwin") {
+      await chmod(join(approvedNodeDirectory, "lib"), 0o700);
+    }
+    await rm(approvedNodeDirectory, { recursive: true, force: true });
+  }
+});
 
 function cleanDeploymentEnvironment() {
   const env = { ...process.env };
@@ -173,13 +222,15 @@ function runLauncher(
 ) {
   const env = cleanDeploymentEnvironment();
   delete env.DEPLOY_NODE_PATH;
+  delete env.DEPLOY_NODE_SHA256;
   delete env.STAGING_RELEASE_SHA;
   delete env.STAGING_BUNDLE_SHA256;
   delete env.STAGING_CONFIG_SHA256;
   delete env.STAGING_DEPLOY_RUNTIME_SHA256;
   delete env.STAGING_LAUNCHER_SHA256;
   delete env.STAGING_INTEGRITY_SHA256;
-  env.DEPLOY_NODE_PATH = process.execPath;
+  env.DEPLOY_NODE_PATH = approvedNodePath;
+  env.DEPLOY_NODE_SHA256 = approvedNodeSha256;
   env.STAGING_LAUNCHER_SHA256 = reviewedLauncherSha256;
   env.STAGING_INTEGRITY_SHA256 = reviewedIntegritySha256;
   Object.assign(env, environmentOverrides);
@@ -947,6 +998,41 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
           "DEPLOY_NODE_PATH must be a regular, non-symlink executable.",
         );
       }
+    });
+  });
+
+  it("rejects a writable approved Node path or parent directory", async () => {
+    await withCheckout(async ({ cwd }) => {
+      const writableNodePath = join(await realpath(cwd), "writable-node");
+      await copyFile(process.execPath, writableNodePath);
+      await chmod(writableNodePath, 0o755);
+      const result = runLauncher(cwd, undefined, {
+        DEPLOY_NODE_PATH: writableNodePath,
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "DEPLOY_NODE_PATH and its parent directory must not be writable during deployment.",
+      );
+    });
+  });
+
+  it.each([
+    ["missing", ""],
+    ["malformed", "not-a-digest"],
+    ["mismatched", "0".repeat(64)],
+  ])("rejects a %s approved Node digest", async (label, digest) => {
+    await withCheckout(async ({ cwd }) => {
+      const result = runLauncher(cwd, undefined, {
+        DEPLOY_NODE_SHA256: digest,
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        label === "mismatched"
+          ? "The approved Node executable does not match its retained reviewed digest."
+          : "DEPLOY_NODE_SHA256 must be the retained lowercase SHA-256 of the reviewed Node executable.",
+      );
     });
   });
 

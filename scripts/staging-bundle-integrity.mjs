@@ -59,6 +59,8 @@ const UNSAFE_DEPLOYMENT_ENVIRONMENT = [
   "NODE_DEBUG",
   "LD_PRELOAD",
   "LD_LIBRARY_PATH",
+  "LD_AUDIT",
+  "GLIBC_TUNABLES",
   "DYLD_INSERT_LIBRARIES",
   "DYLD_LIBRARY_PATH",
   "DYLD_FRAMEWORK_PATH",
@@ -101,12 +103,19 @@ const UNSAFE_DEPLOYMENT_ENVIRONMENT = [
 ];
 
 const credentialAction = action === "deploy" || action === "secret";
+function isUnsafeDeploymentEnvironmentName(name) {
+  return (
+    name.startsWith("LD_") ||
+    name.startsWith("DYLD_") ||
+    UNSAFE_DEPLOYMENT_ENVIRONMENT.includes(name)
+  );
+}
 for (const name of ["TMPDIR", "TMP", "TEMP"]) {
   if (credentialAction) delete process.env[name];
 }
 if (
   credentialAction &&
-  UNSAFE_DEPLOYMENT_ENVIRONMENT.some((name) => Object.hasOwn(process.env, name))
+  Object.keys(process.env).some(isUnsafeDeploymentEnvironmentName)
 ) {
   process.stderr.write(
     "Refusing credential-bearing deployment while an unsafe environment override is present.\n",
@@ -816,11 +825,13 @@ function deployVerifiedBundle(
     if (dryRun) arguments_.push("--dry-run");
     if (!result) {
       const deploymentEnvironment = { ...process.env };
-      for (const name of [
-        ...NODE_INJECTION_ENVIRONMENT,
-        ...UNSAFE_DEPLOYMENT_ENVIRONMENT,
-      ]) {
-        delete deploymentEnvironment[name];
+      for (const name of Object.keys(deploymentEnvironment)) {
+        if (
+          NODE_INJECTION_ENVIRONMENT.includes(name) ||
+          isUnsafeDeploymentEnvironmentName(name)
+        ) {
+          delete deploymentEnvironment[name];
+        }
       }
       result = spawnSync(process.execPath, arguments_, {
         env: deploymentEnvironment,
@@ -942,11 +953,13 @@ function putVerifiedStagingSecret(
     chmodSync(runtimeDirectory, 0o500);
     if (!result) {
       const secretEnvironment = { ...process.env };
-      for (const environmentName of [
-        ...NODE_INJECTION_ENVIRONMENT,
-        ...UNSAFE_DEPLOYMENT_ENVIRONMENT,
-      ]) {
-        delete secretEnvironment[environmentName];
+      for (const environmentName of Object.keys(secretEnvironment)) {
+        if (
+          NODE_INJECTION_ENVIRONMENT.includes(environmentName) ||
+          isUnsafeDeploymentEnvironmentName(environmentName)
+        ) {
+          delete secretEnvironment[environmentName];
+        }
       }
       result = spawnSync(
         process.execPath,
