@@ -3229,12 +3229,22 @@ describe("ConnectWiseClient", () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         urls.push(String(input));
-        return Response.json([{ id: 21, member: { id: 149 } }]);
+        return Response.json([
+          {
+            id: 21,
+            member: { id: 149 },
+            dateStart: "2026-10-18T12:00:00Z",
+          },
+        ]);
       },
     });
 
     await expect(client.getTimeSheets(9)).resolves.toEqual([
-      { id: 21, member: { id: 149 } },
+      {
+        id: 21,
+        member: { id: 149 },
+        dateStart: "2026-10-18T12:00:00Z",
+      },
     ]);
     const url = new URL(urls[0]!);
     expect(url.searchParams.get("conditions")).toBe("member/id=149");
@@ -3244,6 +3254,87 @@ describe("ConnectWiseClient", () => {
     expect(url.searchParams.get("orderBy")).toBe("dateStart desc");
     expect(url.searchParams.get("pageSize")).toBe("9");
   });
+
+  it("accepts recent-first timesheets by chronological instant", async () => {
+    const sheets = [
+      {
+        id: 22,
+        member: { id: 149 },
+        dateStart: "2026-10-18T10:00:00-05:00",
+      },
+      {
+        id: 21,
+        member: { id: 149 },
+        dateStart: "2026-10-18T11:00:00+05:00",
+      },
+    ];
+    const logs: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json(sheets),
+      log: (line) => logs.push(line),
+    });
+
+    await expect(client.getTimeSheets(9)).resolves.toEqual(sheets);
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "success",
+    });
+  });
+
+  it.each([
+    {
+      name: "ascending timestamps",
+      sheets: [
+        {
+          id: 21,
+          member: { id: 149 },
+          dateStart: "2026-10-18T11:00:00Z",
+        },
+        {
+          id: 22,
+          member: { id: 149 },
+          dateStart: "2026-10-18T12:00:00Z",
+        },
+      ],
+    },
+    {
+      name: "a missing timestamp",
+      sheets: [{ id: 21, member: { id: 149 } }],
+    },
+    {
+      name: "a malformed timestamp",
+      sheets: [{ id: 21, member: { id: 149 }, dateStart: "October 18, 2026" }],
+    },
+    {
+      name: "a non-string timestamp",
+      sheets: [{ id: 21, member: { id: 149 }, dateStart: 123 }],
+    },
+  ])(
+    "rejects timesheets with $name before reporting success",
+    async ({ sheets }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(sheets),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.getTimeSheets(9)).rejects.toThrow(
+        "ConnectWise timesheets are not ordered recent-first",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
 
   it("rejects timesheet reads without a mapped member before fetching", async () => {
     let requests = 0;
@@ -3657,6 +3748,7 @@ describe("ConnectWiseClient", () => {
         id: 1,
         member: { id: 149 },
         dateEntered: "2026-10-18T12:00:00Z",
+        dateStart: "2026-10-18T12:00:00Z",
       };
       const logs: string[] = [];
       const client = createConnectWiseClient(credentials, {
