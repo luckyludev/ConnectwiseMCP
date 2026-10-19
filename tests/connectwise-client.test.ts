@@ -36,7 +36,8 @@ const scheduleEntryCollectionFields =
   "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
 const timeSheetCollectionFields =
   "id,member,year,period,dateStart,dateEnd,status,hours,deadline";
-const agreementAdditionSummaryFields = "extPrice,extCost,agreementId";
+const agreementAdditionSummaryFields =
+  "id,extPrice,extCost,effectiveDate,agreementId";
 const agreementInvoiceCollectionFields =
   "id,invoiceNumber,total,date,agreement";
 const serviceTicketNoteCollectionFields =
@@ -2158,12 +2159,36 @@ describe("ConnectWiseClient", () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         capturedUrl = String(input);
-        return Response.json([{ extPrice: 25, extCost: 10, agreementId: 7 }]);
+        return Response.json([
+          {
+            id: 12,
+            extPrice: 25,
+            extCost: 10,
+            effectiveDate: "2026-09-16T00:00:00Z",
+            agreementId: 7,
+          },
+          {
+            id: 11,
+            extPrice: 20,
+            extCost: 8,
+            effectiveDate: "2026-09-16T00:00:00Z",
+            agreementId: 7,
+          },
+          {
+            id: 10,
+            extPrice: 15,
+            extCost: 6,
+            effectiveDate: "2026-09-15T00:00:00Z",
+            agreementId: 7,
+          },
+        ]);
       },
     });
 
     await expect(client.getAgreementAdditionSummary(7, 5)).resolves.toEqual([
       { extPrice: 25, extCost: 10 },
+      { extPrice: 20, extCost: 8 },
+      { extPrice: 15, extCost: 6 },
     ]);
 
     const summaryUrl = new URL(capturedUrl);
@@ -2173,8 +2198,110 @@ describe("ConnectWiseClient", () => {
     expect(Object.fromEntries(summaryUrl.searchParams)).toEqual({
       fields: agreementAdditionSummaryFields,
       pageSize: "5",
+      orderBy: "effectiveDate desc,id desc",
     });
   });
+
+  it.each([
+    {
+      name: "ascending dates",
+      additions: [
+        {
+          id: 2,
+          extPrice: 25,
+          extCost: 10,
+          effectiveDate: "2026-09-14",
+          agreementId: 7,
+        },
+        {
+          id: 1,
+          extPrice: 20,
+          extCost: 8,
+          effectiveDate: "2026-09-15",
+          agreementId: 7,
+        },
+      ],
+    },
+    {
+      name: "ascending IDs for tied dates",
+      additions: [
+        {
+          id: 1,
+          extPrice: 25,
+          extCost: 10,
+          effectiveDate: "2026-09-15",
+          agreementId: 7,
+        },
+        {
+          id: 2,
+          extPrice: 20,
+          extCost: 8,
+          effectiveDate: "2026-09-15",
+          agreementId: 7,
+        },
+      ],
+    },
+    {
+      name: "missing tie-breaker ID",
+      additions: [
+        {
+          extPrice: 25,
+          extCost: 10,
+          effectiveDate: "2026-09-15",
+          agreementId: 7,
+        },
+      ],
+    },
+    {
+      name: "missing effective date",
+      additions: [{ id: 1, extPrice: 25, extCost: 10, agreementId: 7 }],
+    },
+    {
+      name: "impossible effective date",
+      additions: [
+        {
+          id: 1,
+          extPrice: 25,
+          extCost: 10,
+          effectiveDate: "2026-02-30",
+          agreementId: 7,
+        },
+      ],
+    },
+    {
+      name: "timezone-less effective timestamp",
+      additions: [
+        {
+          id: 1,
+          extPrice: 25,
+          extCost: 10,
+          effectiveDate: "2026-09-15T00:00:00",
+          agreementId: 7,
+        },
+      ],
+    },
+  ])(
+    "rejects $name in agreement addition summaries before auditing success",
+    async ({ additions }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(additions),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.getAgreementAdditionSummary(7, 5)).rejects.toThrow(
+        "ConnectWise agreement addition summary is not deterministically ordered recent-first",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
 
   it.each([
     { name: "missing price", addition: { extCost: 10, agreementId: 7 } },
