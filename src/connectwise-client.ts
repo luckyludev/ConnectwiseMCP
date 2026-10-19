@@ -1633,6 +1633,24 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertRecentTimeSheetOrder(records: unknown): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise timesheet response");
+    }
+    let previousTimestamp = Number.POSITIVE_INFINITY;
+    for (const record of records) {
+      const dateStart =
+        record && typeof record === "object" && !Array.isArray(record)
+          ? (record as Record<string, unknown>).dateStart
+          : undefined;
+      const timestamp = strictIsoTimestampMs(dateStart);
+      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
+        throw new Error("ConnectWise timesheets are not ordered recent-first");
+      }
+      previousTimestamp = timestamp;
+    }
+  }
+
   function assertRecentAgreementInvoiceList(
     records: unknown,
     agreementId: number,
@@ -2301,7 +2319,10 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
-        (result) => assertMappedMemberList(result, memberId),
+        (result) => {
+          assertMappedMemberList(result, memberId);
+          assertRecentTimeSheetOrder(result);
+        },
       );
     },
 
