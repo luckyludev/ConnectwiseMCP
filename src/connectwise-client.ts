@@ -489,17 +489,23 @@ type CatalogRoute = {
   transform?: (value: unknown) => unknown;
 };
 
+function scheduleDateStartTimestamps(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  const timestamps = value.map((entry) =>
+    strictIsoTimestampMs((entry as Record<string, unknown>)?.dateStart),
+  );
+  if (timestamps.some((timestamp) => !Number.isFinite(timestamp))) {
+    throw new Error("ConnectWise schedule entry has invalid dateStart");
+  }
+  return timestamps;
+}
+
 // CW rejects orderBy on schedule entries, so order them in the worker. Fail
 // closed when an entry cannot participate in the promised chronological order.
 function sortByDateStart(value: unknown): unknown {
   if (!Array.isArray(value) || value.length === 0) return value;
   const items = value as Array<Record<string, unknown>>;
-  const timestamps = items.map((entry) =>
-    strictIsoTimestampMs(entry?.dateStart),
-  );
-  if (timestamps.some((timestamp) => !Number.isFinite(timestamp))) {
-    throw new Error("ConnectWise schedule entry has invalid dateStart");
-  }
+  const timestamps = scheduleDateStartTimestamps(items);
   return items
     .map((entry, index) => ({ entry, timestamp: timestamps[index]! }))
     .sort((a, b) => a.timestamp - b.timestamp)
@@ -757,20 +763,7 @@ function assertScheduleDateRange(
   const startMs = isoDateToUtcMs(startDate, "startDate");
   const endMs = isoDateToUtcMs(endDate, "endDate") + 86_400_000 - 1;
   for (const record of value as Array<Record<string, unknown>>) {
-    const dateStart = record.dateStart;
-    if (typeof dateStart !== "string" || !ISO_OFFSET_RE.test(dateStart)) {
-      throw new Error(
-        "ConnectWise schedule entry is outside requested date range",
-      );
-    }
-    try {
-      isoDateToUtcMs(dateStart.slice(0, 10), "schedule entry dateStart");
-    } catch {
-      throw new Error(
-        "ConnectWise schedule entry is outside requested date range",
-      );
-    }
-    const dateMs = Date.parse(dateStart);
+    const dateMs = strictIsoTimestampMs(record.dateStart);
     if (!Number.isFinite(dateMs) || dateMs < startMs || dateMs > endMs) {
       throw new Error(
         "ConnectWise schedule entry is outside requested date range",
@@ -2598,16 +2591,19 @@ export function createConnectWiseClient(
           if (route === "finance.agreements.byName") {
             assertTargetedNameList(records, String(effectiveParams.name));
           }
-          if (
-            route === "schedule.entries.byMember" &&
-            effectiveParams.startDate !== undefined &&
-            effectiveParams.endDate !== undefined
-          ) {
-            assertScheduleDateRange(
-              records,
-              String(effectiveParams.startDate),
-              String(effectiveParams.endDate),
-            );
+          if (route === "schedule.entries.byMember") {
+            if (
+              effectiveParams.startDate !== undefined &&
+              effectiveParams.endDate !== undefined
+            ) {
+              assertScheduleDateRange(
+                records,
+                String(effectiveParams.startDate),
+                String(effectiveParams.endDate),
+              );
+            } else {
+              scheduleDateStartTimestamps(records);
+            }
           }
         },
       );

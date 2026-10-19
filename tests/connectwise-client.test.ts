@@ -3253,15 +3253,61 @@ describe("ConnectWiseClient", () => {
         { id: 2, member: { id: 149 }, dateStart: "garbage" },
       ],
     ],
-  ])("rejects %s schedule dateStart values", async (_label, response) => {
+  ])(
+    "rejects %s schedule dateStart values before auditing success",
+    async (_label, response) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json(Array.isArray(response) ? response : [response]),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(
+        client.catalogGet("schedule.entries.byMember", { memberId: 149 }),
+      ).rejects.toThrow("ConnectWise schedule entry has invalid dateStart");
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
+
+  it("rejects ranged schedule timestamps before auditing success", async () => {
+    const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
-        Response.json(Array.isArray(response) ? response : [response]),
+        Response.json([
+          {
+            id: 1,
+            member: { id: 149 },
+            dateStart: "2026-08-01T12:00:00.1234Z",
+          },
+        ]),
+      log: (line) => logs.push(line),
     });
 
     await expect(
-      client.catalogGet("schedule.entries.byMember", { memberId: 149 }),
-    ).rejects.toThrow("ConnectWise schedule entry has invalid dateStart");
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        startDate: "2026-08-01",
+        endDate: "2026-08-15",
+      }),
+    ).rejects.toThrow(
+      "ConnectWise schedule entry is outside requested date range",
+    );
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "upstream_error",
+    });
   });
 
   it("orders schedule entries by chronological instant across offsets", async () => {
