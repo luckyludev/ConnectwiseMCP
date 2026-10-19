@@ -45,7 +45,7 @@ jobs:
           cache-dependency-path: deploy/cwm-mcp/package-lock.json
       - name: Install hash-locked CI tools
         run: >-
-          python -m pip install --require-hashes
+          python -m pip install --require-hashes --only-binary=:all:
           -r deploy/http-gateway/requirements-ci.lock
       - name: Verify rollback dependency locks are current
         run: |
@@ -54,7 +54,7 @@ jobs:
           git diff --exit-code -- deploy/http-gateway/requirements-ci.lock deploy/http-gateway/requirements.lock
       - name: Install gateway dependencies
         run: >-
-          python -m pip install --require-hashes
+          python -m pip install --require-hashes --only-binary=:all:
           -r deploy/http-gateway/requirements.lock
       - name: Compile legacy rollback code
         run: >-
