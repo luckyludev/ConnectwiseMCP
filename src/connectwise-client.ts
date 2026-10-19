@@ -1564,6 +1564,38 @@ export function createConnectWiseClient(
     }
   }
 
+  function agreementAdditionEffectiveDateMs(value: unknown): number {
+    if (typeof value !== "string") return Number.NaN;
+    if (ISO_DATE.test(value)) {
+      try {
+        return isoDateToUtcMs(value, "agreement addition effective date");
+      } catch {
+        return Number.NaN;
+      }
+    }
+    return strictIsoTimestampMs(value);
+  }
+
+  function assertRecentAgreementAdditionOrder(records: unknown): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise agreement addition response");
+    }
+    let previousTimestamp = Number.POSITIVE_INFINITY;
+    for (const record of records) {
+      const effectiveDate =
+        record && typeof record === "object" && !Array.isArray(record)
+          ? (record as Record<string, unknown>).effectiveDate
+          : undefined;
+      const timestamp = agreementAdditionEffectiveDateMs(effectiveDate);
+      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
+        throw new Error(
+          "ConnectWise agreement additions are not ordered recent-first",
+        );
+      }
+      previousTimestamp = timestamp;
+    }
+  }
+
   function assertRecentTicketOrder(records: unknown): void {
     if (!Array.isArray(records)) {
       throw new Error("Invalid ConnectWise ticket response");
@@ -2697,6 +2729,7 @@ export function createConnectWiseClient(
         pageSize,
         (records) => {
           verifiedAgreementAdditionSearchList(records, agreementId, filters);
+          assertRecentAgreementAdditionOrder(records);
         },
       );
       return verifiedAgreementAdditionSearchList(
