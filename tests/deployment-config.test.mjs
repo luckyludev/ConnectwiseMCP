@@ -794,6 +794,10 @@ describe("staging deployment configuration", () => {
     expect(launcher).toContain(
       'if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_PATH+x}" = x ]; then',
     );
+    expect(launcher).toContain('case "$0" in');
+    expect(launcher).toContain(
+      "must receive authenticated bytes over standard input from the independently retained bootstrap",
+    );
     expect(launcher).toContain("CLOUDFLARE_API_BASE_URL");
     expect(launcher).toContain("HTTPS_PROXY");
     expect(launcher).toContain("NODE_EXTRA_CA_CERTS");
