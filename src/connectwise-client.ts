@@ -567,7 +567,8 @@ const AGREEMENT_COLLECTION_FIELDS =
   "id,name,type,company,agreementStatus,billingCycle,billAmount,nextInvoiceDate";
 const AGREEMENT_ADDITION_COLLECTION_FIELDS =
   "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description,agreementId";
-const AGREEMENT_ADDITION_SUMMARY_FIELDS = "extPrice,extCost,agreementId";
+const AGREEMENT_ADDITION_SUMMARY_FIELDS =
+  "id,extPrice,extCost,effectiveDate,agreementId";
 const AGREEMENT_INVOICE_COLLECTION_FIELDS =
   "id,invoiceNumber,total,date,agreement";
 const TIME_ENTRY_COLLECTION_FIELDS =
@@ -1435,7 +1436,9 @@ export function createConnectWiseClient(
         );
       }
     }
-    return additions;
+    return additions.map(
+      ({ id: _id, effectiveDate: _effectiveDate, ...addition }) => addition,
+    );
   }
 
   function verifiedAgreementAdditionSearchList(
@@ -1593,6 +1596,38 @@ export function createConnectWiseClient(
         );
       }
       previousTimestamp = timestamp;
+    }
+  }
+
+  function assertRecentAgreementAdditionSummaryOrder(records: unknown): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise agreement addition response");
+    }
+    let previousTimestamp = Number.POSITIVE_INFINITY;
+    let previousId = Number.POSITIVE_INFINITY;
+    for (const record of records) {
+      const addition =
+        record && typeof record === "object" && !Array.isArray(record)
+          ? (record as Record<string, unknown>)
+          : undefined;
+      const timestamp = agreementAdditionEffectiveDateMs(
+        addition?.effectiveDate,
+      );
+      const id = addition?.id;
+      if (
+        !Number.isFinite(timestamp) ||
+        typeof id !== "number" ||
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        timestamp > previousTimestamp ||
+        (timestamp === previousTimestamp && id >= previousId)
+      ) {
+        throw new Error(
+          "ConnectWise agreement addition summary is not deterministically ordered recent-first",
+        );
+      }
+      previousTimestamp = timestamp;
+      previousId = id;
     }
   }
 
@@ -2777,10 +2812,12 @@ export function createConnectWiseClient(
         {
           fields: AGREEMENT_ADDITION_SUMMARY_FIELDS,
           pageSize,
+          orderBy: "effectiveDate desc,id desc",
         },
         pageSize,
         (records) => {
           verifiedAgreementAdditionSummaryList(records, agreementId);
+          assertRecentAgreementAdditionSummaryOrder(records);
         },
       );
       return verifiedAgreementAdditionSummaryList(additions, agreementId);
