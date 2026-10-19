@@ -2012,6 +2012,35 @@ describe("ConnectWiseClient", () => {
     },
   );
 
+  it.each([
+    {},
+    { agreementId: null },
+    { agreementId: "7" },
+    { agreementId: 8 },
+  ])(
+    "audits an invalid agreement addition relationship as an upstream error: %j",
+    async (addition) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([addition]),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.getAgreementAdditions(7, 5)).rejects.toThrow(
+        "ConnectWise addition is not associated with requested agreement",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+      expect(logs[0]).not.toContain("agreementId");
+    },
+  );
+
   it("verifies and strips agreement relationships from recent invoices", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
