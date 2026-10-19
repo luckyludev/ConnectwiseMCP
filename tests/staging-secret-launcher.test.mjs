@@ -87,6 +87,26 @@ afterEach(async () => {
 });
 
 describe("staging secret launcher", () => {
+  it("rejects direct path execution before invoking Node", async () => {
+    const result = spawnSync("/bin/sh", [launcher, "ENTRA_CLIENT_SECRET"], {
+      cwd: repository,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        CAPTURE_PATH: capturePath,
+        DEPLOY_NODE_PATH: approvedNode,
+        STAGING_INTEGRITY_SHA256: reviewedIntegritySha256,
+      },
+      stdio: ["pipe", "pipe", "pipe", "pipe"],
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "The secret-entry launcher must receive authenticated bytes over standard input from the independently retained bootstrap.",
+    );
+    await expect(lstat(capturePath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("passes only approved names to the staging environment", async () => {
     for (const secretName of [
       "ENTRA_CLIENT_SECRET",

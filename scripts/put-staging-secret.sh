@@ -1,6 +1,14 @@
 #!/bin/sh
 set -eu
 
+case "$0" in
+  /bin/sh) ;;
+  *)
+    printf '%s\n' "The secret-entry launcher must receive authenticated bytes over standard input from the independently retained bootstrap." >&2
+    exit 1
+    ;;
+esac
+
 if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_PATH+x}" = x ]; then
   printf '%s\n' "Refusing credential-bearing secret entry while Node preload settings are present." >&2
   exit 1
