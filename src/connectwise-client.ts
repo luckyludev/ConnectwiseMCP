@@ -2669,6 +2669,9 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (records) => {
+          verifiedAgreementAdditionList(records, agreementId);
+        },
       );
       return verifiedAgreementAdditionList(additions, agreementId);
     },
