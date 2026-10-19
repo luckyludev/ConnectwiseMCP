@@ -2696,6 +2696,9 @@ export function createConnectWiseClient(
           orderBy: "effectiveDate desc",
         },
         pageSize,
+        (records) => {
+          verifiedAgreementAdditionSearchList(records, agreementId, filters);
+        },
       );
       return verifiedAgreementAdditionSearchList(
         additions,
