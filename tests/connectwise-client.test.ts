@@ -1829,6 +1829,7 @@ describe("ConnectWiseClient", () => {
   });
 
   it("fails closed when agreement additions do not match requested filters", async () => {
+    const productMismatchLogs: string[] = [];
     const productMismatch = createConnectWiseClient(credentials, {
       fetcher: async () =>
         Response.json([
@@ -1845,6 +1846,7 @@ describe("ConnectWiseClient", () => {
             agreementId: 7,
           },
         ]),
+      log: (line) => productMismatchLogs.push(line),
     });
     await expect(
       productMismatch.searchAgreementAdditions(
@@ -1853,6 +1855,14 @@ describe("ConnectWiseClient", () => {
         5,
       ),
     ).rejects.toThrow("does not match requested product");
+    expect(productMismatchLogs).toHaveLength(1);
+    expect(JSON.parse(productMismatchLogs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "upstream_error",
+    });
 
     const relationshipMismatch = createConnectWiseClient(credentials, {
       fetcher: async () =>
