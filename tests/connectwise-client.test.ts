@@ -397,6 +397,149 @@ describe("ConnectWiseClient", () => {
     });
   });
 
+  it("rejects ticket notes that do not match the requested visibility before auditing success", async () => {
+    const cases = [
+      {
+        visibility: { includeInternal: false, includeExternal: true },
+        note: {
+          internalFlag: true,
+          internalAnalysisFlag: false,
+          externalFlag: true,
+        },
+      },
+      {
+        visibility: { includeInternal: true, includeExternal: false },
+        note: {
+          internalFlag: false,
+          internalAnalysisFlag: false,
+          externalFlag: true,
+        },
+      },
+      {
+        visibility: { includeInternal: false, includeExternal: true },
+        priorNote: {
+          internalFlag: false,
+          internalAnalysisFlag: false,
+          externalFlag: true,
+        },
+        note: {
+          internalFlag: false,
+          internalAnalysisFlag: true,
+          externalFlag: true,
+        },
+      },
+      {
+        visibility: { includeInternal: false, includeExternal: true },
+        note: {
+          internalFlag: false,
+          internalAnalysisFlag: false,
+          externalFlag: false,
+        },
+      },
+      {
+        visibility: { includeInternal: false, includeExternal: true },
+        note: {
+          internalFlag: false,
+          internalAnalysisFlag: false,
+        },
+      },
+      {
+        visibility: { includeInternal: true, includeExternal: true },
+        note: { externalFlag: true },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json([
+            ...("priorNote" in testCase && testCase.priorNote
+              ? [
+                  {
+                    id: 302,
+                    dateCreated: "2026-10-15T13:00:00Z",
+                    ticketId: 123,
+                    ...testCase.priorNote,
+                  },
+                ]
+              : []),
+            {
+              id: 301,
+              dateCreated: "2026-10-15T12:00:00Z",
+              ticketId: 123,
+              ...testCase.note,
+            },
+          ]),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(
+        client.getTicketNotes(123, 20, testCase.visibility),
+      ).rejects.toThrow(
+        "ConnectWise ticket note does not match requested visibility",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    }
+  });
+
+  it("accepts classified ticket notes and treats internal flags as authoritative", async () => {
+    const responses = [
+      {
+        internalFlag: false,
+        internalAnalysisFlag: false,
+        externalFlag: true,
+      },
+      {
+        internalFlag: true,
+        internalAnalysisFlag: false,
+        externalFlag: true,
+      },
+      {
+        internalFlag: false,
+        internalAnalysisFlag: true,
+        externalFlag: false,
+      },
+    ];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          {
+            id: 301,
+            dateCreated: "2026-10-15T12:00:00Z",
+            ticketId: 123,
+            ...responses.shift(),
+          },
+        ]),
+    });
+
+    await expect(
+      client.getTicketNotes(123, 20, {
+        includeInternal: false,
+        includeExternal: true,
+      }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      client.getTicketNotes(123, 20, {
+        includeInternal: true,
+        includeExternal: false,
+      }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      client.getTicketNotes(123, 20, {
+        includeInternal: true,
+        includeExternal: false,
+      }),
+    ).resolves.toHaveLength(1);
+  });
+
   it("does not fetch ticket notes when neither visibility class is requested", async () => {
     let fetchCount = 0;
     const client = createConnectWiseClient(credentials, {
@@ -423,16 +566,19 @@ describe("ConnectWiseClient", () => {
             id: 303,
             dateCreated: "2026-10-15T12:00:00Z",
             ticketId: 123,
+            internalFlag: true,
           },
           {
             id: 302,
             dateCreated: "2026-10-15T11:00:00Z",
             ticketId: 123,
+            internalFlag: true,
           },
           {
             id: 301,
             dateCreated: "2026-10-15T10:00:00Z",
             ticketId: 123,
+            internalFlag: true,
           },
         ]),
     });
@@ -443,9 +589,21 @@ describe("ConnectWiseClient", () => {
         includeExternal: true,
       }),
     ).resolves.toEqual([
-      { id: 301, dateCreated: "2026-10-15T10:00:00Z" },
-      { id: 302, dateCreated: "2026-10-15T11:00:00Z" },
-      { id: 303, dateCreated: "2026-10-15T12:00:00Z" },
+      {
+        id: 301,
+        dateCreated: "2026-10-15T10:00:00Z",
+        internalFlag: true,
+      },
+      {
+        id: 302,
+        dateCreated: "2026-10-15T11:00:00Z",
+        internalFlag: true,
+      },
+      {
+        id: 303,
+        dateCreated: "2026-10-15T12:00:00Z",
+        internalFlag: true,
+      },
     ]);
   });
 
@@ -510,6 +668,7 @@ describe("ConnectWiseClient", () => {
             text: "Customer update",
             dateCreated: "2026-10-15T12:00:00Z",
             ticketId: 123,
+            internalFlag: true,
           },
         ]),
     });
@@ -524,6 +683,7 @@ describe("ConnectWiseClient", () => {
         id: 301,
         text: "Customer update",
         dateCreated: "2026-10-15T12:00:00Z",
+        internalFlag: true,
       },
     ]);
   });
@@ -795,6 +955,7 @@ describe("ConnectWiseClient", () => {
             id: 301,
             dateCreated: "2026-10-15T12:00:00Z",
             ticketId: 123,
+            internalFlag: true,
           },
         ],
         invalidResponse: [
@@ -809,7 +970,13 @@ describe("ConnectWiseClient", () => {
             includeInternal: true,
             includeExternal: true,
           }),
-        expected: [{ id: 301, dateCreated: "2026-10-15T12:00:00Z" }],
+        expected: [
+          {
+            id: 301,
+            dateCreated: "2026-10-15T12:00:00Z",
+            internalFlag: true,
+          },
+        ],
         error: "ConnectWise note is not associated with requested ticket",
       },
       {

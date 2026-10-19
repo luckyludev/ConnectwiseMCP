@@ -1638,6 +1638,35 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertRequestedTicketNoteVisibility(
+    records: unknown,
+    visibility: { includeInternal: boolean; includeExternal: boolean },
+  ): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise ticket note response");
+    }
+    for (const record of records) {
+      if (!record || typeof record !== "object" || Array.isArray(record)) {
+        throw new Error("Invalid ConnectWise ticket note visibility response");
+      }
+      const note = record as Record<string, unknown>;
+      const isInternal =
+        note.internalFlag === true || note.internalAnalysisFlag === true;
+      const isExternal =
+        note.internalFlag === false &&
+        note.internalAnalysisFlag === false &&
+        note.externalFlag === true;
+      if (
+        (!visibility.includeInternal || !isInternal) &&
+        (!visibility.includeExternal || !isExternal)
+      ) {
+        throw new Error(
+          "ConnectWise ticket note does not match requested visibility",
+        );
+      }
+    }
+  }
+
   function assertRecentTimeEntryOrder(records: unknown): void {
     if (!Array.isArray(records)) {
       throw new Error("Invalid ConnectWise time entry response");
@@ -1966,6 +1995,7 @@ export function createConnectWiseClient(
         (records) => {
           assertRecentTicketNoteOrder(records);
           assertTicketRelationshipList(records, ticketId, "note");
+          assertRequestedTicketNoteVisibility(records, visibility);
         },
       );
       return (notes as Array<Record<string, unknown>>)
