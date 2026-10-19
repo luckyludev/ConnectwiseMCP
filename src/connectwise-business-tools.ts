@@ -1322,7 +1322,7 @@ export function registerConnectWiseBusinessTools(
     "search_agreement_additions",
     {
       description:
-        "Search a bounded set of additions within one agreement by product or date. ConnectWise permissions remain authoritative.",
+        "Search an effective-date-recent-first bounded set of additions within one agreement by product or date. ConnectWise permissions remain authoritative.",
       inputSchema: agreementSearchSchema,
       annotations: readAnnotations,
     },

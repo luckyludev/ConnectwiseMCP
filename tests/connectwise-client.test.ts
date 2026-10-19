@@ -1802,6 +1802,83 @@ describe("ConnectWiseClient", () => {
     });
   });
 
+  it("accepts agreement additions ordered by effective instant recent-first", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          { id: 1, effectiveDate: "2026-09-15T00:00:00Z", agreementId: 7 },
+          { id: 2, effectiveDate: "2026-09-15", agreementId: 7 },
+          {
+            id: 3,
+            effectiveDate: "2026-09-15T01:00:00+02:00",
+            agreementId: 7,
+          },
+        ]),
+    });
+
+    await expect(client.searchAgreementAdditions(7, {}, 5)).resolves.toEqual([
+      { id: 1, effectiveDate: "2026-09-15T00:00:00Z" },
+      { id: 2, effectiveDate: "2026-09-15" },
+      { id: 3, effectiveDate: "2026-09-15T01:00:00+02:00" },
+    ]);
+  });
+
+  it.each([
+    {
+      name: "ascending dates",
+      additions: [
+        { id: 1, effectiveDate: "2026-09-14", agreementId: 7 },
+        { id: 2, effectiveDate: "2026-09-15", agreementId: 7 },
+      ],
+    },
+    {
+      name: "chronologically ascending offset timestamps",
+      additions: [
+        {
+          id: 1,
+          effectiveDate: "2026-09-15T00:30:00+02:00",
+          agreementId: 7,
+        },
+        { id: 2, effectiveDate: "2026-09-14T23:00:00Z", agreementId: 7 },
+      ],
+    },
+    {
+      name: "missing effective date",
+      additions: [{ id: 1, agreementId: 7 }],
+    },
+    {
+      name: "impossible date",
+      additions: [{ id: 1, effectiveDate: "2026-02-30", agreementId: 7 }],
+    },
+    {
+      name: "local timestamp without offset",
+      additions: [
+        { id: 1, effectiveDate: "2026-09-15T00:00:00", agreementId: 7 },
+      ],
+    },
+  ])(
+    "rejects agreement additions with $name before auditing success",
+    async ({ additions }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(additions),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.searchAgreementAdditions(7, {}, 5)).rejects.toThrow(
+        "ConnectWise agreement additions are not ordered recent-first",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
+
   it("rejects unsafe agreement addition filters before requesting data", async () => {
     let fetchCount = 0;
     const client = createConnectWiseClient(credentials, {
