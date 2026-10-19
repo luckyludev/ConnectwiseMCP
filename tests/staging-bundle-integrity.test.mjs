@@ -75,6 +75,7 @@ const unsafeDeploymentEnvironment = [
   "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV",
   "CLOUDFLARE_ACCOUNT_ID",
   "CF_ACCOUNT_ID",
+  "WRANGLER_CI_OVERRIDE_NAME",
   "WRANGLER_LOG",
   "WRANGLER_LOG_SANITIZE",
   "WRANGLER_LOG_PATH",
@@ -910,7 +911,7 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
   it("rejects even an empty unsafe override", async () => {
     await withCheckout(async ({ cwd }) => {
       const result = runLauncher(cwd, undefined, {
-        CLOUDFLARE_API_BASE_URL: "",
+        WRANGLER_CI_OVERRIDE_NAME: "",
       });
 
       expect(result.status).toBe(1);
