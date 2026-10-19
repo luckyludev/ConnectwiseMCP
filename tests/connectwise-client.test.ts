@@ -30,7 +30,7 @@ const agreementAdditionCollectionFields =
   "id,product,quantity,unitPrice,unitCost,extPrice,extCost,effectiveDate,cancelledDate,billCustomer,description,agreementId";
 const timeEntryCollectionFields =
   "id,actualHours,timeStart,member,notes,workType";
-const ticketTimeEntryRelationshipFields = `${timeEntryCollectionFields},chargeToType,chargeToId`;
+const ticketTimeEntryRelationshipFields = `${timeEntryCollectionFields},dateEntered,chargeToType,chargeToId`;
 const timeEntryReadFields = `${timeEntryCollectionFields},dateEntered,chargeToType`;
 const scheduleEntryCollectionFields =
   "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
@@ -662,7 +662,14 @@ describe("ConnectWiseClient", () => {
         capturedUrl = String(input);
         return Response.json([
           {
+            id: 402,
+            dateEntered: "2026-10-18T12:00:00Z",
+            chargeToType: "ServiceTicket",
+            chargeToId: 123,
+          },
+          {
             id: 401,
+            dateEntered: "2026-10-18T11:00:00Z",
             chargeToType: "ServiceTicket",
             chargeToId: 123,
           },
@@ -671,6 +678,7 @@ describe("ConnectWiseClient", () => {
     });
 
     await expect(client.getTicketTimeEntries(123, 20)).resolves.toEqual([
+      { id: 402 },
       { id: 401 },
     ]);
     const url = new URL(capturedUrl);
@@ -705,6 +713,68 @@ describe("ConnectWiseClient", () => {
       await expect(client.getTicketTimeEntries(123, 20)).rejects.toThrow(
         "ConnectWise time entry is not associated with requested ticket",
       );
+    },
+  );
+
+  it.each([
+    {
+      name: "ascending timestamps",
+      entries: [
+        {
+          id: 401,
+          dateEntered: "2026-10-18T11:00:00Z",
+          chargeToType: "ServiceTicket",
+          chargeToId: 123,
+        },
+        {
+          id: 402,
+          dateEntered: "2026-10-18T12:00:00Z",
+          chargeToType: "ServiceTicket",
+          chargeToId: 123,
+        },
+      ],
+    },
+    {
+      name: "missing timestamp",
+      entries: [
+        {
+          id: 401,
+          chargeToType: "ServiceTicket",
+          chargeToId: 123,
+        },
+      ],
+    },
+    {
+      name: "malformed timestamp",
+      entries: [
+        {
+          id: 401,
+          dateEntered: "October 18, 2026",
+          chargeToType: "ServiceTicket",
+          chargeToId: 123,
+        },
+      ],
+    },
+  ])(
+    "rejects ticket time entries with $name before reporting success",
+    async ({ entries }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(entries),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.getTicketTimeEntries(123, 20)).rejects.toThrow(
+        "ConnectWise time entries are not ordered recent-first",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
     },
   );
 
@@ -769,7 +839,12 @@ describe("ConnectWiseClient", () => {
       {
         name: "time entries",
         validResponse: [
-          { id: 501, chargeToType: "ServiceTicket", chargeToId: 123 },
+          {
+            id: 501,
+            dateEntered: "2026-10-18T12:00:00Z",
+            chargeToType: "ServiceTicket",
+            chargeToId: 123,
+          },
         ],
         invalidResponse: [
           { id: 501, chargeToType: "ServiceTicket", chargeToId: 124 },

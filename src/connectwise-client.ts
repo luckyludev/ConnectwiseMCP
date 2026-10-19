@@ -566,7 +566,7 @@ const AGREEMENT_INVOICE_COLLECTION_FIELDS =
   "id,invoiceNumber,total,date,agreement";
 const TIME_ENTRY_COLLECTION_FIELDS =
   "id,actualHours,timeStart,member,notes,workType";
-const TICKET_TIME_ENTRY_RELATIONSHIP_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},chargeToType,chargeToId`;
+const TICKET_TIME_ENTRY_RELATIONSHIP_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},dateEntered,chargeToType,chargeToId`;
 const TIME_ENTRY_READ_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},dateEntered,chargeToType`;
 const SCHEDULE_ENTRY_COLLECTION_FIELDS =
   "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
@@ -2033,11 +2033,16 @@ export function createConnectWiseClient(
         pageSize,
         (records) => {
           assertTicketTimeEntryRelationshipList(records, ticketId);
+          assertRecentTimeEntryOrder(records);
         },
       );
       return (entries as Array<Record<string, unknown>>).map(
-        ({ chargeToType: _chargeToType, chargeToId: _chargeToId, ...entry }) =>
-          entry,
+        ({
+          dateEntered: _dateEntered,
+          chargeToType: _chargeToType,
+          chargeToId: _chargeToId,
+          ...entry
+        }) => entry,
       );
     },
 
