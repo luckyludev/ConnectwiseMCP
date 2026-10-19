@@ -2284,7 +2284,7 @@ export function createConnectWiseClient(
     async searchMembers(query: string, pageSize: number): Promise<unknown> {
       const escaped = targetedSearchString(query);
       targetedSearchPageSize(pageSize);
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/system/members",
         {
           conditions: `name like '%${escaped}%'`,
@@ -2293,15 +2293,14 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (result) => assertTargetedNameList(result, query),
       );
-      assertTargetedNameList(result, query);
-      return result;
     },
 
     async searchCompanies(query: string, pageSize: number): Promise<unknown> {
       targetedSearchPageSize(pageSize);
       const escaped = targetedSearchString(query);
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/company/companies",
         {
           conditions: `name like '%${escaped}%'`,
@@ -2310,15 +2309,14 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (result) => assertTargetedNameList(result, query),
       );
-      assertTargetedNameList(result, query);
-      return result;
     },
 
     async searchContacts(query: string, pageSize: number): Promise<unknown> {
       targetedSearchPageSize(pageSize);
       const escaped = targetedSearchString(query);
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/company/contacts",
         {
           conditions: `(name like '%${escaped}%' OR email like '%${escaped}%')`,
@@ -2327,9 +2325,8 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
+        (result) => assertTargetedContactList(result, query),
       );
-      assertTargetedContactList(result, query);
-      return result;
     },
 
     async listTimeEntries(pageSize: number): Promise<unknown> {
