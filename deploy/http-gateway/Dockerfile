@@ -15,7 +15,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY http-gateway/requirements.lock /app/requirements.lock
-RUN pip install --no-cache-dir --require-hashes -r /app/requirements.lock \
+RUN pip install --no-cache-dir --require-hashes --only-binary=:all: -r /app/requirements.lock \
   && groupadd --gid 10001 app \
   && useradd --uid 10001 --gid app --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin app
 

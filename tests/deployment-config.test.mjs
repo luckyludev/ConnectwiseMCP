@@ -238,6 +238,7 @@ describe("dependency maintenance configuration", () => {
     expect(pipInstalls).toHaveLength(2);
     for (const command of pipInstalls) {
       expect(command).toContain("--require-hashes");
+      expect(command).toContain("--only-binary=:all:");
     }
   });
 });
@@ -574,6 +575,9 @@ describe("legacy rollback image security", () => {
     expect(downloadOffset).toBeGreaterThan(checkoutVerifierOffset);
     expect(reverifyOffset).toBeGreaterThan(downloadOffset);
     expect(attestOffset).toBeGreaterThan(reverifyOffset);
+    expect(dockerfile).toContain(
+      "pip install --no-cache-dir --require-hashes --only-binary=:all: -r /app/requirements.lock",
+    );
     expect(workflow).toMatch(/^permissions:\n  contents: read$/mu);
     expect(attestJob).toMatch(
       /^  attest:\n    needs: verify\n    if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\)\n    runs-on: ubuntu-24\.04\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      id-token: write\n      attestations: write$/mu,
