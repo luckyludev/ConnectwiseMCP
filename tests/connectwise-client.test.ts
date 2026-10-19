@@ -3016,6 +3016,48 @@ describe("ConnectWiseClient", () => {
     }
   });
 
+  it("audits targeted search validation before reporting request success", async () => {
+    const searches = [
+      {
+        run: (client: ReturnType<typeof createConnectWiseClient>) =>
+          client.searchMembers("Alice", 20),
+        record: { id: 1, name: "Unrelated" },
+        error: "ConnectWise record does not match targeted name search",
+      },
+      {
+        run: (client: ReturnType<typeof createConnectWiseClient>) =>
+          client.searchCompanies("Alice", 20),
+        record: { id: 1, name: "Unrelated" },
+        error: "ConnectWise record does not match targeted name search",
+      },
+      {
+        run: (client: ReturnType<typeof createConnectWiseClient>) =>
+          client.searchContacts("Alice", 20),
+        record: { id: 1, name: "Unrelated", email: "other@example.net" },
+        error: "ConnectWise record does not match targeted contact search",
+      },
+    ];
+
+    for (const { run, record, error } of searches) {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json([record]),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(run(client)).rejects.toThrow(error);
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual(
+        expect.objectContaining({
+          event: "cw_request",
+          method: "GET",
+          status: 200,
+          outcome: "upstream_error",
+        }),
+      );
+    }
+  });
+
   it("builds allowlisted catalog routes and rejects unknown ones", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
