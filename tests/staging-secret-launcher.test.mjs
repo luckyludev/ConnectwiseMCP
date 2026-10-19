@@ -261,6 +261,7 @@ describe("staging secret launcher", () => {
       "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV",
       "CLOUDFLARE_ACCOUNT_ID",
       "CF_ACCOUNT_ID",
+      "WRANGLER_CI_OVERRIDE_NAME",
       "WRANGLER_LOG",
       "WRANGLER_LOG_SANITIZE",
       "WRANGLER_LOG_PATH",
