@@ -1453,6 +1453,15 @@ describe("staging deployment configuration", () => {
         "node scripts/staging-bundle-integrity.mjs deploy",
       );
     }
+    expect(stagingChecklist).toContain(
+      "Confirm the existing `OAUTH_KV` runtime and preview namespace IDs",
+    );
+    expect(stagingChecklist).toContain(
+      "Do not create or replace either namespace merely because this checklist is being followed",
+    );
+    expect(stagingChecklist).not.toContain(
+      "Create separate staging KV namespaces",
+    );
     expect(stagingHowto).toContain(
       "/approved/operator-tools/connectwisemcp-deploy-bootstrap",
     );
