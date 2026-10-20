@@ -2226,7 +2226,7 @@ export function createConnectWiseClient(
     },
 
     async getServiceBoards(): Promise<unknown> {
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/service/boards",
         {
           fields: SERVICE_BOARD_COLLECTION_FIELDS,
@@ -2234,31 +2234,28 @@ export function createConnectWiseClient(
           pageSize: 50,
         },
         50,
+        assertReferenceCollectionIdentities,
       );
-      assertReferenceCollectionIdentities(result);
-      return result;
     },
 
     async getBoardStatuses(boardId: number): Promise<unknown> {
       positiveId(boardId, "board ID");
-      const result = await requestBoundedList(
+      return requestBoundedList(
         `/service/boards/${boardId}/statuses`,
         { fields: BOARD_STATUS_COLLECTION_FIELDS, pageSize: 50 },
         50,
+        assertReferenceCollectionIdentities,
       );
-      assertReferenceCollectionIdentities(result);
-      return result;
     },
 
     async getBoardTypes(boardId: number): Promise<unknown> {
       positiveId(boardId, "board ID");
-      const result = await requestBoundedList(
+      return requestBoundedList(
         `/service/boards/${boardId}/types`,
         { fields: BOARD_TYPE_COLLECTION_FIELDS, pageSize: 50 },
         50,
+        assertReferenceCollectionIdentities,
       );
-      assertReferenceCollectionIdentities(result);
-      return result;
     },
 
     async listBoardTickets(
@@ -2285,7 +2282,7 @@ export function createConnectWiseClient(
     },
 
     async getServiceStatuses(): Promise<unknown> {
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/service/statuses",
         {
           fields: SERVICE_STATUS_COLLECTION_FIELDS,
@@ -2293,13 +2290,12 @@ export function createConnectWiseClient(
           pageSize: 50,
         },
         50,
+        assertReferenceCollectionIdentities,
       );
-      assertReferenceCollectionIdentities(result);
-      return result;
     },
 
     async getServicePriorities(): Promise<unknown> {
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/service/priorities",
         {
           fields: SERVICE_PRIORITY_COLLECTION_FIELDS,
@@ -2307,13 +2303,12 @@ export function createConnectWiseClient(
           pageSize: 50,
         },
         50,
+        assertReferenceCollectionIdentities,
       );
-      assertReferenceCollectionIdentities(result);
-      return result;
     },
 
     async getServiceSources(): Promise<unknown> {
-      const result = await requestBoundedList(
+      return requestBoundedList(
         "/service/sources",
         {
           fields: SERVICE_SOURCE_COLLECTION_FIELDS,
@@ -2321,9 +2316,8 @@ export function createConnectWiseClient(
           pageSize: 50,
         },
         50,
+        assertReferenceCollectionIdentities,
       );
-      assertReferenceCollectionIdentities(result);
-      return result;
     },
 
     async getMyMember(): Promise<unknown> {
