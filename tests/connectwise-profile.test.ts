@@ -325,6 +325,53 @@ describe("resolveIdentityBoundConnectWiseCredentials", () => {
     ]);
   });
 
+  it("snapshots identity claims before policy and secret resolution", () => {
+    const { env, reads } = trackedEnv();
+    const claimReads = {
+      tenantId: 0,
+      objectId: 0,
+      profileAlias: 0,
+      groups: 0,
+      roles: 0,
+    };
+    const readOnce = <T>(claim: keyof typeof claimReads, value: T): T => {
+      claimReads[claim] += 1;
+      if (claimReads[claim] > 1) {
+        throw new Error(`${claim} was read more than once`);
+      }
+      return value;
+    };
+    const volatileProps = {
+      get tenantId() {
+        return readOnce("tenantId", tenantId);
+      },
+      get objectId() {
+        return readOnce("objectId", objectId);
+      },
+      get profileAlias() {
+        return readOnce("profileAlias", "LUIS");
+      },
+      get groups() {
+        return readOnce("groups", [groupId]);
+      },
+      get roles() {
+        return readOnce("roles", []);
+      },
+    };
+
+    expect(
+      resolveIdentityBoundConnectWiseCredentials(env, volatileProps),
+    ).toMatchObject({ companyId: "acme" });
+    expect(claimReads).toEqual({
+      tenantId: 1,
+      objectId: 1,
+      profileAlias: 1,
+      groups: 1,
+      roles: 1,
+    });
+    expect(reads.at(-1)).toBe("CW_PROFILE_LUIS");
+  });
+
   it.each([
     ["removed mapping", { IDENTITY_PROFILE_MAP: "{}" }],
     [
