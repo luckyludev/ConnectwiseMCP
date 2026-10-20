@@ -11,7 +11,7 @@ setup(
         "mcp>=1.3.0,<2",
         "httpx>=0.23.0",
         "pydantic>=1.10.0",
-        "aiohttp>=3.8.4",
+        "aiohttp>=3.14.4",
     ],
     entry_points={
         "console_scripts": [
