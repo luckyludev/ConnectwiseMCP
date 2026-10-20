@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emitToolAudit } from "../src/audit";
+import { emitResourceAudit, emitToolAudit } from "../src/audit";
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
 const objectId = "22222222-2222-4222-8222-222222222222";
@@ -231,5 +231,103 @@ describe("emitToolAudit", () => {
     expect(messages[0]!).not.toContain("must-not-be-logged");
     expect(messages[0]!).not.toContain("scopes");
     expect(messages[0]!).not.toContain("authorization");
+  });
+});
+
+describe("emitResourceAudit", () => {
+  it("emits only allowlisted resource-read fields", () => {
+    const messages: string[] = [];
+
+    emitResourceAudit(
+      {
+        props: {
+          tenantId,
+          objectId,
+          profileAlias: "LUIS",
+          scopes: ["mcp:read"],
+          authorization: "Basic must-not-be-logged",
+        },
+        resource: "ui://connectwise/attachment-uploader.html",
+        outcome: "success",
+        reason: "ok",
+        startedAtMs: 900,
+      },
+      {
+        logger: (message) => messages.push(message),
+        now: () => 1_000,
+        createCorrelationId: () => correlationId,
+      },
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(JSON.parse(messages[0]!)).toEqual({
+      version: 1,
+      event: "mcp_resource_read",
+      timestamp: "1970-01-01T00:00:01.000Z",
+      correlationId,
+      tenantId,
+      objectId,
+      profileAlias: "LUIS",
+      resource: "ui://connectwise/attachment-uploader.html",
+      outcome: "success",
+      reason: "ok",
+      durationMs: 100,
+    });
+    expect(messages[0]!).not.toContain("must-not-be-logged");
+    expect(messages[0]!).not.toContain("scopes");
+    expect(messages[0]!).not.toContain("authorization");
+  });
+
+  it("suppresses unrecognized resource identifiers and outcomes", () => {
+    const messages: string[] = [];
+    const base = {
+      props: { tenantId, objectId, profileAlias: "LUIS" },
+      resource: "ui://connectwise/attachment-uploader.html",
+      outcome: "success",
+      reason: "ok",
+      startedAtMs: 0,
+    };
+    const dependencies = {
+      logger: (message: string) => messages.push(message),
+      now: () => 1,
+      createCorrelationId: () => correlationId,
+    };
+
+    emitResourceAudit(
+      {
+        ...base,
+        resource: "ui://attacker.example/secret",
+      } as unknown as Parameters<typeof emitResourceAudit>[0],
+      dependencies,
+    );
+    emitResourceAudit(
+      { ...base, outcome: "failure" } as unknown as Parameters<
+        typeof emitResourceAudit
+      >[0],
+      dependencies,
+    );
+
+    expect(messages).toEqual([]);
+  });
+
+  it("does not throw when the resource audit logger fails", () => {
+    expect(() =>
+      emitResourceAudit(
+        {
+          props: { tenantId, objectId, profileAlias: "LUIS" },
+          resource: "ui://connectwise/attachment-uploader.html",
+          outcome: "success",
+          reason: "ok",
+          startedAtMs: 0,
+        },
+        {
+          logger: () => {
+            throw new Error("logging backend unavailable");
+          },
+          now: () => 1,
+          createCorrelationId: () => correlationId,
+        },
+      ),
+    ).not.toThrow();
   });
 });
