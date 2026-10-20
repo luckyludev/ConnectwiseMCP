@@ -23,6 +23,7 @@ import type { EntraAccessTokenProps } from "./auth-handler";
 import { hasMcpScopes } from "./auth-scopes";
 import { requiredMcpScopes } from "./tool-access";
 import {
+  emitResourceAudit,
   emitToolAudit,
   getAuditStartTime,
   type ToolAuditDependencies,
@@ -693,6 +694,88 @@ const scheduleEntryUpdateInput = z
     { message: "at least one schedule update field is required" },
   );
 
+export function attachmentUploaderResourceResult(
+  props: AuthProps,
+  env: object,
+  dependencies: BusinessToolDependencies = {},
+) {
+  const startedAtMs = getAuditStartTime(dependencies.audit);
+  if (!hasMcpScopes(props, ["mcp:read"])) {
+    emitResourceAudit(
+      {
+        props: undefined,
+        resource: ATTACHMENT_UPLOADER_RESOURCE_URI,
+        outcome: "denied",
+        reason: "insufficient_scope",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
+    throw new Error("Insufficient scope");
+  }
+  let auditProps: AuthProps = undefined;
+  try {
+    const tenantId = props.tenantId;
+    const objectId = props.objectId;
+    const profileAlias = props.profileAlias;
+    const groups = props.groups;
+    const roles = props.roles;
+    const identitySnapshot: AuthProps = {
+      ...(tenantId !== undefined ? { tenantId } : {}),
+      ...(objectId !== undefined ? { objectId } : {}),
+      ...(profileAlias !== undefined ? { profileAlias } : {}),
+      ...(groups !== undefined ? { groups } : {}),
+      ...(roles !== undefined ? { roles } : {}),
+      scopes: ["mcp:read"],
+    };
+    auditProps = identitySnapshot;
+    if (!hasAuthenticatedProfile(identitySnapshot)) {
+      throw new Error("Authenticated profile unavailable");
+    }
+    resolveIdentityBoundProfileAlias(env, identitySnapshot);
+    const result = {
+      contents: [
+        {
+          uri: ATTACHMENT_UPLOADER_RESOURCE_URI,
+          mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
+          text: ATTACHMENT_UPLOADER_HTML,
+          _meta: {
+            ui: {
+              csp: {
+                connectDomains: [] as string[],
+                resourceDomains: [] as string[],
+              },
+            },
+          },
+        },
+      ],
+    };
+    emitResourceAudit(
+      {
+        props: identitySnapshot,
+        resource: ATTACHMENT_UPLOADER_RESOURCE_URI,
+        outcome: "success",
+        reason: "ok",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
+    return result;
+  } catch (error) {
+    emitResourceAudit(
+      {
+        props: auditProps,
+        resource: ATTACHMENT_UPLOADER_RESOURCE_URI,
+        outcome: "denied",
+        reason: "profile_unavailable",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
+    throw error;
+  }
+}
+
 export function registerConnectWiseBusinessTools(
   server: McpServer,
   env: object,
@@ -725,33 +808,7 @@ export function registerConnectWiseBusinessTools(
         "Paste, drop, or choose an image and attach it to a ConnectWise ticket or time entry.",
       mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
     },
-    async (uri) => {
-      const props = getProps();
-      if (!hasMcpScopes(props, ["mcp:read"])) {
-        throw new Error("Insufficient scope");
-      }
-      if (!hasAuthenticatedProfile(props)) {
-        throw new Error("Authenticated profile unavailable");
-      }
-      resolveIdentityBoundProfileAlias(env, props);
-      return {
-        contents: [
-          {
-            uri: uri.href,
-            mimeType: ATTACHMENT_UPLOADER_MIME_TYPE,
-            text: ATTACHMENT_UPLOADER_HTML,
-            _meta: {
-              ui: {
-                csp: {
-                  connectDomains: [],
-                  resourceDomains: [],
-                },
-              },
-            },
-          },
-        ],
-      };
-    },
+    async () => attachmentUploaderResourceResult(getProps(), env, dependencies),
   );
 
   server.registerTool(

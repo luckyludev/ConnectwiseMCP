@@ -51,9 +51,22 @@ const toolAuditNames = [
   "update_service_ticket",
 ] as const;
 
+const resourceAuditNames = [
+  "ui://connectwise/attachment-uploader.html",
+] as const;
+const resourceAuditOutcomes = ["success", "denied"] as const;
+const resourceAuditReasons = [
+  "ok",
+  "insufficient_scope",
+  "profile_unavailable",
+] as const;
+
 export type ToolAuditOutcome = (typeof toolAuditOutcomes)[number];
 export type ToolAuditReason = (typeof toolAuditReasons)[number];
 export type ToolAuditName = (typeof toolAuditNames)[number];
+export type ResourceAuditName = (typeof resourceAuditNames)[number];
+export type ResourceAuditOutcome = (typeof resourceAuditOutcomes)[number];
+export type ResourceAuditReason = (typeof resourceAuditReasons)[number];
 
 const toolAuditOutcomeAllowlist: ReadonlySet<unknown> = new Set(
   toolAuditOutcomes,
@@ -62,6 +75,15 @@ const toolAuditReasonAllowlist: ReadonlySet<unknown> = new Set(
   toolAuditReasons,
 );
 const toolAuditNameAllowlist: ReadonlySet<unknown> = new Set(toolAuditNames);
+const resourceAuditNameAllowlist: ReadonlySet<unknown> = new Set(
+  resourceAuditNames,
+);
+const resourceAuditOutcomeAllowlist: ReadonlySet<unknown> = new Set(
+  resourceAuditOutcomes,
+);
+const resourceAuditReasonAllowlist: ReadonlySet<unknown> = new Set(
+  resourceAuditReasons,
+);
 
 export function isToolAuditName(value: unknown): value is ToolAuditName {
   return toolAuditNameAllowlist.has(value);
@@ -76,6 +98,14 @@ export type ToolAuditInput = {
   tool: ToolAuditName;
   outcome: ToolAuditOutcome;
   reason: ToolAuditReason;
+  startedAtMs: number;
+};
+
+export type ResourceAuditInput = {
+  props: unknown;
+  resource: ResourceAuditName;
+  outcome: ResourceAuditOutcome;
+  reason: ResourceAuditReason;
   startedAtMs: number;
 };
 
@@ -141,6 +171,61 @@ export function emitToolAudit(
         ? { profileAlias }
         : {}),
       tool,
+      outcome,
+      reason,
+      durationMs: Math.min(300_000, Math.max(0, Math.round(now - startedAtMs))),
+    };
+    (dependencies.logger ?? console.info)(JSON.stringify(event));
+  } catch {
+    // Audit delivery is best-effort and must not alter the MCP result.
+  }
+}
+
+export function emitResourceAudit(
+  input: ResourceAuditInput,
+  dependencies: ToolAuditDependencies = {},
+): void {
+  try {
+    const now = dependencies.now?.() ?? Date.now();
+    const correlationId =
+      dependencies.createCorrelationId?.() ?? crypto.randomUUID();
+    const startedAtMs = input.startedAtMs;
+    const resource: unknown = input.resource;
+    const outcome: unknown = input.outcome;
+    const reason: unknown = input.reason;
+    if (
+      !Number.isFinite(now) ||
+      !Number.isFinite(startedAtMs) ||
+      !entraIdPattern.test(correlationId) ||
+      !resourceAuditNameAllowlist.has(resource) ||
+      !resourceAuditOutcomeAllowlist.has(outcome) ||
+      !resourceAuditReasonAllowlist.has(reason)
+    ) {
+      return;
+    }
+    const props =
+      input.props !== null && typeof input.props === "object"
+        ? (input.props as Record<string, unknown>)
+        : {};
+    const tenantId = props.tenantId;
+    const objectId = props.objectId;
+    const profileAlias = props.profileAlias;
+    const event = {
+      version: 1,
+      event: "mcp_resource_read",
+      timestamp: new Date(now).toISOString(),
+      correlationId,
+      ...(typeof tenantId === "string" && entraIdPattern.test(tenantId)
+        ? { tenantId }
+        : {}),
+      ...(typeof objectId === "string" && entraIdPattern.test(objectId)
+        ? { objectId }
+        : {}),
+      ...(typeof profileAlias === "string" &&
+      profileAliasPattern.test(profileAlias)
+        ? { profileAlias }
+        : {}),
+      resource,
       outcome,
       reason,
       durationMs: Math.min(300_000, Math.max(0, Math.round(now - startedAtMs))),
