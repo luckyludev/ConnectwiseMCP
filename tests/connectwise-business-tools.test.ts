@@ -1,12 +1,19 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vitest";
 import {
   MAX_TOOL_OUTPUT_BYTES,
   attachmentUploaderResourceResult,
   boundedToolOutput,
   projectAgreementAddition,
+  registerConnectWiseBusinessTools,
   summarizeAgreementAdditions,
 } from "../src/connectwise-business-tools";
-import { MAX_DOWNLOAD_BYTES } from "../src/connectwise-client";
+import {
+  MAX_DOWNLOAD_BYTES,
+  type ConnectWiseClient,
+} from "../src/connectwise-client";
 
 describe("agreement addition projection", () => {
   const upstreamAddition = {
@@ -107,6 +114,201 @@ const resourceEnv = {
   ALLOWED_GROUP_IDS: JSON.stringify([groupId]),
   ALLOWED_APP_ROLES: "[]",
 };
+const businessEnv = {
+  ...resourceEnv,
+  CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
+    "https://api-na.myconnectwise.net",
+  ]),
+  CW_PROFILE_LUIS: JSON.stringify({
+    apiBaseUrl: "https://api-na.myconnectwise.net/v4_6_release/apis/3.0",
+    companyId: "company-luis",
+    publicKey: "public-key",
+    privateKey: "private-key",
+    clientId: "partner-client-id",
+    memberId: 149,
+  }),
+};
+
+async function callRegisteredBusinessTool(
+  props: Record<string, unknown>,
+  dependencies: Parameters<typeof registerConnectWiseBusinessTools>[3],
+) {
+  const server = new McpServer({
+    name: "business-tool-test",
+    version: "1.0.0",
+  });
+  registerConnectWiseBusinessTools(
+    server,
+    businessEnv,
+    () => props,
+    dependencies,
+  );
+  const client = new Client({ name: "business-tool-test", version: "1.0.0" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    return await client.callTool({ name: "get_service_boards", arguments: {} });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
+
+function serviceBoardClient(): ConnectWiseClient {
+  return {
+    async getServiceBoards() {
+      return [];
+    },
+  } as unknown as ConnectWiseClient;
+}
+
+describe("business-tool identity snapshot", () => {
+  it("reuses one identity snapshot for authorization, credentials, and audit", async () => {
+    const messages: string[] = [];
+    const selectedCompanies: string[] = [];
+    const reads = {
+      tenantId: 0,
+      objectId: 0,
+      profileAlias: 0,
+      groups: 0,
+      roles: 0,
+    };
+    const alternateTenantId = "55555555-5555-4555-8555-555555555555";
+    const alternateObjectId = "66666666-6666-4666-8666-666666666666";
+    const props = {
+      scopes: ["mcp:read"],
+      get tenantId() {
+        reads.tenantId += 1;
+        return reads.tenantId === 1 ? tenantId : alternateTenantId;
+      },
+      get objectId() {
+        reads.objectId += 1;
+        return reads.objectId === 1 ? objectId : alternateObjectId;
+      },
+      get profileAlias() {
+        reads.profileAlias += 1;
+        return reads.profileAlias === 1 ? "LUIS" : "OTHER";
+      },
+      get groups() {
+        reads.groups += 1;
+        return reads.groups === 1 ? [groupId] : [];
+      },
+      get roles() {
+        reads.roles += 1;
+        return reads.roles === 1 ? [] : ["unexpected-role"];
+      },
+    };
+
+    const result = await callRegisteredBusinessTool(props, {
+      audit: {
+        logger: (message) => messages.push(message),
+        now: () => 1_000,
+        createCorrelationId: () => correlationId,
+      },
+      createClient: (credentials) => {
+        selectedCompanies.push(credentials.companyId);
+        return serviceBoardClient();
+      },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(selectedCompanies).toEqual(["company-luis"]);
+    expect(reads).toEqual({
+      tenantId: 1,
+      objectId: 1,
+      profileAlias: 1,
+      groups: 1,
+      roles: 1,
+    });
+    expect(JSON.parse(messages[0]!)).toMatchObject({
+      tenantId,
+      objectId,
+      profileAlias: "LUIS",
+      tool: "get_service_boards",
+      outcome: "success",
+      reason: "ok",
+    });
+    expect(messages[0]!).not.toContain(alternateTenantId);
+    expect(messages[0]!).not.toContain(alternateObjectId);
+    expect(messages[0]!).not.toContain("OTHER");
+    expect(messages[0]!).not.toContain("unexpected-role");
+  });
+
+  it("rejects identity arrays whose iterator disagrees with indexed claims", async () => {
+    const messages: string[] = [];
+    let clientCreated = false;
+    const groups = ["77777777-7777-4777-8777-777777777777"];
+    groups[Symbol.iterator] = () => [groupId][Symbol.iterator]();
+
+    const result = await callRegisteredBusinessTool(
+      {
+        tenantId,
+        objectId,
+        profileAlias: "LUIS",
+        groups,
+        roles: [],
+        scopes: ["mcp:read"],
+      },
+      {
+        audit: {
+          logger: (message) => messages.push(message),
+          now: () => 1_000,
+          createCorrelationId: () => correlationId,
+        },
+        createClient: () => {
+          clientCreated = true;
+          return serviceBoardClient();
+        },
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(clientCreated).toBe(false);
+    expect(messages).toHaveLength(1);
+    expect(JSON.parse(messages[0]!)).toMatchObject({
+      tool: "get_service_boards",
+      outcome: "failure",
+      reason: "operation_failed",
+    });
+  });
+
+  it("fails closed and audits when identity snapshot construction throws", async () => {
+    const messages: string[] = [];
+    let clientCreated = false;
+    const props = {
+      scopes: ["mcp:read"],
+      get tenantId(): string {
+        throw new Error("identity accessor failed");
+      },
+    };
+
+    const result = await callRegisteredBusinessTool(props, {
+      audit: {
+        logger: (message) => messages.push(message),
+        now: () => 1_000,
+        createCorrelationId: () => correlationId,
+      },
+      createClient: () => {
+        clientCreated = true;
+        return serviceBoardClient();
+      },
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "Authenticated profile unavailable" }],
+    });
+    expect(clientCreated).toBe(false);
+    expect(JSON.parse(messages[0]!)).toMatchObject({
+      tool: "get_service_boards",
+      outcome: "denied",
+      reason: "profile_unavailable",
+    });
+    expect(messages[0]!).not.toContain("identity accessor failed");
+  });
+});
 
 describe("attachment uploader resource", () => {
   it("audits an authorized read without exposing resource content or auth data", () => {

@@ -75,6 +75,53 @@ function hasAuthenticatedProfile(
   );
 }
 
+function snapshotStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new Error("Invalid identity string array");
+  const snapshot: string[] = [];
+  const length = value.length;
+  for (let index = 0; index < length; index += 1) {
+    if (!Object.prototype.hasOwnProperty.call(value, index)) {
+      throw new Error("Invalid identity string array");
+    }
+    const entry: unknown = value[index];
+    if (typeof entry !== "string") {
+      throw new Error("Invalid identity string array");
+    }
+    snapshot.push(entry);
+  }
+  return snapshot;
+}
+
+function snapshotAuthProps(
+  props: NonNullable<AuthProps>,
+  scopes: readonly string[],
+): NonNullable<AuthProps> {
+  const tenantId = props.tenantId;
+  const objectId = props.objectId;
+  const profileAlias = props.profileAlias;
+  const groups: unknown = props.groups;
+  const roles: unknown = props.roles;
+  return {
+    ...(tenantId !== undefined ? { tenantId } : {}),
+    ...(objectId !== undefined ? { objectId } : {}),
+    ...(profileAlias !== undefined ? { profileAlias } : {}),
+    ...(groups !== undefined ? { groups: snapshotStringArray(groups) } : {}),
+    ...(roles !== undefined ? { roles: snapshotStringArray(roles) } : {}),
+    scopes: [...scopes],
+  };
+}
+
+function trySnapshotAuthProps(
+  props: NonNullable<AuthProps>,
+  scopes: readonly string[],
+): NonNullable<AuthProps> | undefined {
+  try {
+    return snapshotAuthProps(props, scopes);
+  } catch {
+    return undefined;
+  }
+}
+
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -339,9 +386,12 @@ async function runAuthorizedTool(
   const requiredScopes = requiredMcpScopes(tool);
   if (!hasMcpScopes(props, requiredScopes)) {
     const hasReadScope = hasMcpScopes(props, ["mcp:read"]);
+    const auditProps = hasReadScope
+      ? trySnapshotAuthProps(props, ["mcp:read"])
+      : undefined;
     emitToolAudit(
       {
-        props: hasReadScope ? props : undefined,
+        props: auditProps,
         tool,
         outcome: "denied",
         reason: "insufficient_scope",
@@ -354,10 +404,11 @@ async function runAuthorizedTool(
       content: [{ type: "text", text: "Insufficient scope" }],
     };
   }
-  if (!hasAuthenticatedProfile(props)) {
+  const authorizedProps = trySnapshotAuthProps(props, requiredScopes);
+  if (!hasAuthenticatedProfile(authorizedProps)) {
     emitToolAudit(
       {
-        props,
+        props: authorizedProps,
         tool,
         outcome: "denied",
         reason: "profile_unavailable",
@@ -371,14 +422,11 @@ async function runAuthorizedTool(
     };
   }
   try {
-    const result = await operation({
-      ...props,
-      profileAlias: props.profileAlias,
-    });
+    const result = await operation(authorizedProps);
     const toolOutput = boundedToolOutput(result);
     emitToolAudit(
       {
-        props,
+        props: authorizedProps,
         tool,
         outcome: "success",
         reason: "ok",
@@ -390,7 +438,7 @@ async function runAuthorizedTool(
   } catch (error) {
     emitToolAudit(
       {
-        props,
+        props: authorizedProps,
         tool,
         outcome:
           error instanceof ConnectWiseRequestError &&
@@ -715,19 +763,7 @@ export function attachmentUploaderResourceResult(
   }
   let auditProps: AuthProps = undefined;
   try {
-    const tenantId = props.tenantId;
-    const objectId = props.objectId;
-    const profileAlias = props.profileAlias;
-    const groups = props.groups;
-    const roles = props.roles;
-    const identitySnapshot: AuthProps = {
-      ...(tenantId !== undefined ? { tenantId } : {}),
-      ...(objectId !== undefined ? { objectId } : {}),
-      ...(profileAlias !== undefined ? { profileAlias } : {}),
-      ...(groups !== undefined ? { groups } : {}),
-      ...(roles !== undefined ? { roles } : {}),
-      scopes: ["mcp:read"],
-    };
+    const identitySnapshot = snapshotAuthProps(props, ["mcp:read"]);
     auditProps = identitySnapshot;
     if (!hasAuthenticatedProfile(identitySnapshot)) {
       throw new Error("Authenticated profile unavailable");
