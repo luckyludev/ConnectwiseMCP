@@ -50,6 +50,8 @@ jobs:
         with:
           node-version: 24.11.0
           cache: npm
+      - name: Verify reviewed npm CLI
+        run: node scripts/verify-npm-version.mjs
       - run: npm ci --ignore-scripts
       - run: npm run check
       - name: Exercise verified staging deployment path

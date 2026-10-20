@@ -17,6 +17,7 @@
 The operator first validates the checkout with no Cloudflare credentials or authenticated Wrangler state available:
 
 ```bash
+node scripts/verify-npm-version.mjs
 npm ci --ignore-scripts
 npm run check
 node node_modules/wrangler/bin/wrangler.js deploy --env staging --keep-vars --dry-run --outdir dist-staging

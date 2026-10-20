@@ -133,6 +133,7 @@ Before production cutover:
 ## Verification
 
 ```bash
+node scripts/verify-npm-version.mjs
 npm ci --ignore-scripts
 npm run check
 ```

@@ -43,6 +43,8 @@ jobs:
           node-version: 24.11.0
           cache: npm
           cache-dependency-path: deploy/cwm-mcp/package-lock.json
+      - name: Verify reviewed npm CLI
+        run: node scripts/verify-npm-version.mjs
       - name: Install hash-locked CI tools
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
