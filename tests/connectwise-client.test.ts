@@ -2877,6 +2877,78 @@ describe("ConnectWiseClient", () => {
     }
   });
 
+  it("audits reference identity validation before reporting request success", async () => {
+    type Client = ReturnType<typeof createConnectWiseClient>;
+    const cases: Array<{
+      name: string;
+      exercise: (client: Client) => Promise<unknown>;
+    }> = [
+      {
+        name: "service boards",
+        exercise: (client) => client.getServiceBoards(),
+      },
+      {
+        name: "board statuses",
+        exercise: (client) => client.getBoardStatuses(32),
+      },
+      { name: "board types", exercise: (client) => client.getBoardTypes(32) },
+      {
+        name: "service statuses",
+        exercise: (client) => client.getServiceStatuses(),
+      },
+      {
+        name: "service priorities",
+        exercise: (client) => client.getServicePriorities(),
+      },
+      {
+        name: "service sources",
+        exercise: (client) => client.getServiceSources(),
+      },
+    ];
+    const invalidResponse = [{ name: "Missing ID" }];
+    const validResponse = [{ id: 7, name: "Valid reference" }];
+
+    for (const testCase of cases) {
+      const failureLogs: string[] = [];
+      const failingClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(invalidResponse),
+        log: (line) => failureLogs.push(line),
+      });
+
+      await expect(
+        testCase.exercise(failingClient),
+        testCase.name,
+      ).rejects.toThrow("Invalid ConnectWise reference response");
+      expect(failureLogs, testCase.name).toHaveLength(1);
+      expect(JSON.parse(failureLogs[0]!), testCase.name).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+
+      const successLogs: string[] = [];
+      const successfulClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(validResponse),
+        log: (line) => successLogs.push(line),
+      });
+
+      await expect(
+        testCase.exercise(successfulClient),
+        testCase.name,
+      ).resolves.toEqual(validResponse);
+      expect(successLogs, testCase.name).toHaveLength(1);
+      expect(JSON.parse(successLogs[0]!), testCase.name).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "success",
+      });
+    }
+  });
+
   it.each([
     { name: "missing", option: { name: "New" } },
     { name: "string", option: { id: "7", name: "New" } },
