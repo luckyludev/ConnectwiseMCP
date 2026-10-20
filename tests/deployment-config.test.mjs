@@ -1013,20 +1013,31 @@ describe("staging deployment configuration", () => {
   });
 
   it("retains and attests canonical V2 release evidence", async () => {
-    const [workflow, stagingHowto, runbook] = await Promise.all([
-      readFile(
-        new URL("../.github/workflows/v2-ci.yml", import.meta.url),
-        "utf8",
-      ),
-      readFile(
-        new URL("../docs/cloudflare-workers-staging-howto.md", import.meta.url),
-        "utf8",
-      ),
-      readFile(
-        new URL("../docs/cutover-rollback-runbook.md", import.meta.url),
-        "utf8",
-      ),
-    ]);
+    const [workflow, stagingHowto, runbook, stagingChecklist] =
+      await Promise.all([
+        readFile(
+          new URL("../.github/workflows/v2-ci.yml", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../docs/cloudflare-workers-staging-howto.md",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+        readFile(
+          new URL("../docs/cutover-rollback-runbook.md", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../docs/v2-staging-acceptance-checklist.md",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ]);
     const stagingDryRunOffset = workflow.indexOf(
       "      - name: Exercise verified staging deployment path",
     );
@@ -1292,6 +1303,15 @@ describe("staging deployment configuration", () => {
     );
     expect(runbook).toContain(
       "successful canonical `v2-ci` run, and verified references to its attested staging and production release-evidence artifacts",
+    );
+    expect(stagingChecklist).toContain(
+      "[retained V2 release-evidence verification procedure](cloudflare-workers-staging-howto.md#verify-retained-v2-release-evidence)",
+    );
+    expect(stagingChecklist).toContain(
+      "Require GitHub attestation verification for all six retained files and `npm run verify:v2-evidence -- <downloaded-directory> staging <release-commit>` to pass",
+    );
+    expect(stagingChecklist).toContain(
+      "Missing, expired, substituted, or unverifiable evidence blocks staging acceptance",
     );
   });
 
