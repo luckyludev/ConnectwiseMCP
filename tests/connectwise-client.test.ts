@@ -173,6 +173,86 @@ describe("ConnectWiseClient", () => {
     }
   });
 
+  it("audits direct-record identity validation before reporting request success", async () => {
+    type Client = ReturnType<typeof createConnectWiseClient>;
+    const cases: Array<{
+      name: string;
+      validResponse: Record<string, unknown>;
+      invalidResponse: Record<string, unknown>;
+      exercise: (client: Client) => Promise<unknown>;
+      error: string;
+    }> = [
+      {
+        name: "detailed service ticket",
+        validResponse: { id: 123, summary: "Expected ticket" },
+        invalidResponse: { id: 124, summary: "Wrong ticket" },
+        exercise: (client) => client.getServiceTicket(123),
+        error: "ConnectWise service ticket does not match requested ID",
+      },
+      {
+        name: "service ticket status",
+        validResponse: { id: 123, status: { name: "New" } },
+        invalidResponse: { id: 124, status: { name: "Wrong ticket" } },
+        exercise: (client) => client.getServiceTicketStatus(123),
+        error: "ConnectWise service ticket does not match requested ID",
+      },
+      {
+        name: "mapped member",
+        validResponse: { id: 149, name: "Mapped member" },
+        invalidResponse: { id: 150, name: "Different member" },
+        exercise: (client) => client.getMyMember(),
+        error: "ConnectWise member response does not match mapped member",
+      },
+      {
+        name: "agreement",
+        validResponse: { id: 7, name: "Expected agreement" },
+        invalidResponse: { id: 8, name: "Wrong agreement" },
+        exercise: (client) => client.getAgreement(7),
+        error: "ConnectWise agreement does not match requested ID",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const failureLogs: string[] = [];
+      const failingClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(testCase.invalidResponse),
+        log: (line) => failureLogs.push(line),
+      });
+
+      await expect(
+        testCase.exercise(failingClient),
+        testCase.name,
+      ).rejects.toThrow(testCase.error);
+      expect(failureLogs, testCase.name).toHaveLength(1);
+      expect(JSON.parse(failureLogs[0]!), testCase.name).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+
+      const successLogs: string[] = [];
+      const successfulClient = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(testCase.validResponse),
+        log: (line) => successLogs.push(line),
+      });
+
+      await expect(
+        testCase.exercise(successfulClient),
+        testCase.name,
+      ).resolves.toEqual(testCase.validResponse);
+      expect(successLogs, testCase.name).toHaveLength(1);
+      expect(JSON.parse(successLogs[0]!), testCase.name).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "success",
+      });
+    }
+  });
+
   it("scopes attachment lookup to one ticket and a bounded page", async () => {
     let capturedUrl = "";
     let capturedInit: RequestInit | undefined;
@@ -4906,6 +4986,7 @@ describe("ConnectWiseClient", () => {
         { id: 10, member: { id: 149 } },
       ]) {
         const methods: string[] = [];
+        const logs: string[] = [];
         const client = createConnectWiseClient(credentials, {
           fetcher: async (_input, init) => {
             methods.push(
@@ -4913,12 +4994,20 @@ describe("ConnectWiseClient", () => {
             );
             return Response.json(response);
           },
+          log: (line) => logs.push(line),
         });
 
         await expect(mutate(client)).rejects.toThrow(
           `ConnectWise ${recordType} does not match requested ID`,
         );
         expect(methods).toEqual(["GET"]);
+        expect(logs).toHaveLength(1);
+        expect(JSON.parse(logs[0]!)).toMatchObject({
+          event: "cw_request",
+          method: "GET",
+          status: 200,
+          outcome: "upstream_error",
+        });
       }
     },
   );
@@ -5006,6 +5095,7 @@ describe("ConnectWiseClient", () => {
 
   it("reconciles a misrouted service ticket update response", async () => {
     const methods: string[] = [];
+    const logs: string[] = [];
     let getCount = 0;
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input, init) => {
@@ -5030,6 +5120,7 @@ describe("ConnectWiseClient", () => {
           company: { id: 1, name: "Expected customer" },
         });
       },
+      log: (line) => logs.push(line),
     });
 
     await expect(
@@ -5040,6 +5131,16 @@ describe("ConnectWiseClient", () => {
       company: { id: 1, name: "Expected customer" },
     });
     expect(methods).toEqual(["GET", "PATCH", "GET"]);
+    expect(
+      logs
+        .map((line) => JSON.parse(line))
+        .find((entry) => entry.method === "PATCH"),
+    ).toMatchObject({
+      event: "cw_request",
+      method: "PATCH",
+      status: 200,
+      outcome: "indeterminate",
+    });
   });
 
   it("reconciles an accepted asynchronous service ticket update response", async () => {
@@ -5385,6 +5486,7 @@ describe("ConnectWiseClient", () => {
     { id: 9, member: { id: 150 } },
   ])("reconciles an invalid schedule update response %#", async (updated) => {
     const methods: string[] = [];
+    const logs: string[] = [];
     let getCount = 0;
     const client = createConnectWiseClient(credentials, {
       fetcher: async (_input, init) => {
@@ -5400,6 +5502,7 @@ describe("ConnectWiseClient", () => {
           doneFlag: getCount === 1 ? false : true,
         });
       },
+      log: (line) => logs.push(line),
     });
 
     await expect(
@@ -5411,6 +5514,16 @@ describe("ConnectWiseClient", () => {
       doneFlag: true,
     });
     expect(methods).toEqual(["GET", "PATCH", "GET"]);
+    expect(
+      logs
+        .map((line) => JSON.parse(line))
+        .find((entry) => entry.method === "PATCH"),
+    ).toMatchObject({
+      event: "cw_request",
+      method: "PATCH",
+      status: 200,
+      outcome: "indeterminate",
+    });
   });
 
   it("reconciles a malformed successful schedule update response", async () => {
@@ -5754,8 +5867,9 @@ describe("ConnectWiseClient", () => {
     ["malformed", () => Promise.resolve(Response.json({ id: 247135 }))],
   ])(
     "classifies a %s deletion confirmation as indeterminate without repeating DELETE",
-    async (_name, confirmationResult) => {
+    async (name, confirmationResult) => {
       const methods: string[] = [];
+      const logs: string[] = [];
       let getCount = 0;
       const client = createConnectWiseClient(credentials, {
         fetcher: async (_input, init) => {
@@ -5770,12 +5884,21 @@ describe("ConnectWiseClient", () => {
             ? Response.json({ id: 247134, member: { id: 149 } })
             : confirmationResult();
         },
+        log: (line) => logs.push(line),
       });
 
       await expect(client.deleteScheduleEntry(247134)).rejects.toBeInstanceOf(
         ConnectWiseIndeterminateWriteError,
       );
       expect(methods.filter((method) => method === "DELETE")).toHaveLength(1);
+      if (name === "malformed") {
+        expect(JSON.parse(logs.at(-1)!)).toMatchObject({
+          event: "cw_request",
+          method: "GET",
+          status: 200,
+          outcome: "upstream_error",
+        });
+      }
     },
   );
 
@@ -6287,8 +6410,10 @@ describe("ConnectWiseClient", () => {
       [{ id: 83, member: { id: 149 } }],
       [{ id: 84, objectId: 123 }],
     ];
+    const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async () => Response.json(responses.shift()),
+      log: (line) => logs.push(line),
     });
 
     await expect(client.openScheduleEntriesForObject(123)).rejects.toThrow(
@@ -6303,6 +6428,15 @@ describe("ConnectWiseClient", () => {
     await expect(client.openScheduleEntriesForObject(123)).rejects.toThrow(
       "ConnectWise record is not assigned to mapped member",
     );
+    expect(logs).toHaveLength(4);
+    for (const line of logs) {
+      expect(JSON.parse(line)).toMatchObject({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        outcome: "upstream_error",
+      });
+    }
   });
 
   it.each([

@@ -1976,31 +1976,59 @@ export function createConnectWiseClient(
     operation: string,
   ): Promise<void> {
     const memberId = mappedMemberId(operation);
-    const entry = await requestJson("GET", `/time/entries/${timeEntryId}`, {
-      fields: "id,member",
-    });
-    const verifiedEntry = verifiedRecordIdentity(
-      entry,
-      timeEntryId,
-      "time entry",
+    const verifyOwnedEntry = (record: unknown): Record<string, unknown> => {
+      const verified = verifiedRecordIdentity(
+        record,
+        timeEntryId,
+        "time entry",
+      );
+      assertMappedMember(verified, memberId);
+      return verified;
+    };
+    const entry = await requestJson(
+      "GET",
+      `/time/entries/${timeEntryId}`,
+      { fields: "id,member" },
+      undefined,
+      undefined,
+      undefined,
+      (record) => {
+        verifyOwnedEntry(record);
+      },
     );
-    assertMappedMember(verifiedEntry, memberId);
+    verifyOwnedEntry(entry);
   }
 
   return {
     async getServiceTicket(ticketId: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
-      const ticket = await requestJson("GET", `/service/tickets/${ticketId}`, {
-        fields: SERVICE_TICKET_READ_FIELDS,
-      });
+      const ticket = await requestJson(
+        "GET",
+        `/service/tickets/${ticketId}`,
+        { fields: SERVICE_TICKET_READ_FIELDS },
+        undefined,
+        undefined,
+        undefined,
+        (record) => {
+          verifiedRecordIdentity(record, ticketId, "service ticket");
+        },
+      );
       return verifiedRecordIdentity(ticket, ticketId, "service ticket");
     },
 
     async getServiceTicketStatus(ticketId: number): Promise<unknown> {
       positiveId(ticketId, "service ticket ID");
-      const ticket = await requestJson("GET", `/service/tickets/${ticketId}`, {
-        fields: SERVICE_TICKET_LOOKUP_FIELDS,
-      });
+      const ticket = await requestJson(
+        "GET",
+        `/service/tickets/${ticketId}`,
+        { fields: SERVICE_TICKET_LOOKUP_FIELDS },
+        undefined,
+        undefined,
+        undefined,
+        (record) => {
+          verifiedRecordIdentity(record, ticketId, "service ticket");
+        },
+      );
       return verifiedRecordIdentity(ticket, ticketId, "service ticket");
     },
 
@@ -2300,19 +2328,28 @@ export function createConnectWiseClient(
 
     async getMyMember(): Promise<unknown> {
       const memberId = mappedMemberId("get_my_member");
-      const result = await requestJson("GET", `/system/members/${memberId}`, {
-        fields: MEMBER_DETAIL_FIELDS,
-      });
-      if (
-        !result ||
-        typeof result !== "object" ||
-        Array.isArray(result) ||
-        (result as Record<string, unknown>).id !== memberId
-      ) {
-        throw new Error(
-          "ConnectWise member response does not match mapped member",
-        );
-      }
+      const verifyMappedMember = (record: unknown): void => {
+        if (
+          !record ||
+          typeof record !== "object" ||
+          Array.isArray(record) ||
+          (record as Record<string, unknown>).id !== memberId
+        ) {
+          throw new Error(
+            "ConnectWise member response does not match mapped member",
+          );
+        }
+      };
+      const result = await requestJson(
+        "GET",
+        `/system/members/${memberId}`,
+        { fields: MEMBER_DETAIL_FIELDS },
+        undefined,
+        undefined,
+        undefined,
+        verifyMappedMember,
+      );
+      verifyMappedMember(result);
       return result;
     },
 
@@ -2739,8 +2776,12 @@ export function createConnectWiseClient(
       const agreement = await requestJson(
         "GET",
         `/finance/agreements/${agreementId}`,
-        {
-          fields: AGREEMENT_COLLECTION_FIELDS,
+        { fields: AGREEMENT_COLLECTION_FIELDS },
+        undefined,
+        undefined,
+        undefined,
+        (record) => {
+          verifiedRecordIdentity(record, agreementId, "agreement");
         },
       );
       return verifiedRecordIdentity(agreement, agreementId, "agreement");
@@ -2952,13 +2993,19 @@ export function createConnectWiseClient(
       positiveId(ticketId, "service ticket ID");
       // Verify the exact source identity, then PATCH only caller-authorized fields.
       // A replacement PUT can blank every unpassed field on established tickets.
-      verifiedRecordIdentity(
-        await requestJson("GET", `/service/tickets/${ticketId}`, {
-          fields: SERVICE_TICKET_UPDATE_SOURCE_FIELDS,
-        }),
-        ticketId,
-        "service ticket",
+      const verifySourceTicket = (record: unknown): void => {
+        verifiedRecordIdentity(record, ticketId, "service ticket");
+      };
+      const sourceTicket = await requestJson(
+        "GET",
+        `/service/tickets/${ticketId}`,
+        { fields: SERVICE_TICKET_UPDATE_SOURCE_FIELDS },
+        undefined,
+        undefined,
+        undefined,
+        verifySourceTicket,
       );
+      verifySourceTicket(sourceTicket);
       const operations: Array<{
         op: "replace";
         path: string;
@@ -3036,11 +3083,18 @@ export function createConnectWiseClient(
       };
       const reconcile = async () => {
         try {
-          return confirmUpdate(
-            await requestJson("GET", `/service/tickets/${ticketId}`, {
-              fields: SERVICE_TICKET_UPDATE_RESULT_FIELDS,
-            }),
+          const reconciled = await requestJson(
+            "GET",
+            `/service/tickets/${ticketId}`,
+            { fields: SERVICE_TICKET_UPDATE_RESULT_FIELDS },
+            undefined,
+            undefined,
+            undefined,
+            (record) => {
+              confirmUpdate(record);
+            },
           );
+          return confirmUpdate(reconciled);
         } catch {
           throw new ConnectWiseIndeterminateWriteError();
         }
@@ -3053,6 +3107,11 @@ export function createConnectWiseClient(
           `/service/tickets/${ticketId}`,
           undefined,
           operations,
+          undefined,
+          undefined,
+          (record) => {
+            confirmUpdate(record);
+          },
         );
       } catch (error) {
         if (
@@ -3142,14 +3201,27 @@ export function createConnectWiseClient(
       // Verify ownership with a minimal read, then PATCH only requested fields.
       // The current interval is also needed to validate one-sided date changes.
       // A replacement PUT can blank every unpassed field on established records.
-      const existing = verifiedRecordIdentity(
-        await requestJson("GET", `/schedule/entries/${entryId}`, {
-          fields: SCHEDULE_ENTRY_UPDATE_SOURCE_FIELDS,
-        }),
-        entryId,
-        "schedule entry",
+      const verifyOwnedEntry = (record: unknown): Record<string, unknown> => {
+        const verified = verifiedRecordIdentity(
+          record,
+          entryId,
+          "schedule entry",
+        );
+        assertMappedMember(verified, memberId);
+        return verified;
+      };
+      const sourceEntry = await requestJson(
+        "GET",
+        `/schedule/entries/${entryId}`,
+        { fields: SCHEDULE_ENTRY_UPDATE_SOURCE_FIELDS },
+        undefined,
+        undefined,
+        undefined,
+        (record) => {
+          verifyOwnedEntry(record);
+        },
       );
-      assertMappedMember(existing, memberId);
+      const existing = verifyOwnedEntry(sourceEntry);
       const operations: Array<{
         op: "replace";
         path: string;
@@ -3230,11 +3302,18 @@ export function createConnectWiseClient(
       };
       const reconcile = async () => {
         try {
-          return confirmUpdate(
-            await requestJson("GET", `/schedule/entries/${entryId}`, {
-              fields: SCHEDULE_ENTRY_UPDATE_RESULT_FIELDS,
-            }),
+          const reconciled = await requestJson(
+            "GET",
+            `/schedule/entries/${entryId}`,
+            { fields: SCHEDULE_ENTRY_UPDATE_RESULT_FIELDS },
+            undefined,
+            undefined,
+            undefined,
+            (record) => {
+              confirmUpdate(record);
+            },
           );
+          return confirmUpdate(reconciled);
         } catch {
           throw new ConnectWiseIndeterminateWriteError();
         }
@@ -3247,6 +3326,11 @@ export function createConnectWiseClient(
           `/schedule/entries/${entryId}`,
           undefined,
           operations,
+          undefined,
+          undefined,
+          (record) => {
+            confirmUpdate(record);
+          },
         );
       } catch (error) {
         if (
@@ -3275,19 +3359,41 @@ export function createConnectWiseClient(
     async deleteScheduleEntry(entryId): Promise<void> {
       positiveId(entryId, "schedule entry ID");
       const memberId = mappedMemberId("delete_schedule_entry");
-      const existing = verifiedRecordIdentity(
-        await requestJson("GET", `/schedule/entries/${entryId}`, {
-          fields: SCHEDULE_ENTRY_OWNERSHIP_FIELDS,
-        }),
-        entryId,
-        "schedule entry",
+      const verifyOwnedEntry = (record: unknown): Record<string, unknown> => {
+        const verified = verifiedRecordIdentity(
+          record,
+          entryId,
+          "schedule entry",
+        );
+        assertMappedMember(verified, memberId);
+        return verified;
+      };
+      const sourceEntry = await requestJson(
+        "GET",
+        `/schedule/entries/${entryId}`,
+        { fields: SCHEDULE_ENTRY_OWNERSHIP_FIELDS },
+        undefined,
+        undefined,
+        undefined,
+        (record) => {
+          verifyOwnedEntry(record);
+        },
       );
-      assertMappedMember(existing, memberId);
+      verifyOwnedEntry(sourceEntry);
       await requestJson("DELETE", `/schedule/entries/${entryId}`);
       try {
-        await requestJson("GET", `/schedule/entries/${entryId}`, {
-          fields: SCHEDULE_ENTRY_OWNERSHIP_FIELDS,
-        });
+        await requestJson(
+          "GET",
+          `/schedule/entries/${entryId}`,
+          { fields: SCHEDULE_ENTRY_OWNERSHIP_FIELDS },
+          undefined,
+          undefined,
+          undefined,
+          (record) => {
+            verifiedRecordIdentity(record, entryId, "schedule entry");
+            throw new Error("ConnectWise schedule entry still exists");
+          },
+        );
       } catch (error) {
         if (
           error instanceof ConnectWiseRequestError &&
@@ -3313,6 +3419,9 @@ export function createConnectWiseClient(
           pageSize: 50,
         },
         50,
+        (records) => {
+          verifiedObjectScheduleEntryList(records, objectId, memberId);
+        },
       );
       return verifiedObjectScheduleEntryList(found, objectId, memberId);
     },
