@@ -3,11 +3,20 @@
   "version": "2.0.0-alpha.1",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.6.1",
   "engines": {
     "node": "^24.11.0"
   },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": "11.6.1",
+      "onFail": "error"
+    }
+  },
   "scripts": {
     "test": "vitest run",
+    "verify:npm": "node scripts/verify-npm-version.mjs",
     "test:live-staging": "node scripts/staging-live-smoke.mjs",
     "verify:v2-evidence": "node scripts/verify-v2-release-evidence.mjs",
     "scripts:check": "for file in scripts/*.mjs; do node --check \"$file\" || exit 1; done && for file in scripts/*.sh; do sh -n \"$file\" || exit 1; done",
@@ -21,8 +30,8 @@
     "build:staging": "wrangler deploy --env staging --keep-vars --strict --dry-run --outdir dist && node scripts/staging-bundle-integrity.mjs create",
     "build:production": "wrangler deploy --env=\"\" --env-file config/empty.env --keep-vars --strict --dry-run --outdir dist && node scripts/staging-bundle-integrity.mjs create production",
     "dry-run:production": "node scripts/verify-staging-release.mjs production && npm run build:production && node scripts/verify-staging-release.mjs production && node scripts/staging-bundle-integrity.mjs dry-run production",
-    "prepare:staging": "node scripts/verify-staging-release.mjs && npm ci --ignore-scripts && npm run check && node scripts/verify-staging-release.mjs",
-    "check": "npm run scripts:check && npm run typecheck && npm test && npm run format:check && npm audit --audit-level=moderate && npm run build && npm run build:staging"
+    "prepare:staging": "node scripts/verify-staging-release.mjs && node scripts/verify-npm-version.mjs && npm ci --ignore-scripts && npm run check && node scripts/verify-staging-release.mjs",
+    "check": "npm run verify:npm && npm run scripts:check && npm run typecheck && npm test && npm run format:check && npm audit --audit-level=moderate && npm run build && npm run build:staging"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.3",

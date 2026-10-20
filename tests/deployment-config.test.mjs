@@ -1,5 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { readFile, readdir, stat } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { parse as parseJsonc } from "jsonc-parser";
 import { describe, expect, it } from "vitest";
@@ -142,6 +153,76 @@ describe("dependency maintenance configuration", () => {
     expect(npmConfig).toBe("engine-strict=true\n");
     expect(v2Package.engines).toEqual({ node: "^24.11.0" });
     expect(v2Workflow.match(/- "\.npmrc"/gu)).toHaveLength(1);
+  });
+
+  it("pins and verifies the npm CLI before dependency operations", async () => {
+    const expectedVersion = "11.6.1";
+    const expectedPolicy = {
+      name: "npm",
+      version: expectedVersion,
+      onFail: "error",
+    };
+    const [rootPackage, v2Workflow, legacyWorkflow] = await Promise.all([
+      readJson("../package.json"),
+      readFile(
+        new URL("../.github/workflows/v2-ci.yml", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+        "utf8",
+      ),
+    ]);
+
+    expect(rootPackage.packageManager).toBe(`npm@${expectedVersion}`);
+    expect(rootPackage.devEngines?.packageManager).toEqual(expectedPolicy);
+    expect(rootPackage.scripts?.["verify:npm"]).toBe(
+      "node scripts/verify-npm-version.mjs",
+    );
+    expect(rootPackage.scripts?.check).toMatch(/^npm run verify:npm &&/u);
+    expect(rootPackage.scripts?.["prepare:staging"]).toMatch(
+      /verify-staging-release\.mjs && node scripts\/verify-npm-version\.mjs && npm ci/u,
+    );
+
+    for (const workflow of [v2Workflow, legacyWorkflow]) {
+      const verificationOffset = workflow.indexOf(
+        "run: node scripts/verify-npm-version.mjs",
+      );
+      const installOffset = workflow.indexOf("npm ci");
+      expect(verificationOffset).toBeGreaterThan(-1);
+      expect(installOffset).toBeGreaterThan(verificationOffset);
+      expect(
+        workflow.match(/run: node scripts\/verify-npm-version\.mjs/gu),
+      ).toHaveLength(1);
+    }
+
+    const verifier = fileURLToPath(
+      new URL("../scripts/verify-npm-version.mjs", import.meta.url),
+    );
+    const verified = spawnSync(process.execPath, [verifier], {
+      cwd: new URL("../", import.meta.url),
+      encoding: "utf8",
+    });
+    expect(verified.status, verified.stderr).toBe(0);
+    expect(verified.stdout).toBe(`Verified npm ${expectedVersion}.\n`);
+
+    const fakeBin = await mkdtemp(join(tmpdir(), "connectwise-fake-npm-"));
+    try {
+      const fakeNpm = join(fakeBin, "npm");
+      await writeFile(fakeNpm, "#!/bin/sh\nprintf '11.6.2\\n'\n");
+      await chmod(fakeNpm, 0o700);
+      const rejected = spawnSync(process.execPath, [verifier], {
+        cwd: new URL("../", import.meta.url),
+        encoding: "utf8",
+        env: { ...process.env, PATH: fakeBin },
+      });
+      expect(rejected.status).toBe(1);
+      expect(rejected.stderr).toBe(
+        `npm ${expectedVersion} is required before dependency operations.\n`,
+      );
+    } finally {
+      await rm(fakeBin, { recursive: true, force: true });
+    }
   });
 
   it("pins every CI job to the reviewed Ubuntu runner image", async () => {
@@ -1348,7 +1429,7 @@ describe("staging deployment configuration", () => {
       "wrangler deploy --env staging --keep-vars --strict --dry-run --outdir dist && node scripts/staging-bundle-integrity.mjs create",
     );
     expect(packageJson.scripts?.["prepare:staging"]).toBe(
-      "node scripts/verify-staging-release.mjs && npm ci --ignore-scripts && npm run check && node scripts/verify-staging-release.mjs",
+      "node scripts/verify-staging-release.mjs && node scripts/verify-npm-version.mjs && npm ci --ignore-scripts && npm run check && node scripts/verify-staging-release.mjs",
     );
     expect(packageJson.scripts?.["deploy:staging"]).toBeUndefined();
     expect(stagingHowto).toContain(

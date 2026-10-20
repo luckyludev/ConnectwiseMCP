@@ -129,6 +129,7 @@ git fetch --no-tags origin main
 git checkout --detach <FULL_RELEASE_COMMIT>
 export PRODUCTION_RELEASE_SHA=<FULL_RELEASE_COMMIT>
 node scripts/verify-staging-release.mjs production
+node scripts/verify-npm-version.mjs
 npm ci --ignore-scripts
 npm run check
 node scripts/verify-staging-release.mjs production
