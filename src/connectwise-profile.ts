@@ -84,13 +84,18 @@ export function resolveIdentityBoundProfileAlias(
   env: object,
   props: IdentityBoundProfileProps,
 ): string {
+  const identityTenantId = props.tenantId;
+  const identityObjectId = props.objectId;
+  const profileAlias = props.profileAlias;
+  const groups = props.groups;
+  const roles = props.roles;
   if (
-    typeof props.tenantId !== "string" ||
-    !props.tenantId ||
-    typeof props.objectId !== "string" ||
-    !props.objectId ||
-    typeof props.profileAlias !== "string" ||
-    !props.profileAlias
+    typeof identityTenantId !== "string" ||
+    !identityTenantId ||
+    typeof identityObjectId !== "string" ||
+    !identityObjectId ||
+    typeof profileAlias !== "string" ||
+    !profileAlias
   ) {
     throw new Error("Authenticated ConnectWise profile binding unavailable");
   }
@@ -111,14 +116,14 @@ export function resolveIdentityBoundProfileAlias(
 
   const resolved = resolveCredentialProfile(
     {
-      tid: props.tenantId,
-      oid: props.objectId,
-      groups: props.groups,
-      roles: props.roles,
+      tid: identityTenantId,
+      oid: identityObjectId,
+      groups,
+      roles,
     },
     { tenantId, identityProfileMap, allowedGroupIds, allowedAppRoles },
   );
-  if (resolved.profileAlias !== props.profileAlias) {
+  if (resolved.profileAlias !== profileAlias) {
     throw new Error("Authenticated ConnectWise profile binding changed");
   }
 
