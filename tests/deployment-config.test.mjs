@@ -172,6 +172,51 @@ describe("dependency maintenance configuration", () => {
     }
   });
 
+  it("keeps the legacy rollback lock above the aiohttp security floor", async () => {
+    const [input, setup, generatedRequirements, packageInfo, lock] =
+      await Promise.all([
+        readFile(
+          new URL("../deploy/cwm-mcp/requirements.txt", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL("../deploy/cwm-mcp/setup.py", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../deploy/cwm-mcp/cwm_api_gateway_mcp.egg-info/requires.txt",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../deploy/cwm-mcp/cwm_api_gateway_mcp.egg-info/PKG-INFO",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+        readFile(
+          new URL("../deploy/http-gateway/requirements.lock", import.meta.url),
+          "utf8",
+        ),
+      ]);
+    const lockedVersion = lock.match(/^aiohttp==(\d+)\.(\d+)\.(\d+)/mu);
+
+    expect(input).toMatch(/^aiohttp>=3\.14\.4$/mu);
+    expect(setup).toContain('"aiohttp>=3.14.4"');
+    expect(generatedRequirements).toMatch(/^aiohttp>=3\.14\.4$/mu);
+    expect(packageInfo).toMatch(/^Requires-Dist: aiohttp>=3\.14\.4$/mu);
+    expect(lockedVersion).not.toBeNull();
+    expect(
+      lockedVersion
+        .slice(1)
+        .map(Number)
+        .reduce((result, part, index) => result || part - [3, 14, 4][index], 0),
+    ).toBeGreaterThanOrEqual(0);
+  });
+
   it("keeps the legacy rollback lock above the multidict security floor", async () => {
     const [input, lock] = await Promise.all([
       readFile(
