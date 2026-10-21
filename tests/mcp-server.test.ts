@@ -63,6 +63,69 @@ describe("whoami", () => {
     });
   });
 
+  it("uses one immutable identity snapshot for authorization and audit", () => {
+    const reads = {
+      tenantId: 0,
+      objectId: 0,
+      profileAlias: 0,
+      groups: 0,
+      roles: 0,
+    };
+    const auditMessages: string[] = [];
+    const props = {
+      scopes: ["mcp:read"],
+      get tenantId() {
+        reads.tenantId += 1;
+        return reads.tenantId === 1
+          ? tenantId
+          : "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      },
+      get objectId() {
+        reads.objectId += 1;
+        return reads.objectId === 1 ? objectId : mayaObjectId;
+      },
+      get profileAlias() {
+        reads.profileAlias += 1;
+        return reads.profileAlias === 1 ? "LUIS" : "MAYA";
+      },
+      get groups() {
+        reads.groups += 1;
+        return reads.groups === 1 ? [groupId] : [];
+      },
+      get roles() {
+        reads.roles += 1;
+        return reads.roles === 1 ? [] : ["unexpected"];
+      },
+    };
+
+    expect(
+      whoamiResult(props, authorizationEnv, {
+        audit: {
+          logger: (message) => auditMessages.push(message),
+          createCorrelationId: () => correlationId,
+        },
+      }),
+    ).toMatchObject({
+      content: [
+        { type: "text", text: JSON.stringify({ profileAlias: "LUIS" }) },
+      ],
+    });
+    expect(reads).toEqual({
+      tenantId: 1,
+      objectId: 1,
+      profileAlias: 1,
+      groups: 1,
+      roles: 1,
+    });
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      tenantId,
+      objectId,
+      profileAlias: "LUIS",
+      tool: "whoami",
+      outcome: "success",
+    });
+  });
+
   it("does not let a failing audit clock alter the result", () => {
     expect(
       whoamiResult(authProps(), authorizationEnv, {
@@ -325,6 +388,117 @@ describe("get_service_ticket", () => {
     });
     expect(auditMessages[0]!).not.toContain("Printer offline");
     expect(auditMessages[0]!).not.toContain("privateUpstreamField");
+  });
+
+  it("keeps credential selection and audit attribution on one identity snapshot", async () => {
+    const reads = {
+      tenantId: 0,
+      objectId: 0,
+      profileAlias: 0,
+      groups: 0,
+      roles: 0,
+    };
+    const auditMessages: string[] = [];
+    const props = {
+      scopes: ["mcp:read"],
+      get tenantId() {
+        reads.tenantId += 1;
+        return reads.tenantId === 1
+          ? tenantId
+          : "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      },
+      get objectId() {
+        reads.objectId += 1;
+        return reads.objectId === 1 ? objectId : mayaObjectId;
+      },
+      get profileAlias() {
+        reads.profileAlias += 1;
+        return reads.profileAlias === 1 ? "LUIS" : "MAYA";
+      },
+      get groups() {
+        reads.groups += 1;
+        return reads.groups === 1 ? [groupId] : [];
+      },
+      get roles() {
+        reads.roles += 1;
+        return reads.roles === 1 ? [] : ["unexpected"];
+      },
+    };
+    const env = {
+      ...authorizationEnv,
+      CONNECTWISE_ALLOWED_ORIGINS: JSON.stringify([
+        "https://api-na.myconnectwise.net",
+      ]),
+      CW_PROFILE_LUIS: JSON.stringify({
+        apiBaseUrl: "https://api-na.myconnectwise.net/v4_6_release/apis/3.0",
+        companyId: "company-luis",
+        publicKey: "public-key",
+        privateKey: "private-key",
+        clientId: "partner-client-id",
+      }),
+      CW_PROFILE_MAYA: "must-not-be-read",
+    };
+
+    const result = await getServiceTicketResult(props, env, 123, {
+      audit: {
+        logger: (message) => auditMessages.push(message),
+        createCorrelationId: () => correlationId,
+      },
+      createClient: (credentials) => ({
+        async getServiceTicketStatus(ticketId) {
+          expect(credentials.companyId).toBe("company-luis");
+          await Promise.resolve();
+          return { id: ticketId, status: { name: "New" } };
+        },
+      }),
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(reads).toEqual({
+      tenantId: 1,
+      objectId: 1,
+      profileAlias: 1,
+      groups: 1,
+      roles: 1,
+    });
+    expect(JSON.parse(auditMessages[0]!)).toMatchObject({
+      tenantId,
+      objectId,
+      profileAlias: "LUIS",
+      tool: "get_service_ticket",
+      outcome: "success",
+    });
+  });
+
+  it("fails closed before bindings or client access when identity snapshotting fails", async () => {
+    const bindingReads: string[] = [];
+    let clientCreations = 0;
+    const env = new Proxy(authorizationEnv, {
+      get(target, property, receiver) {
+        bindingReads.push(String(property));
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const props = {
+      ...authProps(),
+      get groups(): string[] {
+        throw new Error("identity context changed");
+      },
+    };
+
+    const result = await getServiceTicketResult(props, env, 123, {
+      createClient: () => {
+        clientCreations += 1;
+        throw new Error("must not construct client");
+      },
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "Authenticated profile unavailable" }],
+    });
+    expect(bindingReads).toEqual([]);
+    expect(clientCreations).toBe(0);
   });
 
   it("returns a generic MCP error when the upstream client fails", async () => {

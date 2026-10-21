@@ -11,6 +11,7 @@ import {
   type ConnectWiseCredentials,
 } from "./connectwise-profile";
 import type { EntraAccessTokenProps } from "./auth-handler";
+import { hasAuthenticatedProfile, trySnapshotAuthProps } from "./auth-context";
 import {
   emitToolAudit,
   getAuditStartTime,
@@ -31,7 +32,8 @@ export function whoamiResult(
   dependencies: AuditedToolDependencies = {},
 ): CallToolResult {
   const startedAtMs = getAuditStartTime(dependencies.audit);
-  if (!hasMcpScopes(props, requiredMcpScopes("whoami"))) {
+  const requiredScopes = requiredMcpScopes("whoami");
+  if (!hasMcpScopes(props, requiredScopes)) {
     emitToolAudit(
       {
         props: undefined,
@@ -47,11 +49,28 @@ export function whoamiResult(
       content: [{ type: "text", text: "Insufficient scope" }],
     };
   }
-  try {
-    const profileAlias = resolveIdentityBoundProfileAlias(env, props ?? {});
+  const authorizedProps = trySnapshotAuthProps(props, requiredScopes);
+  if (!hasAuthenticatedProfile(authorizedProps)) {
     emitToolAudit(
       {
-        props,
+        props: authorizedProps,
+        tool: "whoami",
+        outcome: "denied",
+        reason: "profile_unavailable",
+        startedAtMs,
+      },
+      dependencies.audit,
+    );
+    return {
+      isError: true,
+      content: [{ type: "text", text: "Authenticated profile unavailable" }],
+    };
+  }
+  try {
+    const profileAlias = resolveIdentityBoundProfileAlias(env, authorizedProps);
+    emitToolAudit(
+      {
+        props: authorizedProps,
         tool: "whoami",
         outcome: "success",
         reason: "ok",
@@ -70,7 +89,7 @@ export function whoamiResult(
   } catch {
     emitToolAudit(
       {
-        props,
+        props: authorizedProps,
         tool: "whoami",
         outcome: "denied",
         reason: "profile_unavailable",
@@ -107,7 +126,8 @@ export async function getServiceTicketResult(
   dependencies: ServiceTicketDependencies = {},
 ): Promise<CallToolResult> {
   const startedAtMs = getAuditStartTime(dependencies.audit);
-  if (!hasMcpScopes(props, requiredMcpScopes("get_service_ticket"))) {
+  const requiredScopes = requiredMcpScopes("get_service_ticket");
+  if (!hasMcpScopes(props, requiredScopes)) {
     emitToolAudit(
       {
         props: undefined,
@@ -123,10 +143,11 @@ export async function getServiceTicketResult(
       content: [{ type: "text", text: "Insufficient scope" }],
     };
   }
-  if (!props.profileAlias) {
+  const authorizedProps = trySnapshotAuthProps(props, requiredScopes);
+  if (!hasAuthenticatedProfile(authorizedProps)) {
     emitToolAudit(
       {
-        props,
+        props: authorizedProps,
         tool: "get_service_ticket",
         outcome: "denied",
         reason: "profile_unavailable",
@@ -142,7 +163,10 @@ export async function getServiceTicketResult(
 
   try {
     const requestLog = dependencies.requestLog ?? ((message: string) => {});
-    const credentials = resolveIdentityBoundConnectWiseCredentials(env, props);
+    const credentials = resolveIdentityBoundConnectWiseCredentials(
+      env,
+      authorizedProps,
+    );
     const clientFactory =
       dependencies.createClient ??
       ((c: ConnectWiseCredentials) =>
@@ -153,7 +177,7 @@ export async function getServiceTicketResult(
     );
     emitToolAudit(
       {
-        props,
+        props: authorizedProps,
         tool: "get_service_ticket",
         outcome: "success",
         reason: "ok",
@@ -175,7 +199,7 @@ export async function getServiceTicketResult(
   } catch {
     emitToolAudit(
       {
-        props,
+        props: authorizedProps,
         tool: "get_service_ticket",
         outcome: "failure",
         reason: "lookup_failed",
