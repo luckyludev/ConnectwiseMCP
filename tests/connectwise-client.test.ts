@@ -3756,6 +3756,7 @@ describe("ConnectWiseClient", () => {
     expect(configurationUrl.searchParams.getAll("fields")).toEqual([
       configurationCollectionFields,
     ]);
+    expect(configurationUrl.searchParams.get("orderBy")).toBe("id asc");
     expect(configurationUrl.searchParams.getAll("pageSize")).toEqual(["20"]);
 
     await client.catalogGet("finance.agreements.byName", {
@@ -3847,6 +3848,36 @@ describe("ConnectWiseClient", () => {
           "ConnectWise record does not match targeted name search",
         );
       }
+    }
+  });
+
+  it("rejects nondeterministic configuration result windows", async () => {
+    for (const records of [
+      [
+        { id: 2, name: "Router B" },
+        { id: 1, name: "Router A" },
+      ],
+      [
+        { id: 1, name: "Router A" },
+        { id: 1, name: "Router B" },
+      ],
+      [{ name: "Router A" }],
+      [{ id: "1", name: "Router A" }],
+      [{ id: 0, name: "Router A" }],
+      [{ id: Number.MAX_SAFE_INTEGER + 1, name: "Router A" }],
+    ]) {
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(records),
+      });
+
+      await expect(
+        client.catalogGet("company.configurations", {
+          query: "router",
+          pageSize: 20,
+        }),
+      ).rejects.toThrow(
+        "ConnectWise configurations are not deterministically ordered by ID",
+      );
     }
   });
 
@@ -4893,6 +4924,16 @@ describe("ConnectWiseClient", () => {
         params: { query: "router", pageSize: 20 },
         response: [{ id: 3, name: "Unrelated server" }],
         error: "ConnectWise record does not match targeted name search",
+      },
+      {
+        route: "company.configurations",
+        params: { query: "router", pageSize: 20 },
+        response: [
+          { id: 3, name: "Router C" },
+          { id: 2, name: "Router B" },
+        ],
+        error:
+          "ConnectWise configurations are not deterministically ordered by ID",
       },
     ] as const;
 
