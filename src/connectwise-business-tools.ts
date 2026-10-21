@@ -1297,7 +1297,7 @@ export function registerConnectWiseBusinessTools(
     "get_agreement_additions",
     {
       description:
-        "Get bounded agreement additions and commercial fields allowed by the authenticated ConnectWise API member.",
+        "Get a bounded, deterministic recent-first window of agreement additions and commercial fields allowed by the authenticated ConnectWise API member.",
       inputSchema: { agreementId: positiveId, maxResults: pageSize },
       annotations: readAnnotations,
     },

@@ -2087,13 +2087,22 @@ describe("ConnectWiseClient", () => {
       fetcher: async (input) => {
         capturedUrl = String(input);
         return Response.json([
-          { id: 44, description: "Managed service", agreementId: 7 },
+          {
+            id: 44,
+            description: "Managed service",
+            effectiveDate: "2026-09-15T00:00:00Z",
+            agreementId: 7,
+          },
         ]);
       },
     });
 
     await expect(client.getAgreementAdditions(7, 5)).resolves.toEqual([
-      { id: 44, description: "Managed service" },
+      {
+        id: 44,
+        description: "Managed service",
+        effectiveDate: "2026-09-15T00:00:00Z",
+      },
     ]);
 
     const additionsUrl = new URL(capturedUrl);
@@ -2103,8 +2112,33 @@ describe("ConnectWiseClient", () => {
     expect(Object.fromEntries(additionsUrl.searchParams)).toEqual({
       fields: agreementAdditionCollectionFields,
       pageSize: "5",
+      orderBy: "effectiveDate desc,id desc",
     });
     expect(additionsUrl.searchParams.getAll("fields")).toHaveLength(1);
+  });
+
+  it("rejects nondeterministic agreement addition windows before auditing success", async () => {
+    const logs: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () =>
+        Response.json([
+          { id: 1, effectiveDate: "2026-09-14", agreementId: 7 },
+          { id: 2, effectiveDate: "2026-09-15", agreementId: 7 },
+        ]),
+      log: (line) => logs.push(line),
+    });
+
+    await expect(client.getAgreementAdditions(7, 5)).rejects.toThrow(
+      "ConnectWise agreement additions are not deterministically ordered recent-first",
+    );
+    expect(logs).toHaveLength(1);
+    expect(JSON.parse(logs[0]!)).toEqual({
+      event: "cw_request",
+      method: "GET",
+      status: 200,
+      latencyMs: expect.any(Number),
+      outcome: "upstream_error",
+    });
   });
 
   it("applies agreement addition filters before the bounded result page", async () => {
