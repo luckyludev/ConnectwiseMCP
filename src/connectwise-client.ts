@@ -2849,10 +2849,12 @@ export function createConnectWiseClient(
         {
           fields: AGREEMENT_ADDITION_COLLECTION_FIELDS,
           pageSize,
+          orderBy: "effectiveDate desc,id desc",
         },
         pageSize,
         (records) => {
           verifiedAgreementAdditionList(records, agreementId);
+          assertRecentAgreementAdditionOrder(records);
         },
       );
       return verifiedAgreementAdditionList(additions, agreementId);
