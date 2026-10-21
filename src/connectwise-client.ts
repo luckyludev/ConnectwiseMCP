@@ -580,7 +580,7 @@ const SCHEDULE_ENTRY_COLLECTION_FIELDS =
 const SCHEDULE_ENTRY_OBJECT_RELATIONSHIP_FIELDS = `${SCHEDULE_ENTRY_COLLECTION_FIELDS},objectId`;
 const TIME_SHEET_COLLECTION_FIELDS =
   "id,member,year,period,dateStart,dateEnd,status,hours,deadline";
-const TIME_SHEET_STATUS_FIELDS = "status";
+const TIME_SHEET_PENDING_FIELDS = "id,member,status";
 const SERVICE_TICKET_NOTE_COLLECTION_FIELDS =
   "id,text,dateCreated,createdBy,internalFlag,internalAnalysisFlag,externalFlag,resolutionFlag,issueFlag,detailDescriptionFlag,contact";
 const SERVICE_TICKET_NOTE_RELATIONSHIP_FIELDS = `${SERVICE_TICKET_NOTE_COLLECTION_FIELDS},ticketId`;
@@ -3458,19 +3458,25 @@ export function createConnectWiseClient(
       const sheets = await requestBoundedList(
         "/time/sheets",
         {
-          conditions: `member/id=${memberId}`,
-          fields: TIME_SHEET_STATUS_FIELDS,
-          pageSize: 5,
+          conditions: `member/id=${memberId} and status='PendingApproval'`,
+          fields: TIME_SHEET_PENDING_FIELDS,
+          pageSize: 1,
         },
-        5,
-      );
-      if (Array.isArray(sheets)) {
-        for (const sheet of sheets) {
-          const status = (sheet as Record<string, unknown>)?.status;
-          if (status === "PendingApproval") {
-            throw new ConnectWiseUserError("timesheet_pending");
+        1,
+        (records) => {
+          assertReferenceCollectionIdentities(records);
+          assertMappedMemberList(records, memberId);
+          if (
+            (records as Record<string, unknown>[]).some(
+              (sheet) => sheet.status !== "PendingApproval",
+            )
+          ) {
+            throw new Error("ConnectWise returned a non-pending timesheet");
           }
-        }
+        },
+      );
+      if (Array.isArray(sheets) && sheets.length > 0) {
+        throw new ConnectWiseUserError("timesheet_pending");
       }
       const payload: Record<string, unknown> = {
         member: { id: memberId },
