@@ -910,7 +910,7 @@ describe("ConnectWiseClient", () => {
           },
           {
             id: 401,
-            dateEntered: "2026-10-18T11:00:00Z",
+            dateEntered: "2026-10-18T12:00:00Z",
             chargeToType: "ServiceTicket",
             chargeToId: 123,
           },
@@ -935,7 +935,7 @@ describe("ConnectWiseClient", () => {
     expect(url.searchParams.getAll("fields")).toEqual([
       ticketTimeEntryRelationshipFields,
     ]);
-    expect(url.searchParams.get("orderBy")).toBe("dateEntered desc");
+    expect(url.searchParams.get("orderBy")).toBe("dateEntered desc,id desc");
     expect(url.searchParams.get("pageSize")).toBe("20");
   });
 
@@ -996,6 +996,51 @@ describe("ConnectWiseClient", () => {
         },
       ],
     },
+    {
+      name: "ascending IDs at a timestamp tie",
+      entries: [
+        {
+          id: 401,
+          dateEntered: "2026-10-18T12:00:00Z",
+          chargeToType: "ServiceTicket",
+          chargeToId: 123,
+        },
+        {
+          id: 402,
+          dateEntered: "2026-10-18T12:00:00Z",
+          chargeToType: "ServiceTicket",
+          chargeToId: 123,
+        },
+      ],
+    },
+    {
+      name: "duplicate IDs at a timestamp tie",
+      entries: [
+        {
+          id: 401,
+          dateEntered: "2026-10-18T12:00:00Z",
+          chargeToType: "ServiceTicket",
+          chargeToId: 123,
+        },
+        {
+          id: 401,
+          dateEntered: "2026-10-18T12:00:00Z",
+          chargeToType: "ServiceTicket",
+          chargeToId: 123,
+        },
+      ],
+    },
+    {
+      name: "invalid ID",
+      entries: [
+        {
+          id: 0,
+          dateEntered: "2026-10-18T12:00:00Z",
+          chargeToType: "ServiceTicket",
+          chargeToId: 123,
+        },
+      ],
+    },
   ])(
     "rejects ticket time entries with $name before reporting success",
     async ({ entries }) => {
@@ -1006,7 +1051,7 @@ describe("ConnectWiseClient", () => {
       });
 
       await expect(client.getTicketTimeEntries(123, 20)).rejects.toThrow(
-        "ConnectWise time entries are not ordered recent-first",
+        "ConnectWise time entries are not deterministically ordered recent-first",
       );
       expect(logs).toHaveLength(1);
       expect(JSON.parse(logs[0]!)).toEqual({
@@ -2763,7 +2808,7 @@ describe("ConnectWiseClient", () => {
       timeEntryReadFields,
     ]);
     expect(new URL(urls[6]!).searchParams.get("orderBy")).toBe(
-      "dateEntered desc",
+      "dateEntered desc,id desc",
     );
     expect(new URL(urls[6]!).searchParams.get("pageSize")).toBe("5");
   });
@@ -2778,7 +2823,7 @@ describe("ConnectWiseClient", () => {
       {
         id: 1,
         member: { id: 149 },
-        dateEntered: "2026-10-18T11:00:00Z",
+        dateEntered: "2026-10-18T12:00:00Z",
       },
     ];
     const logs: string[] = [];
@@ -2824,6 +2869,24 @@ describe("ConnectWiseClient", () => {
         { id: 1, member: { id: 149 }, dateEntered: "October 18, 2026" },
       ],
     },
+    {
+      name: "ascending IDs at a timestamp tie",
+      entries: [
+        { id: 1, member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" },
+        { id: 2, member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" },
+      ],
+    },
+    {
+      name: "duplicate IDs at a timestamp tie",
+      entries: [
+        { id: 1, member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" },
+        { id: 1, member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" },
+      ],
+    },
+    {
+      name: "missing ID",
+      entries: [{ member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" }],
+    },
   ])(
     "rejects time entries with $name before reporting success",
     async ({ entries }) => {
@@ -2834,7 +2897,7 @@ describe("ConnectWiseClient", () => {
       });
 
       await expect(client.listTimeEntries(5)).rejects.toThrow(
-        "ConnectWise time entries are not ordered recent-first",
+        "ConnectWise time entries are not deterministically ordered recent-first",
       );
       expect(logs).toHaveLength(1);
       expect(JSON.parse(logs[0]!)).toEqual({

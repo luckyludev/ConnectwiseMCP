@@ -1720,18 +1720,28 @@ export function createConnectWiseClient(
       throw new Error("Invalid ConnectWise time entry response");
     }
     let previousTimestamp = Number.POSITIVE_INFINITY;
+    let previousId = Number.POSITIVE_INFINITY;
     for (const record of records) {
-      const dateEntered =
+      const entry =
         record && typeof record === "object" && !Array.isArray(record)
-          ? (record as Record<string, unknown>).dateEntered
+          ? (record as Record<string, unknown>)
           : undefined;
-      const timestamp = strictIsoTimestampMs(dateEntered);
-      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
+      const timestamp = strictIsoTimestampMs(entry?.dateEntered);
+      const id = entry?.id;
+      if (
+        !Number.isFinite(timestamp) ||
+        typeof id !== "number" ||
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        timestamp > previousTimestamp ||
+        (timestamp === previousTimestamp && id >= previousId)
+      ) {
         throw new Error(
-          "ConnectWise time entries are not ordered recent-first",
+          "ConnectWise time entries are not deterministically ordered recent-first",
         );
       }
       previousTimestamp = timestamp;
+      previousId = id;
     }
   }
 
@@ -2159,7 +2169,7 @@ export function createConnectWiseClient(
           conditions: `chargeToType='ServiceTicket' AND chargeToId=${ticketId}`,
           fields: TICKET_TIME_ENTRY_RELATIONSHIP_FIELDS,
           pageSize,
-          orderBy: "dateEntered desc",
+          orderBy: "dateEntered desc,id desc",
         },
         pageSize,
         (records) => {
@@ -2416,7 +2426,7 @@ export function createConnectWiseClient(
         {
           conditions: `member/id=${memberId}`,
           fields: TIME_ENTRY_READ_FIELDS,
-          orderBy: "dateEntered desc",
+          orderBy: "dateEntered desc,id desc",
           pageSize,
         },
         pageSize,
