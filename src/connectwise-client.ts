@@ -1793,6 +1793,7 @@ export function createConnectWiseClient(
       throw new Error("Invalid ConnectWise invoice response");
     }
     let previousTimestamp = Number.POSITIVE_INFINITY;
+    let previousId = Number.POSITIVE_INFINITY;
     for (const record of records) {
       if (!record || typeof record !== "object" || Array.isArray(record)) {
         throw new Error("Invalid ConnectWise invoice response");
@@ -1810,10 +1811,21 @@ export function createConnectWiseClient(
         );
       }
       const timestamp = strictIsoTimestampMs(invoice.date);
-      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
-        throw new Error("ConnectWise invoices are not ordered recent-first");
+      const id = invoice.id;
+      if (
+        !Number.isFinite(timestamp) ||
+        typeof id !== "number" ||
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        timestamp > previousTimestamp ||
+        (timestamp === previousTimestamp && id >= previousId)
+      ) {
+        throw new Error(
+          "ConnectWise invoices are not deterministically ordered recent-first",
+        );
       }
       previousTimestamp = timestamp;
+      previousId = id;
     }
   }
 
@@ -2938,7 +2950,7 @@ export function createConnectWiseClient(
           conditions: `agreement/id=${agreementId}`,
           fields: AGREEMENT_INVOICE_COLLECTION_FIELDS,
           pageSize,
-          orderBy: "date desc",
+          orderBy: "date desc,id desc",
         },
         pageSize,
         (records) => {

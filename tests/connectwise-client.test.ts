@@ -2679,7 +2679,7 @@ describe("ConnectWiseClient", () => {
       conditions: "agreement/id=7",
       fields: agreementInvoiceCollectionFields,
       pageSize: "5",
-      orderBy: "date desc",
+      orderBy: "date desc,id desc",
     });
     expect(invoicesUrl.searchParams.getAll("fields")).toHaveLength(1);
   });
@@ -2712,6 +2712,66 @@ describe("ConnectWiseClient", () => {
       name: "a non-string timestamp",
       invoices: [{ id: 91, date: 123, agreement: { id: 7 } }],
     },
+    {
+      name: "ascending IDs at an equal timestamp",
+      invoices: [
+        {
+          id: 91,
+          date: "2026-10-18T13:00:00Z",
+          agreement: { id: 7 },
+        },
+        {
+          id: 92,
+          date: "2026-10-18T09:00:00-04:00",
+          agreement: { id: 7 },
+        },
+      ],
+    },
+    {
+      name: "duplicate IDs at an equal timestamp",
+      invoices: [
+        {
+          id: 91,
+          date: "2026-10-18T13:00:00Z",
+          agreement: { id: 7 },
+        },
+        {
+          id: 91,
+          date: "2026-10-18T09:00:00-04:00",
+          agreement: { id: 7 },
+        },
+      ],
+    },
+    {
+      name: "a missing ID",
+      invoices: [{ date: "2026-10-18T13:00:00Z", agreement: { id: 7 } }],
+    },
+    {
+      name: "a string ID",
+      invoices: [
+        { id: "91", date: "2026-10-18T13:00:00Z", agreement: { id: 7 } },
+      ],
+    },
+    {
+      name: "a zero ID",
+      invoices: [{ id: 0, date: "2026-10-18T13:00:00Z", agreement: { id: 7 } }],
+    },
+    {
+      name: "a fractional ID",
+      invoices: [
+        { id: 91.5, date: "2026-10-18T13:00:00Z", agreement: { id: 7 } },
+      ],
+    },
+    {
+      name: "an unsafe ID",
+      invoices: [
+        {
+          id: Number.MAX_SAFE_INTEGER + 1,
+          date: "2026-10-18T13:00:00Z",
+          agreement: { id: 7 },
+        },
+      ],
+    },
   ])(
     "rejects recent invoices with $name before reporting success",
     async ({ invoices }) => {
@@ -2722,7 +2782,7 @@ describe("ConnectWiseClient", () => {
       });
 
       await expect(client.getRecentAgreementInvoices(7, 5)).rejects.toThrow(
-        "ConnectWise invoices are not ordered recent-first",
+        "ConnectWise invoices are not deterministically ordered recent-first",
       );
       expect(logs).toHaveLength(1);
       expect(JSON.parse(logs[0]!)).toEqual({
