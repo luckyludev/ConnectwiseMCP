@@ -418,7 +418,7 @@ describe("ConnectWiseClient", () => {
         "(internalFlag=true OR internalAnalysisFlag=true OR externalFlag=true)",
       fields: serviceTicketNoteCollectionFields,
       pageSize: "20",
-      orderBy: "dateCreated desc",
+      orderBy: "dateCreated desc,id desc",
     });
     expect(serviceNotesUrl.searchParams.getAll("fields")).toEqual([
       serviceTicketNoteCollectionFields,
@@ -461,20 +461,20 @@ describe("ConnectWiseClient", () => {
         "externalFlag=true AND internalFlag=false AND internalAnalysisFlag=false",
       fields: serviceTicketNoteCollectionFields,
       pageSize: "7",
-      orderBy: "dateCreated desc",
+      orderBy: "dateCreated desc,id desc",
     });
     expect(Object.fromEntries(new URL(urls[1]!).searchParams)).toEqual({
       conditions: "(internalFlag=true OR internalAnalysisFlag=true)",
       fields: serviceTicketNoteCollectionFields,
       pageSize: "8",
-      orderBy: "dateCreated desc",
+      orderBy: "dateCreated desc,id desc",
     });
     expect(Object.fromEntries(new URL(urls[2]!).searchParams)).toEqual({
       conditions:
         "(internalFlag=true OR internalAnalysisFlag=true OR externalFlag=true)",
       fields: serviceTicketNoteCollectionFields,
       pageSize: "9",
-      orderBy: "dateCreated desc",
+      orderBy: "dateCreated desc,id desc",
     });
   });
 
@@ -651,7 +651,7 @@ describe("ConnectWiseClient", () => {
           },
           {
             id: 302,
-            dateCreated: "2026-10-15T11:00:00Z",
+            dateCreated: "2026-10-15T12:00:00Z",
             ticketId: 123,
             internalFlag: true,
           },
@@ -677,7 +677,7 @@ describe("ConnectWiseClient", () => {
       },
       {
         id: 302,
-        dateCreated: "2026-10-15T11:00:00Z",
+        dateCreated: "2026-10-15T12:00:00Z",
         internalFlag: true,
       },
       {
@@ -712,6 +712,64 @@ describe("ConnectWiseClient", () => {
       name: "malformed timestamp",
       notes: [{ id: 301, dateCreated: "not-a-date", ticketId: 123 }],
     },
+    {
+      name: "ascending ID at an equal timestamp",
+      notes: [
+        {
+          id: 301,
+          dateCreated: "2026-10-15T12:00:00Z",
+          ticketId: 123,
+        },
+        {
+          id: 302,
+          dateCreated: "2026-10-15T12:00:00Z",
+          ticketId: 123,
+        },
+      ],
+    },
+    {
+      name: "duplicate ID at an equal timestamp",
+      notes: [
+        {
+          id: 301,
+          dateCreated: "2026-10-15T12:00:00Z",
+          ticketId: 123,
+        },
+        {
+          id: 301,
+          dateCreated: "2026-10-15T12:00:00Z",
+          ticketId: 123,
+        },
+      ],
+    },
+    {
+      name: "missing ID",
+      notes: [{ dateCreated: "2026-10-15T12:00:00Z", ticketId: 123 }],
+    },
+    {
+      name: "zero ID",
+      notes: [{ id: 0, dateCreated: "2026-10-15T12:00:00Z", ticketId: 123 }],
+    },
+    {
+      name: "fractional ID",
+      notes: [
+        {
+          id: 301.5,
+          dateCreated: "2026-10-15T12:00:00Z",
+          ticketId: 123,
+        },
+      ],
+    },
+    {
+      name: "unsafe ID",
+      notes: [
+        {
+          id: Number.MAX_SAFE_INTEGER + 1,
+          dateCreated: "2026-10-15T12:00:00Z",
+          ticketId: 123,
+        },
+      ],
+    },
   ])(
     "rejects $name ticket-note order before auditing success",
     async ({ notes }) => {
@@ -727,7 +785,7 @@ describe("ConnectWiseClient", () => {
           includeExternal: true,
         }),
       ).rejects.toThrow(
-        "ConnectWise ticket notes are not ordered recent-first",
+        "ConnectWise ticket notes are not deterministically ordered recent-first",
       );
       expect(logs).toHaveLength(1);
       expect(JSON.parse(logs[0]!)).toEqual({

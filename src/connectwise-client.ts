@@ -1683,18 +1683,28 @@ export function createConnectWiseClient(
       throw new Error("Invalid ConnectWise ticket note response");
     }
     let previousTimestamp = Number.POSITIVE_INFINITY;
+    let previousId = Number.POSITIVE_INFINITY;
     for (const record of records) {
-      const dateCreated =
+      const note =
         record && typeof record === "object" && !Array.isArray(record)
-          ? (record as Record<string, unknown>).dateCreated
+          ? (record as Record<string, unknown>)
           : undefined;
-      const timestamp = strictIsoTimestampMs(dateCreated);
-      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
+      const timestamp = strictIsoTimestampMs(note?.dateCreated);
+      const id = note?.id;
+      if (
+        !Number.isFinite(timestamp) ||
+        typeof id !== "number" ||
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        timestamp > previousTimestamp ||
+        (timestamp === previousTimestamp && id >= previousId)
+      ) {
         throw new Error(
-          "ConnectWise ticket notes are not ordered recent-first",
+          "ConnectWise ticket notes are not deterministically ordered recent-first",
         );
       }
       previousTimestamp = timestamp;
+      previousId = id;
     }
   }
 
@@ -2087,7 +2097,7 @@ export function createConnectWiseClient(
           conditions,
           fields: SERVICE_TICKET_NOTE_RELATIONSHIP_FIELDS,
           pageSize,
-          orderBy: "dateCreated desc",
+          orderBy: "dateCreated desc,id desc",
         },
         pageSize,
         (records) => {
