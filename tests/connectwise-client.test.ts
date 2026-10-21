@@ -4231,7 +4231,7 @@ describe("ConnectWiseClient", () => {
     expect(url.searchParams.getAll("fields")).toEqual([
       timeSheetCollectionFields,
     ]);
-    expect(url.searchParams.get("orderBy")).toBe("dateStart desc");
+    expect(url.searchParams.get("orderBy")).toBe("dateStart desc,id desc");
     expect(url.searchParams.get("pageSize")).toBe("9");
   });
 
@@ -4265,6 +4265,26 @@ describe("ConnectWiseClient", () => {
     });
   });
 
+  it("accepts timesheets with equal timestamps in descending ID order", async () => {
+    const sheets = [
+      {
+        id: 22,
+        member: { id: 149 },
+        dateStart: "2026-10-18T12:00:00Z",
+      },
+      {
+        id: 21,
+        member: { id: 149 },
+        dateStart: "2026-10-18T12:00:00Z",
+      },
+    ];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => Response.json(sheets),
+    });
+
+    await expect(client.getTimeSheets(9)).resolves.toEqual(sheets);
+  });
+
   it.each([
     {
       name: "ascending timestamps",
@@ -4276,6 +4296,50 @@ describe("ConnectWiseClient", () => {
         },
         {
           id: 22,
+          member: { id: 149 },
+          dateStart: "2026-10-18T12:00:00Z",
+        },
+      ],
+    },
+    {
+      name: "ascending IDs at a timestamp tie",
+      sheets: [
+        {
+          id: 21,
+          member: { id: 149 },
+          dateStart: "2026-10-18T12:00:00Z",
+        },
+        {
+          id: 22,
+          member: { id: 149 },
+          dateStart: "2026-10-18T12:00:00Z",
+        },
+      ],
+    },
+    {
+      name: "duplicate IDs at a timestamp tie",
+      sheets: [
+        {
+          id: 21,
+          member: { id: 149 },
+          dateStart: "2026-10-18T12:00:00Z",
+        },
+        {
+          id: 21,
+          member: { id: 149 },
+          dateStart: "2026-10-18T12:00:00Z",
+        },
+      ],
+    },
+    {
+      name: "a missing ID",
+      sheets: [{ member: { id: 149 }, dateStart: "2026-10-18T12:00:00Z" }],
+    },
+    {
+      name: "an invalid ID",
+      sheets: [
+        {
+          id: 0,
           member: { id: 149 },
           dateStart: "2026-10-18T12:00:00Z",
         },
@@ -4303,7 +4367,7 @@ describe("ConnectWiseClient", () => {
       });
 
       await expect(client.getTimeSheets(9)).rejects.toThrow(
-        "ConnectWise timesheets are not ordered recent-first",
+        "ConnectWise timesheets are not deterministically ordered recent-first",
       );
       expect(logs).toHaveLength(1);
       expect(JSON.parse(logs[0]!)).toEqual({
