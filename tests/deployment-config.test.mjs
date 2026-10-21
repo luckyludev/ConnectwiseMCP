@@ -341,10 +341,11 @@ describe("dependency maintenance configuration", () => {
     ]);
 
     expect(input.trim().split("\n")).toEqual([
-      "uv==0.12.0",
+      "uv==0.13.4",
       "pytest==9.1.1",
       "ruff==0.16.1",
       "pip-audit==2.10.1",
+      "certifi==2026.10.19",
     ]);
     for (const dependency of input.trim().split("\n")) {
       expect(lock).toContain(`${dependency} \\`);
