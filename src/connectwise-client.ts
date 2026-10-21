@@ -1584,18 +1584,30 @@ export function createConnectWiseClient(
       throw new Error("Invalid ConnectWise agreement addition response");
     }
     let previousTimestamp = Number.POSITIVE_INFINITY;
+    let previousId = Number.POSITIVE_INFINITY;
     for (const record of records) {
-      const effectiveDate =
+      const addition =
         record && typeof record === "object" && !Array.isArray(record)
-          ? (record as Record<string, unknown>).effectiveDate
+          ? (record as Record<string, unknown>)
           : undefined;
-      const timestamp = agreementAdditionEffectiveDateMs(effectiveDate);
-      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
+      const timestamp = agreementAdditionEffectiveDateMs(
+        addition?.effectiveDate,
+      );
+      const id = addition?.id;
+      if (
+        !Number.isFinite(timestamp) ||
+        typeof id !== "number" ||
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        timestamp > previousTimestamp ||
+        (timestamp === previousTimestamp && id >= previousId)
+      ) {
         throw new Error(
-          "ConnectWise agreement additions are not ordered recent-first",
+          "ConnectWise agreement additions are not deterministically ordered recent-first",
         );
       }
       previousTimestamp = timestamp;
+      previousId = id;
     }
   }
 
@@ -2844,7 +2856,7 @@ export function createConnectWiseClient(
             : {}),
           fields: AGREEMENT_ADDITION_COLLECTION_FIELDS,
           pageSize,
-          orderBy: "effectiveDate desc",
+          orderBy: "effectiveDate desc,id desc",
         },
         pageSize,
         (records) => {

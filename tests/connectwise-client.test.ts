@@ -2092,7 +2092,7 @@ describe("ConnectWiseClient", () => {
         "product/name like '%Luis''s service%' and effectiveDate >= [2026-09-01] and effectiveDate <= [2026-09-30T23:59:59]",
       fields: agreementAdditionCollectionFields,
       pageSize: "5",
-      orderBy: "effectiveDate desc",
+      orderBy: "effectiveDate desc,id desc",
     });
   });
 
@@ -2100,10 +2100,10 @@ describe("ConnectWiseClient", () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
         Response.json([
-          { id: 1, effectiveDate: "2026-09-15T00:00:00Z", agreementId: 7 },
+          { id: 3, effectiveDate: "2026-09-15T00:00:00Z", agreementId: 7 },
           { id: 2, effectiveDate: "2026-09-15", agreementId: 7 },
           {
-            id: 3,
+            id: 1,
             effectiveDate: "2026-09-15T01:00:00+02:00",
             agreementId: 7,
           },
@@ -2111,9 +2111,9 @@ describe("ConnectWiseClient", () => {
     });
 
     await expect(client.searchAgreementAdditions(7, {}, 5)).resolves.toEqual([
-      { id: 1, effectiveDate: "2026-09-15T00:00:00Z" },
+      { id: 3, effectiveDate: "2026-09-15T00:00:00Z" },
       { id: 2, effectiveDate: "2026-09-15" },
-      { id: 3, effectiveDate: "2026-09-15T01:00:00+02:00" },
+      { id: 1, effectiveDate: "2026-09-15T01:00:00+02:00" },
     ]);
   });
 
@@ -2134,6 +2134,42 @@ describe("ConnectWiseClient", () => {
           agreementId: 7,
         },
         { id: 2, effectiveDate: "2026-09-14T23:00:00Z", agreementId: 7 },
+      ],
+    },
+    {
+      name: "ascending IDs at an effective-date tie",
+      additions: [
+        { id: 1, effectiveDate: "2026-09-15", agreementId: 7 },
+        { id: 2, effectiveDate: "2026-09-15T00:00:00Z", agreementId: 7 },
+      ],
+    },
+    {
+      name: "duplicate IDs at an effective-date tie",
+      additions: [
+        { id: 2, effectiveDate: "2026-09-15", agreementId: 7 },
+        { id: 2, effectiveDate: "2026-09-15T00:00:00Z", agreementId: 7 },
+      ],
+    },
+    {
+      name: "missing ID",
+      additions: [{ effectiveDate: "2026-09-15", agreementId: 7 }],
+    },
+    {
+      name: "zero ID",
+      additions: [{ id: 0, effectiveDate: "2026-09-15", agreementId: 7 }],
+    },
+    {
+      name: "fractional ID",
+      additions: [{ id: 1.5, effectiveDate: "2026-09-15", agreementId: 7 }],
+    },
+    {
+      name: "unsafe integer ID",
+      additions: [
+        {
+          id: Number.MAX_SAFE_INTEGER + 1,
+          effectiveDate: "2026-09-15",
+          agreementId: 7,
+        },
       ],
     },
     {
@@ -2160,7 +2196,7 @@ describe("ConnectWiseClient", () => {
       });
 
       await expect(client.searchAgreementAdditions(7, {}, 5)).rejects.toThrow(
-        "ConnectWise agreement additions are not ordered recent-first",
+        "ConnectWise agreement additions are not deterministically ordered recent-first",
       );
       expect(logs).toHaveLength(1);
       expect(JSON.parse(logs[0]!)).toEqual({
