@@ -1772,16 +1772,28 @@ export function createConnectWiseClient(
       throw new Error("Invalid ConnectWise timesheet response");
     }
     let previousTimestamp = Number.POSITIVE_INFINITY;
+    let previousId = Number.POSITIVE_INFINITY;
     for (const record of records) {
-      const dateStart =
+      const sheet =
         record && typeof record === "object" && !Array.isArray(record)
-          ? (record as Record<string, unknown>).dateStart
+          ? (record as Record<string, unknown>)
           : undefined;
-      const timestamp = strictIsoTimestampMs(dateStart);
-      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
-        throw new Error("ConnectWise timesheets are not ordered recent-first");
+      const timestamp = strictIsoTimestampMs(sheet?.dateStart);
+      const id = sheet?.id;
+      if (
+        !Number.isFinite(timestamp) ||
+        typeof id !== "number" ||
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        timestamp > previousTimestamp ||
+        (timestamp === previousTimestamp && id >= previousId)
+      ) {
+        throw new Error(
+          "ConnectWise timesheets are not deterministically ordered recent-first",
+        );
       }
       previousTimestamp = timestamp;
+      previousId = id;
     }
   }
 
@@ -2495,7 +2507,7 @@ export function createConnectWiseClient(
         {
           conditions: `member/id=${memberId}`,
           fields: TIME_SHEET_COLLECTION_FIELDS,
-          orderBy: "dateStart desc",
+          orderBy: "dateStart desc,id desc",
           pageSize,
         },
         pageSize,
