@@ -627,7 +627,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     query: (p) => ({
       conditions: `status/id=${p.statusId}`,
       fields: SERVICE_TICKET_READ_FIELDS,
-      orderBy: "dateEntered desc",
+      orderBy: "dateEntered desc,id desc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["statusId"],
@@ -650,7 +650,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
           ...(p.includeClosed === "true" ? [] : ["closedFlag=false"]),
         ].join(" and "),
         fields: SERVICE_TICKET_READ_FIELDS,
-        orderBy: "dateEntered desc",
+        orderBy: "dateEntered desc,id desc",
         pageSize: p.pageSize ?? 20,
       };
     },
@@ -1636,20 +1636,33 @@ export function createConnectWiseClient(
       throw new Error("Invalid ConnectWise ticket response");
     }
     let previousTimestamp = Number.POSITIVE_INFINITY;
+    let previousId = Number.POSITIVE_INFINITY;
     for (const record of records) {
       if (!record || typeof record !== "object" || Array.isArray(record)) {
         throw new Error("ConnectWise tickets are not ordered recent-first");
       }
-      const info = (record as Record<string, unknown>)._info;
+      const ticket = record as Record<string, unknown>;
+      const info = ticket._info;
       const dateEntered =
         info && typeof info === "object" && !Array.isArray(info)
           ? (info as Record<string, unknown>).dateEntered
           : undefined;
       const timestamp = strictIsoTimestampMs(dateEntered);
-      if (!Number.isFinite(timestamp) || timestamp > previousTimestamp) {
-        throw new Error("ConnectWise tickets are not ordered recent-first");
+      const id = ticket.id;
+      if (
+        !Number.isFinite(timestamp) ||
+        typeof id !== "number" ||
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        timestamp > previousTimestamp ||
+        (timestamp === previousTimestamp && id >= previousId)
+      ) {
+        throw new Error(
+          "ConnectWise tickets are not deterministically ordered recent-first",
+        );
       }
       previousTimestamp = timestamp;
+      previousId = id;
     }
   }
 
@@ -2269,7 +2282,7 @@ export function createConnectWiseClient(
         {
           conditions: `board/id=${boardId}`,
           fields: SERVICE_TICKET_READ_FIELDS,
-          orderBy: "dateEntered desc",
+          orderBy: "dateEntered desc,id desc",
           pageSize,
         },
         pageSize,
@@ -2754,7 +2767,7 @@ export function createConnectWiseClient(
           conditions: `summary contains '${escaped}'`,
           fields: SERVICE_TICKET_READ_FIELDS,
           pageSize,
-          orderBy: "dateEntered desc",
+          orderBy: "dateEntered desc,id desc",
         },
         pageSize,
         (records) => {

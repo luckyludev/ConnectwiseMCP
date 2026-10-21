@@ -1613,6 +1613,7 @@ describe("ConnectWiseClient", () => {
     );
     expect(url.searchParams.get("fields")).toBe(serviceTicketReadFields);
     expect(url.searchParams.getAll("fields")).toHaveLength(1);
+    expect(url.searchParams.get("orderBy")).toBe("dateEntered desc,id desc");
     expect(url.searchParams.get("pageSize")).toBe("12");
     await expect(client.searchServiceTickets("x", 10)).rejects.toThrow(
       "Invalid ticket search text",
@@ -2737,6 +2738,9 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[3]!).searchParams.get("fields")).toBe(
       serviceTicketReadFields,
     );
+    expect(new URL(urls[3]!).searchParams.get("orderBy")).toBe(
+      "dateEntered desc,id desc",
+    );
 
     await client.getServiceStatuses();
     expect(new URL(urls[4]!).pathname).toBe(
@@ -3357,7 +3361,7 @@ describe("ConnectWiseClient", () => {
       serviceTicketReadFields,
     );
     expect(new URL(urls[0]!).searchParams.get("orderBy")).toBe(
-      "dateEntered desc",
+      "dateEntered desc,id desc",
     );
 
     await client.catalogGet("system.documents", {
@@ -3619,7 +3623,7 @@ describe("ConnectWiseClient", () => {
       serviceTicketReadFields,
     );
     expect(new URL(urls[0]!).searchParams.get("orderBy")).toBe(
-      "dateEntered desc",
+      "dateEntered desc,id desc",
     );
     expect(new URL(urls[1]!).searchParams.get("conditions")).toBe(
       "member/id=149",
@@ -4193,7 +4197,7 @@ describe("ConnectWiseClient", () => {
         "dateResolved",
       ]),
     );
-    expect(first.searchParams.get("orderBy")).toBe("dateEntered desc");
+    expect(first.searchParams.get("orderBy")).toBe("dateEntered desc,id desc");
 
     await client.catalogGet("service.tickets.byOwner", {
       memberId: 149,
@@ -4235,9 +4239,9 @@ describe("ConnectWiseClient", () => {
     }
   });
 
-  it("verifies recent-first ticket catalog windows from upstream", async () => {
-    const ticket = (dateEntered: unknown) => ({
-      id: 912,
+  it("verifies deterministic recent-first ticket catalog windows from upstream", async () => {
+    const ticket = (dateEntered: unknown, id: unknown = 912) => ({
+      id,
       owner: { id: 149 },
       status: { id: 547 },
       closedFlag: false,
@@ -4250,10 +4254,10 @@ describe("ConnectWiseClient", () => {
 
     for (const [route, params] of routes) {
       const ordered = [
-        ticket("2026-10-16T09:00:00-04:00"),
-        ticket("2026-10-16T12:00:00Z"),
-        ticket("2026-10-16T12:00:00+00:00"),
-        ticket("2026-10-15T12:00:00Z"),
+        ticket("2026-10-16T09:00:00-04:00", 915),
+        ticket("2026-10-16T12:00:00Z", 914),
+        ticket("2026-10-16T12:00:00+00:00", 913),
+        ticket("2026-10-15T12:00:00Z", 912),
       ];
       const orderedClient = createConnectWiseClient(credentials, {
         fetcher: async () => Response.json(ordered),
@@ -4270,7 +4274,41 @@ describe("ConnectWiseClient", () => {
           ]),
       });
       await expect(ascendingClient.catalogGet(route, params)).rejects.toThrow(
-        "ConnectWise tickets are not ordered recent-first",
+        "ConnectWise tickets are not deterministically ordered recent-first",
+      );
+
+      for (const ids of [
+        [912, 913],
+        [912, 912],
+        [912, 0],
+        [912, 1.5],
+        [912, "911"],
+      ]) {
+        const tiedClient = createConnectWiseClient(credentials, {
+          fetcher: async () =>
+            Response.json([
+              ticket("2026-10-16T12:00:00Z", ids[0]),
+              ticket("2026-10-16T12:00:00Z", ids[1]),
+            ]),
+        });
+        await expect(tiedClient.catalogGet(route, params)).rejects.toThrow(
+          "ConnectWise tickets are not deterministically ordered recent-first",
+        );
+      }
+
+      const missingIdClient = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json([
+            {
+              owner: { id: 149 },
+              status: { id: 547 },
+              closedFlag: false,
+              _info: { dateEntered: "2026-10-16T12:00:00Z" },
+            },
+          ]),
+      });
+      await expect(missingIdClient.catalogGet(route, params)).rejects.toThrow(
+        "ConnectWise tickets are not deterministically ordered recent-first",
       );
 
       for (const dateEntered of [
@@ -4291,15 +4329,15 @@ describe("ConnectWiseClient", () => {
           fetcher: async () => Response.json([ticket(dateEntered)]),
         });
         await expect(malformedClient.catalogGet(route, params)).rejects.toThrow(
-          "ConnectWise tickets are not ordered recent-first",
+          "ConnectWise tickets are not deterministically ordered recent-first",
         );
       }
     }
   });
 
-  it("verifies recent-first dedicated ticket windows from upstream", async () => {
-    const ticket = (dateEntered: unknown) => ({
-      id: 912,
+  it("verifies deterministic recent-first dedicated ticket windows from upstream", async () => {
+    const ticket = (dateEntered: unknown, id: unknown = 912) => ({
+      id,
       board: { id: 32 },
       summary: "Printer outage",
       _info: { dateEntered },
@@ -4324,9 +4362,9 @@ describe("ConnectWiseClient", () => {
         );
       };
       const ordered = [
-        ticket("2026-10-16T09:00:00-04:00"),
-        ticket("2026-10-16T12:00:00Z"),
-        ticket("2026-10-15T12:00:00Z"),
+        ticket("2026-10-16T09:00:00-04:00", 914),
+        ticket("2026-10-16T12:00:00Z", 913),
+        ticket("2026-10-15T12:00:00Z", 912),
       ];
       const orderedLogs: string[] = [];
       const orderedClient = createConnectWiseClient(credentials, {
@@ -4346,9 +4384,23 @@ describe("ConnectWiseClient", () => {
         log: (line) => ascendingLogs.push(line),
       });
       await expect(read(ascendingClient)).rejects.toThrow(
-        "ConnectWise tickets are not ordered recent-first",
+        "ConnectWise tickets are not deterministically ordered recent-first",
       );
       auditOutcome(ascendingLogs, "upstream_error");
+
+      const tiedLogs: string[] = [];
+      const tiedClient = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json([
+            ticket("2026-10-16T12:00:00Z", 912),
+            ticket("2026-10-16T12:00:00Z", 913),
+          ]),
+        log: (line) => tiedLogs.push(line),
+      });
+      await expect(read(tiedClient)).rejects.toThrow(
+        "ConnectWise tickets are not deterministically ordered recent-first",
+      );
+      auditOutcome(tiedLogs, "upstream_error");
 
       const malformedLogs: string[] = [];
       const malformedClient = createConnectWiseClient(credentials, {
@@ -4356,7 +4408,7 @@ describe("ConnectWiseClient", () => {
         log: (line) => malformedLogs.push(line),
       });
       await expect(read(malformedClient)).rejects.toThrow(
-        "ConnectWise tickets are not ordered recent-first",
+        "ConnectWise tickets are not deterministically ordered recent-first",
       );
       auditOutcome(malformedLogs, "upstream_error");
     }
