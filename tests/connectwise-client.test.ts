@@ -6608,7 +6608,11 @@ describe("ConnectWiseClient", () => {
         if (url.includes("/time/sheets")) {
           capturedSheetUrl = url;
           return Response.json([
-            { id: 99, status: "PendingApproval", period: 43 },
+            {
+              id: 99,
+              member: { id: 149 },
+              status: "PendingApproval",
+            },
           ]);
         }
         return Response.json({ id: 1 });
@@ -6621,10 +6625,64 @@ describe("ConnectWiseClient", () => {
       }),
     ).rejects.toThrow(/pending approval/);
     const sheetUrl = new URL(capturedSheetUrl);
-    expect(sheetUrl.searchParams.get("conditions")).toBe("member/id=149");
-    expect(sheetUrl.searchParams.getAll("fields")).toEqual(["status"]);
-    expect(sheetUrl.searchParams.get("pageSize")).toBe("5");
+    expect(sheetUrl.searchParams.get("conditions")).toBe(
+      "member/id=149 and status='PendingApproval'",
+    );
+    expect(sheetUrl.searchParams.getAll("fields")).toEqual([
+      "id,member,status",
+    ]);
+    expect(sheetUrl.searchParams.get("pageSize")).toBe("1");
   });
+
+  it.each([
+    [
+      "a mismatched member",
+      { id: 99, member: { id: 150 }, status: "PendingApproval" },
+      /not assigned to mapped member/,
+    ],
+    [
+      "a missing member",
+      { id: 99, status: "PendingApproval" },
+      /not assigned to mapped member/,
+    ],
+    [
+      "a non-pending status",
+      { id: 99, member: { id: 149 }, status: "Closed" },
+      /non-pending timesheet/,
+    ],
+    [
+      "a missing status",
+      { id: 99, member: { id: 149 } },
+      /non-pending timesheet/,
+    ],
+    [
+      "a malformed identity",
+      { id: "99", member: { id: 149 }, status: "PendingApproval" },
+      /Invalid ConnectWise reference response/,
+    ],
+  ])(
+    "rejects createTimeEntry when the pending-timesheet preflight returns %s",
+    async (_case, sheet, message) => {
+      let postRequests = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input, init) => {
+          if (String(input).includes("/time/sheets")) {
+            return Response.json([sheet]);
+          }
+          if (init?.method === "POST") postRequests += 1;
+          return Response.json({ id: 1 }, { status: 201 });
+        },
+      });
+
+      await expect(
+        client.createTimeEntry({
+          timeStart: "2026-09-01T12:00:00-04:00",
+          timeEnd: "2026-09-01T13:00:00-04:00",
+        }),
+      ).rejects.toThrow(message);
+      expect(postRequests).toBe(0);
+    },
+  );
 
   it("verifies the created time entry identity and mapped member", async () => {
     const created = {

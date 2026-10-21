@@ -3476,7 +3476,11 @@ describe("authenticated MCP transport", () => {
       bodies.push({ method, url: String(input) });
       if (String(input).includes("/time/sheets")) {
         return Response.json([
-          { id: 99, status: "PendingApproval", period: 43 },
+          {
+            id: 99,
+            member: { id: 149 },
+            status: "PendingApproval",
+          },
         ]);
       }
       return Response.json({ id: 1 });
@@ -3524,7 +3528,13 @@ describe("authenticated MCP transport", () => {
     const sheetLookup = new URL(
       bodies.find((body) => body.url.includes("/time/sheets"))!.url,
     );
-    expect(sheetLookup.searchParams.get("conditions")).toBe("member/id=149");
+    expect(sheetLookup.searchParams.get("conditions")).toBe(
+      "member/id=149 and status='PendingApproval'",
+    );
+    expect(sheetLookup.searchParams.getAll("fields")).toEqual([
+      "id,member,status",
+    ]);
+    expect(sheetLookup.searchParams.get("pageSize")).toBe("1");
     expect(bodies.filter((b) => b.method === "POST").length).toBe(0);
   });
 
