@@ -674,6 +674,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
       recordType: p.recordType ?? "Ticket",
       recordId: Number(p.recordId),
       fields: TICKET_ATTACHMENT_RELATIONSHIP_FIELDS,
+      orderBy: "id asc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["recordId"],
@@ -1900,7 +1901,8 @@ export function createConnectWiseClient(
 
   function assertAscendingCatalogIds(
     records: unknown,
-    resource: "agreements" | "companies" | "configurations" | "contacts",
+    resource:
+      "agreements" | "companies" | "configurations" | "contacts" | "documents",
   ): void {
     if (!Array.isArray(records)) {
       throw new Error(`Invalid ConnectWise ${resource} response`);
@@ -2199,11 +2201,13 @@ export function createConnectWiseClient(
           recordType: "Ticket",
           recordId: ticketId,
           fields: TICKET_ATTACHMENT_RELATIONSHIP_FIELDS,
+          orderBy: "id asc",
           pageSize,
         },
         pageSize,
         (records) => {
           verifiedDocumentList(records, "Ticket", ticketId);
+          assertAscendingCatalogIds(records, "documents");
         },
       );
       return verifiedDocumentList(attachments, "Ticket", ticketId);
@@ -2813,6 +2817,7 @@ export function createConnectWiseClient(
               String(effectiveParams.recordType ?? "Ticket"),
               Number(effectiveParams.recordId),
             );
+            assertAscendingCatalogIds(records, "documents");
           }
           if (MEMBER_SCOPED_CATALOG_ROUTES.has(route as CatalogRouteId)) {
             assertMappedMemberList(
