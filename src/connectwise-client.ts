@@ -1902,7 +1902,12 @@ export function createConnectWiseClient(
   function assertAscendingCatalogIds(
     records: unknown,
     resource:
-      "agreements" | "companies" | "configurations" | "contacts" | "documents",
+      | "agreements"
+      | "companies"
+      | "configurations"
+      | "contacts"
+      | "documents"
+      | "ticket tasks",
   ): void {
     if (!Array.isArray(records)) {
       throw new Error(`Invalid ConnectWise ${resource} response`);
@@ -2248,10 +2253,15 @@ export function createConnectWiseClient(
       boundedPageSize(pageSize);
       const tasks = await requestBoundedList(
         `/service/tickets/${ticketId}/tasks`,
-        { fields: TICKET_TASK_RELATIONSHIP_FIELDS, pageSize },
+        {
+          fields: TICKET_TASK_RELATIONSHIP_FIELDS,
+          pageSize,
+          orderBy: "id asc",
+        },
         pageSize,
         (records) => {
           assertTicketRelationshipList(records, ticketId, "task");
+          assertAscendingCatalogIds(records, "ticket tasks");
         },
       );
       return (tasks as Array<Record<string, unknown>>).map(
