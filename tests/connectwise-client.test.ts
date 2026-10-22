@@ -475,6 +475,7 @@ describe("ConnectWiseClient", () => {
     expect(Object.fromEntries(tasksUrl.searchParams)).toEqual({
       fields: ticketTaskCollectionFields,
       pageSize: "20",
+      orderBy: "id asc",
     });
     expect(tasksUrl.searchParams.getAll("fields")).toEqual([
       ticketTaskCollectionFields,
@@ -936,6 +937,14 @@ describe("ConnectWiseClient", () => {
             closedFlag: false,
             ticketId: 123,
           },
+          {
+            id: 402,
+            summary: "Confirm closure",
+            priority: 2,
+            notes: "Close after customer approval",
+            closedFlag: true,
+            ticketId: 123,
+          },
         ]),
     });
 
@@ -947,7 +956,46 @@ describe("ConnectWiseClient", () => {
         notes: "Confirm maintenance window",
         closedFlag: false,
       },
+      {
+        id: 402,
+        summary: "Confirm closure",
+        priority: 2,
+        notes: "Close after customer approval",
+        closedFlag: true,
+      },
     ]);
+  });
+
+  it("rejects nondeterministic or invalid task IDs before auditing request success", async () => {
+    for (const ids of [
+      [402, 401],
+      [401, 401],
+      ["401", 402],
+      [0, 401],
+      [1.5, 2],
+      [Number.MAX_SAFE_INTEGER + 1],
+      [undefined],
+    ]) {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () =>
+          Response.json(ids.map((id) => ({ id, ticketId: 123 }))),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.getTicketTasks(123, 20)).rejects.toThrow(
+        "ConnectWise ticket tasks are not deterministically ordered by ID",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual(
+        expect.objectContaining({
+          event: "cw_request",
+          method: "GET",
+          status: 200,
+          outcome: "upstream_error",
+        }),
+      );
+    }
   });
 
   it.each([

@@ -335,6 +335,15 @@ describe("legacy read-surface classification", () => {
     );
   });
 
+  it("documents deterministic bounded ticket-task windows", () => {
+    expect(classification).toContain(
+      "Bounded ticket-task windows use fixed ascending task-ID ordering",
+    );
+    expect(classification).toContain(
+      "rejects missing, malformed, duplicate, or out-of-order task IDs before reporting upstream success",
+    );
+  });
+
   it("keeps the attachment-download contract aligned with the runtime bound", () => {
     const documentedLimit = `${MAX_DOWNLOAD_BYTES / 1_000_000} MB`;
 
