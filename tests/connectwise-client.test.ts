@@ -3402,7 +3402,7 @@ describe("ConnectWiseClient", () => {
     expect(Object.fromEntries(companyUrl.searchParams)).toEqual({
       conditions: "name like '%O''Brien%'",
       fields: "id,name,phoneNumber,addressLine1,status",
-      orderBy: "name asc",
+      orderBy: "id asc",
       pageSize: "20",
     });
     expect(companyUrl.searchParams.getAll("fields")).toEqual([
@@ -3522,6 +3522,42 @@ describe("ConnectWiseClient", () => {
 
       await expect(client.searchMembers("Alice", 20)).rejects.toThrow(
         "ConnectWise members are not deterministically ordered by ID",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual(
+        expect.objectContaining({
+          event: "cw_request",
+          method: "GET",
+          status: 200,
+          outcome: "upstream_error",
+        }),
+      );
+    }
+  });
+
+  it("rejects nondeterministic or invalid targeted company IDs before reporting success", async () => {
+    for (const records of [
+      [
+        { id: 2, name: "Alice Two" },
+        { id: 1, name: "Alice One" },
+      ],
+      [
+        { id: 1, name: "Alice One" },
+        { id: 1, name: "Alice Duplicate" },
+      ],
+      [{ id: 0, name: "Alice Zero" }],
+      [{ id: Number.MAX_SAFE_INTEGER + 1, name: "Alice Unsafe" }],
+      [{ id: "1", name: "Alice String" }],
+      [{ name: "Alice Missing" }],
+    ]) {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(records),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.searchCompanies("Alice", 20)).rejects.toThrow(
+        "ConnectWise companies are not deterministically ordered by ID",
       );
       expect(logs).toHaveLength(1);
       expect(JSON.parse(logs[0]!)).toEqual(
