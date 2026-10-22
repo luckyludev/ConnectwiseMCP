@@ -3367,7 +3367,7 @@ describe("ConnectWiseClient", () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({
       conditions: "name like '%O''Brien%'",
       fields: "id,name,status",
-      orderBy: "name asc",
+      orderBy: "id asc",
       pageSize: "20",
     });
     expect(url.searchParams.getAll("fields")).toEqual(["id,name,status"]);
@@ -3497,6 +3497,41 @@ describe("ConnectWiseClient", () => {
           "ConnectWise record does not match targeted name search",
         );
       }
+    }
+  });
+
+  it("rejects nondeterministic or invalid targeted member IDs before reporting success", async () => {
+    for (const records of [
+      [
+        { id: 2, name: "Alice Two" },
+        { id: 1, name: "Alice One" },
+      ],
+      [
+        { id: 1, name: "Alice One" },
+        { id: 1, name: "Alice Duplicate" },
+      ],
+      [{ id: 0, name: "Alice Zero" }],
+      [{ id: Number.MAX_SAFE_INTEGER + 1, name: "Alice Unsafe" }],
+      [{ id: "1", name: "Alice String" }],
+    ]) {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(records),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.searchMembers("Alice", 20)).rejects.toThrow(
+        "ConnectWise members are not deterministically ordered by ID",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual(
+        expect.objectContaining({
+          event: "cw_request",
+          method: "GET",
+          status: 200,
+          outcome: "upstream_error",
+        }),
+      );
     }
   });
 

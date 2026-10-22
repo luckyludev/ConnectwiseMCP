@@ -1945,6 +1945,29 @@ export function createConnectWiseClient(
     }
   }
 
+  function assertAscendingMemberSearchIds(records: unknown): void {
+    if (!Array.isArray(records)) {
+      throw new Error("Invalid ConnectWise member search response");
+    }
+    let previousId = 0;
+    for (const record of records) {
+      const id =
+        record && typeof record === "object" && !Array.isArray(record)
+          ? (record as Record<string, unknown>).id
+          : undefined;
+      if (
+        typeof id !== "number" ||
+        !Number.isSafeInteger(id) ||
+        id <= previousId
+      ) {
+        throw new Error(
+          "ConnectWise members are not deterministically ordered by ID",
+        );
+      }
+      previousId = id;
+    }
+  }
+
   function assertTargetedTicketSummaryList(
     records: unknown,
     searchText: string,
@@ -2453,11 +2476,14 @@ export function createConnectWiseClient(
         {
           conditions: `name like '%${escaped}%'`,
           fields: MEMBER_SEARCH_FIELDS,
-          orderBy: "name asc",
+          orderBy: "id asc",
           pageSize,
         },
         pageSize,
-        (result) => assertTargetedNameList(result, query),
+        (result) => {
+          assertTargetedNameList(result, query);
+          assertAscendingMemberSearchIds(result);
+        },
       );
     },
 
