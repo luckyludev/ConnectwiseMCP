@@ -3978,8 +3978,8 @@ describe("authenticated MCP transport", () => {
         String(input).includes("/service/boards/64/statuses")
       ) {
         return Response.json([
-          { id: 935, name: "Scheduled" },
           { id: 921, name: "In Progress~" },
+          { id: 935, name: "Scheduled" },
         ]);
       }
       if (method === "PATCH") {

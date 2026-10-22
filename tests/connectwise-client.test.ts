@@ -3053,12 +3053,14 @@ describe("ConnectWiseClient", () => {
       "/v4_6_release/apis/3.0/service/boards/32/statuses",
     );
     expect(new URL(urls[1]!).searchParams.get("pageSize")).toBe("50");
+    expect(new URL(urls[1]!).searchParams.get("orderBy")).toBe("id asc");
 
     await client.getBoardTypes(32);
     expect(new URL(urls[2]!).pathname).toBe(
       "/v4_6_release/apis/3.0/service/boards/32/types",
     );
     expect(new URL(urls[2]!).searchParams.get("pageSize")).toBe("50");
+    expect(new URL(urls[2]!).searchParams.get("orderBy")).toBe("id asc");
 
     await client.listBoardTickets(32, 10);
     expect(new URL(urls[3]!).searchParams.get("conditions")).toBe(
@@ -3366,6 +3368,65 @@ describe("ConnectWiseClient", () => {
     ).resolves.toEqual(options);
   });
 
+  it.each([
+    {
+      name: "direct board statuses",
+      resource: "board statuses",
+      exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.getBoardStatuses(32),
+    },
+    {
+      name: "direct board types",
+      resource: "board types",
+      exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.getBoardTypes(32),
+    },
+    {
+      name: "catalog board statuses",
+      resource: "board statuses",
+      exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.catalogGet("service.boards.statuses", { boardId: 32 }),
+    },
+    {
+      name: "catalog board types",
+      resource: "board types",
+      exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.catalogGet("service.boards.types", { boardId: 32 }),
+    },
+  ])(
+    "rejects nondeterministic $name before reporting success",
+    async ({ resource, exercise }) => {
+      for (const options of [
+        [
+          { id: 2, name: "Second" },
+          { id: 1, name: "First" },
+        ],
+        [
+          { id: 1, name: "First" },
+          { id: 1, name: "Duplicate" },
+        ],
+      ]) {
+        const logs: string[] = [];
+        const client = createConnectWiseClient(credentials, {
+          fetcher: async () => Response.json(options),
+          log: (line) => logs.push(line),
+        });
+
+        await expect(exercise(client)).rejects.toThrow(
+          `ConnectWise ${resource} are not deterministically ordered by ID`,
+        );
+        expect(logs).toHaveLength(1);
+        expect(JSON.parse(logs[0]!)).toEqual({
+          event: "cw_request",
+          method: "GET",
+          status: 200,
+          latencyMs: expect.any(Number),
+          outcome: "upstream_error",
+        });
+      }
+    },
+  );
+
   it("minimizes documented board and reference collections upstream", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
@@ -3395,10 +3456,12 @@ describe("ConnectWiseClient", () => {
     });
     expect(Object.fromEntries(new URL(urls[1]!).searchParams)).toEqual({
       fields: boardStatusCollectionFields,
+      orderBy: "id asc",
       pageSize: "50",
     });
     expect(Object.fromEntries(new URL(urls[2]!).searchParams)).toEqual({
       fields: boardTypeCollectionFields,
+      orderBy: "id asc",
       pageSize: "50",
     });
     expect(Object.fromEntries(new URL(urls[3]!).searchParams)).toEqual({
@@ -3418,10 +3481,12 @@ describe("ConnectWiseClient", () => {
     });
     expect(Object.fromEntries(new URL(urls[6]!).searchParams)).toEqual({
       fields: boardStatusCollectionFields,
+      orderBy: "id asc",
       pageSize: "5",
     });
     expect(Object.fromEntries(new URL(urls[7]!).searchParams)).toEqual({
       fields: boardTypeCollectionFields,
+      orderBy: "id asc",
       pageSize: "20",
     });
     for (const url of urls) {
