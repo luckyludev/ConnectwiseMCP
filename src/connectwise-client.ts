@@ -1900,7 +1900,7 @@ export function createConnectWiseClient(
 
   function assertAscendingCatalogIds(
     records: unknown,
-    resource: "agreements" | "companies" | "configurations",
+    resource: "agreements" | "companies" | "configurations" | "contacts",
   ): void {
     if (!Array.isArray(records)) {
       throw new Error(`Invalid ConnectWise ${resource} response`);
@@ -2514,11 +2514,14 @@ export function createConnectWiseClient(
         {
           conditions: `(name like '%${escaped}%' OR email like '%${escaped}%')`,
           fields: CONTACT_SEARCH_FIELDS,
-          orderBy: "name asc",
+          orderBy: "id asc",
           pageSize,
         },
         pageSize,
-        (result) => assertTargetedContactList(result, query),
+        (result) => {
+          assertTargetedContactList(result, query);
+          assertAscendingCatalogIds(result, "contacts");
+        },
       );
     },
 
