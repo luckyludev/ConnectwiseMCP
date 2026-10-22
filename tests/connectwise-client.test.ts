@@ -3955,6 +3955,9 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[1]!).searchParams.getAll("fields")).toEqual([
       timeEntryReadFields,
     ]);
+    expect(new URL(urls[1]!).searchParams.get("orderBy")).toBe(
+      "dateEntered desc,id desc",
+    );
     expect(new URL(urls[2]!).searchParams.get("conditions")).toBe(
       "member/id=149",
     );
@@ -3962,6 +3965,81 @@ describe("ConnectWiseClient", () => {
       scheduleEntryCollectionFields,
     ]);
   });
+
+  it.each([
+    {
+      name: "ascending timestamps",
+      entries: [
+        {
+          id: 2,
+          member: { id: 149 },
+          dateEntered: "2026-10-18T11:00:00Z",
+        },
+        {
+          id: 1,
+          member: { id: 149 },
+          dateEntered: "2026-10-18T12:00:00Z",
+        },
+      ],
+    },
+    {
+      name: "ascending IDs at a timestamp tie",
+      entries: [
+        { id: 1, member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" },
+        { id: 2, member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" },
+      ],
+    },
+    {
+      name: "duplicate IDs at a timestamp tie",
+      entries: [
+        { id: 1, member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" },
+        { id: 1, member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" },
+      ],
+    },
+    {
+      name: "a missing timestamp",
+      entries: [{ id: 1, member: { id: 149 } }],
+    },
+    {
+      name: "a malformed timestamp",
+      entries: [
+        { id: 1, member: { id: 149 }, dateEntered: "October 18, 2026" },
+      ],
+    },
+    {
+      name: "a missing ID",
+      entries: [{ member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" }],
+    },
+    {
+      name: "an invalid ID",
+      entries: [
+        { id: "1", member: { id: 149 }, dateEntered: "2026-10-18T12:00:00Z" },
+      ],
+    },
+  ])(
+    "rejects catalog time entries with $name before reporting success",
+    async ({ entries }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(entries),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(
+        client.catalogGet("time.entries.byMember", { pageSize: 20 }),
+      ).rejects.toThrow(
+        "ConnectWise time entries are not deterministically ordered recent-first",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
 
   it("rejects catalog member overrides and missing profile member IDs", async () => {
     let requests = 0;

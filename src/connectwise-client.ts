@@ -695,6 +695,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     query: (p) => ({
       conditions: `member/id=${p.memberId}`,
       fields: TIME_ENTRY_READ_FIELDS,
+      orderBy: "dateEntered desc,id desc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["memberId"],
@@ -2787,6 +2788,9 @@ export function createConnectWiseClient(
               Number(effectiveParams.memberId),
               route === "service.tickets.byOwner" ? "owner" : "member",
             );
+          }
+          if (route === "time.entries.byMember") {
+            assertRecentTimeEntryOrder(records);
           }
           if (
             route === "service.tickets.byOwner" &&
