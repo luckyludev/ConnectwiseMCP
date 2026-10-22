@@ -262,12 +262,14 @@ describe("ConnectWiseClient", () => {
         capturedInit = init;
         return Response.json([
           { id: 400, recordType: "Ticket", recordId: 123 },
+          { id: 401, recordType: "Ticket", recordId: 123 },
         ]);
       },
     });
 
     await expect(client.getTicketAttachments(123, 50)).resolves.toEqual([
       { id: 400 },
+      { id: 401 },
     ]);
     const url = new URL(capturedUrl);
     expect(`${url.origin}${url.pathname}`).toBe(
@@ -277,6 +279,7 @@ describe("ConnectWiseClient", () => {
       recordType: "Ticket",
       recordId: "123",
       fields: ticketAttachmentCollectionFields,
+      orderBy: "id asc",
       pageSize: "50",
     });
     expect(url.searchParams.getAll("fields")).toEqual([
@@ -299,6 +302,51 @@ describe("ConnectWiseClient", () => {
       await expect(client.getTicketAttachments(123, 50)).rejects.toThrow(
         "ConnectWise document is not associated with requested record",
       );
+    }
+  });
+
+  it("rejects nondeterministic attachment IDs before auditing request success", async () => {
+    const invalidIds = [
+      [401, 400],
+      [400, 400],
+      ["400", 401],
+      [0, 401],
+    ];
+    const operations = [
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.getTicketAttachments(123, 20),
+      (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.catalogGet("system.documents", {
+          recordType: "Ticket",
+          recordId: 123,
+          pageSize: 20,
+        }),
+    ];
+
+    for (const ids of invalidIds) {
+      for (const operation of operations) {
+        const logs: string[] = [];
+        const client = createConnectWiseClient(credentials, {
+          fetcher: async () =>
+            Response.json(
+              ids.map((id) => ({ id, recordType: "Ticket", recordId: 123 })),
+            ),
+          log: (line) => logs.push(line),
+        });
+
+        await expect(operation(client)).rejects.toThrow(
+          "ConnectWise documents are not deterministically ordered by ID",
+        );
+        expect(logs).toHaveLength(1);
+        expect(JSON.parse(logs[0]!)).toEqual(
+          expect.objectContaining({
+            event: "cw_request",
+            method: "GET",
+            status: 200,
+            outcome: "upstream_error",
+          }),
+        );
+      }
     }
   });
 
@@ -3729,6 +3777,7 @@ describe("ConnectWiseClient", () => {
     });
     expect(new URL(urls[1]!).searchParams.get("recordType")).toBe("Ticket");
     expect(new URL(urls[1]!).searchParams.get("recordId")).toBe("77");
+    expect(new URL(urls[1]!).searchParams.get("orderBy")).toBe("id asc");
     expect(new URL(urls[1]!).searchParams.getAll("fields")).toEqual([
       ticketAttachmentCollectionFields,
     ]);
