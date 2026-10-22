@@ -608,6 +608,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     path: (p) => `/service/boards/${p.boardId}/statuses`,
     query: (p) => ({
       fields: BOARD_STATUS_COLLECTION_FIELDS,
+      orderBy: "id asc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["boardId"],
@@ -617,6 +618,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     path: (p) => `/service/boards/${p.boardId}/types`,
     query: (p) => ({
       fields: BOARD_TYPE_COLLECTION_FIELDS,
+      orderBy: "id asc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["boardId"],
@@ -1903,6 +1905,8 @@ export function createConnectWiseClient(
     records: unknown,
     resource:
       | "agreements"
+      | "board statuses"
+      | "board types"
       | "companies"
       | "configurations"
       | "contacts"
@@ -2377,9 +2381,16 @@ export function createConnectWiseClient(
       positiveId(boardId, "board ID");
       return requestBoundedList(
         `/service/boards/${boardId}/statuses`,
-        { fields: BOARD_STATUS_COLLECTION_FIELDS, pageSize: 50 },
+        {
+          fields: BOARD_STATUS_COLLECTION_FIELDS,
+          orderBy: "id asc",
+          pageSize: 50,
+        },
         50,
-        assertReferenceCollectionIdentities,
+        (records) => {
+          assertReferenceCollectionIdentities(records);
+          assertAscendingCatalogIds(records, "board statuses");
+        },
       );
     },
 
@@ -2387,9 +2398,16 @@ export function createConnectWiseClient(
       positiveId(boardId, "board ID");
       return requestBoundedList(
         `/service/boards/${boardId}/types`,
-        { fields: BOARD_TYPE_COLLECTION_FIELDS, pageSize: 50 },
+        {
+          fields: BOARD_TYPE_COLLECTION_FIELDS,
+          orderBy: "id asc",
+          pageSize: 50,
+        },
         50,
-        assertReferenceCollectionIdentities,
+        (records) => {
+          assertReferenceCollectionIdentities(records);
+          assertAscendingCatalogIds(records, "board types");
+        },
       );
     },
 
@@ -2820,6 +2838,12 @@ export function createConnectWiseClient(
             route === "service.boards.types"
           ) {
             assertReferenceCollectionIdentities(records);
+            assertAscendingCatalogIds(
+              records,
+              route === "service.boards.statuses"
+                ? "board statuses"
+                : "board types",
+            );
           }
           if (route === "system.documents") {
             verifiedDocumentList(
