@@ -3770,6 +3770,8 @@ describe("ConnectWiseClient", () => {
     expect(agreementUrl.searchParams.getAll("fields")).toEqual([
       agreementCollectionFields,
     ]);
+    expect(agreementUrl.searchParams.get("orderBy")).toBe("id asc");
+    expect(agreementUrl.searchParams.getAll("pageSize")).toEqual(["20"]);
 
     await expect(
       client.catalogGet("company.configurations", { pageSize: 20 }),
@@ -3878,6 +3880,46 @@ describe("ConnectWiseClient", () => {
       ).rejects.toThrow(
         "ConnectWise configurations are not deterministically ordered by ID",
       );
+    }
+  });
+
+  it("rejects and audits nondeterministic agreement result windows", async () => {
+    for (const records of [
+      [
+        { id: 2, name: "Managed Services B" },
+        { id: 1, name: "Managed Services A" },
+      ],
+      [
+        { id: 1, name: "Managed Services A" },
+        { id: 1, name: "Managed Services B" },
+      ],
+      [{ name: "Managed Services" }],
+      [{ id: "1", name: "Managed Services" }],
+      [{ id: 0, name: "Managed Services" }],
+      [{ id: Number.MAX_SAFE_INTEGER + 1, name: "Managed Services" }],
+    ]) {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(records),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(
+        client.catalogGet("finance.agreements.byName", {
+          name: "Managed Services",
+          pageSize: 20,
+        }),
+      ).rejects.toThrow(
+        "ConnectWise agreements are not deterministically ordered by ID",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
     }
   });
 

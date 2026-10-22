@@ -684,6 +684,7 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
     query: (p) => ({
       conditions: `name like '%${targetedSearchString(String(p.name))}%'`,
       fields: AGREEMENT_COLLECTION_FIELDS,
+      orderBy: "id asc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["name"],
@@ -1896,9 +1897,12 @@ export function createConnectWiseClient(
     }
   }
 
-  function assertAscendingConfigurationIds(records: unknown): void {
+  function assertAscendingCatalogIds(
+    records: unknown,
+    resource: "agreements" | "configurations",
+  ): void {
     if (!Array.isArray(records)) {
-      throw new Error("Invalid ConnectWise configuration response");
+      throw new Error(`Invalid ConnectWise ${resource} response`);
     }
     let previousId = 0;
     for (const record of records) {
@@ -1912,7 +1916,7 @@ export function createConnectWiseClient(
         id <= previousId
       ) {
         throw new Error(
-          "ConnectWise configurations are not deterministically ordered by ID",
+          `ConnectWise ${resource} are not deterministically ordered by ID`,
         );
       }
       previousId = id;
@@ -2805,10 +2809,11 @@ export function createConnectWiseClient(
           }
           if (route === "company.configurations") {
             assertTargetedNameList(records, String(effectiveParams.query));
-            assertAscendingConfigurationIds(records);
+            assertAscendingCatalogIds(records, "configurations");
           }
           if (route === "finance.agreements.byName") {
             assertTargetedNameList(records, String(effectiveParams.name));
+            assertAscendingCatalogIds(records, "agreements");
           }
           if (route === "schedule.entries.byMember") {
             if (
