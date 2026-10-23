@@ -3457,9 +3457,17 @@ describe("authenticated MCP transport", () => {
         url: String(input),
         ...(rawBody ? { body: JSON.parse(rawBody) } : {}),
       });
-      return String(input).includes("/time/sheets")
-        ? Response.json([])
-        : Response.json({ id: 123, member: { id: 149 } });
+      if (String(input).includes("/time/sheets")) return Response.json([]);
+      if (method === "POST") {
+        return Response.json({ id: 123, member: { id: 149 } });
+      }
+      return Response.json({
+        id: 123,
+        member: { id: 149 },
+        timeStart: "2026-09-01T16:00:00Z",
+        timeEnd: "2026-09-01T17:00:00Z",
+        billableOption: "Billable",
+      });
     };
     const handler = createMcpHandler(
       () =>
@@ -3505,6 +3513,13 @@ describe("authenticated MCP transport", () => {
     );
     expect(post).toBeDefined();
     expect((post!.body as { member: { id: number } }).member.id).toBe(149);
+    expect(
+      bodies.some(
+        (body) =>
+          body.method === "GET" &&
+          new URL(body.url).pathname.endsWith("/time/entries/123"),
+      ),
+    ).toBe(true);
     expect(text).toContain('\\"id\\":123');
   });
 

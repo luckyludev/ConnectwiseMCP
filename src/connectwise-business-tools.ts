@@ -2093,7 +2093,7 @@ export function registerConnectWiseBusinessTools(
     "create_time_entry",
     {
       description:
-        "Create a time entry for the member fixed in the authenticated user's server-side ConnectWise profile. timeStart/timeEnd must be ISO 8601 WITH an explicit timezone offset (converted to UTC server-side); the end must be after the start and the interval must not exceed 24 hours. If a timesheet is pending approval the write is refused with a clear instruction to recall/approve it first. Known charge mappings: Unprofitable chargeTo 13/workType 25/DoNotBill; Vacation chargeTo 2/workType 7/NoCharge; Sick chargeTo 7/workType 6/NoCharge. Returns the created entry.",
+        "Create a time entry for the member fixed in the authenticated user's server-side ConnectWise profile. timeStart/timeEnd must be ISO 8601 WITH an explicit timezone offset (converted to UTC server-side); the end must be after the start and the interval must not exceed 24 hours. Supply at most one target: ticketId for a service ticket or chargeToId for a charge code. If a timesheet is pending approval the write is refused with a clear instruction to recall/approve it first. Known charge mappings: Unprofitable chargeTo 13/workType 25/DoNotBill; Vacation chargeTo 2/workType 7/NoCharge; Sick chargeTo 7/workType 6/NoCharge. Returns the confirmed stored entry.",
       inputSchema: {
         timeStart: z.string(),
         timeEnd: z.string(),
