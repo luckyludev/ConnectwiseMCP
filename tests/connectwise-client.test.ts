@@ -4574,12 +4574,12 @@ describe("ConnectWiseClient", () => {
     });
   });
 
-  it("orders schedule entries by chronological instant across offsets", async () => {
+  it("orders schedule entries by chronological instant and ID", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
         Response.json([
           {
-            id: 1,
+            id: 3,
             member: { id: 149 },
             dateStart: "2026-08-01T10:00:00-05:00",
           },
@@ -4587,6 +4587,11 @@ describe("ConnectWiseClient", () => {
             id: 2,
             member: { id: 149 },
             dateStart: "2026-08-01T11:00:00+05:00",
+          },
+          {
+            id: 1,
+            member: { id: 149 },
+            dateStart: "2026-08-01T15:00:00Z",
           },
         ]),
     });
@@ -4602,24 +4607,88 @@ describe("ConnectWiseClient", () => {
       {
         id: 1,
         member: { id: 149 },
+        dateStart: "2026-08-01T15:00:00Z",
+      },
+      {
+        id: 3,
+        member: { id: 149 },
         dateStart: "2026-08-01T10:00:00-05:00",
       },
     ]);
   });
 
-  it("scopes dedicated schedule reads to the mapped profile member", async () => {
+  it.each([
+    {
+      records: [
+        { id: 0, member: { id: 149 }, dateStart: "2026-08-01T15:00:00Z" },
+      ],
+    },
+    {
+      records: [
+        { id: 4, member: { id: 149 }, dateStart: "2026-08-01T15:00:00Z" },
+        { id: 4, member: { id: 149 }, dateStart: "2026-08-02T15:00:00Z" },
+      ],
+    },
+  ])(
+    "rejects invalid schedule entry identity ordering",
+    async ({ records }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(records),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(
+        client.catalogGet("schedule.entries.byMember", { memberId: 149 }),
+      ).rejects.toThrow(
+        "ConnectWise schedule entry has invalid or duplicate ID",
+      );
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
+
+  it("scopes and deterministically orders dedicated schedule reads", async () => {
     const urls: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         urls.push(String(input));
         return Response.json([
-          { id: 2, member: { id: 149 }, privateField: "not projected here" },
+          {
+            id: 3,
+            member: { id: 149 },
+            dateStart: "2026-08-01T12:00:00Z",
+            privateField: "not projected here",
+          },
+          {
+            id: 2,
+            member: { id: 149 },
+            dateStart: "2026-08-01T12:00:00Z",
+            privateField: "not projected here",
+          },
         ]);
       },
     });
 
     await expect(client.listScheduleEntries(7)).resolves.toEqual([
-      { id: 2, member: { id: 149 }, privateField: "not projected here" },
+      {
+        id: 2,
+        member: { id: 149 },
+        dateStart: "2026-08-01T12:00:00Z",
+        privateField: "not projected here",
+      },
+      {
+        id: 3,
+        member: { id: 149 },
+        dateStart: "2026-08-01T12:00:00Z",
+        privateField: "not projected here",
+      },
     ]);
     const url = new URL(urls[0]!);
     expect(url.searchParams.get("conditions")).toBe("member/id=149");
@@ -4629,6 +4698,41 @@ describe("ConnectWiseClient", () => {
     expect(url.searchParams.get("pageSize")).toBe("7");
     expect(url.searchParams.has("orderBy")).toBe(false);
   });
+
+  it.each([
+    {
+      records: [
+        { id: 2, member: { id: 149 }, dateStart: "2026-08-01 12:00:00" },
+      ],
+      message: "ConnectWise schedule entry has invalid dateStart",
+    },
+    {
+      records: [
+        { id: 2, member: { id: 149 }, dateStart: "2026-08-01T12:00:00Z" },
+        { id: 2, member: { id: 149 }, dateStart: "2026-08-02T12:00:00Z" },
+      ],
+      message: "ConnectWise schedule entry has invalid or duplicate ID",
+    },
+  ])(
+    "fails closed and audits malformed dedicated schedule reads",
+    async ({ records, message }) => {
+      const logs: string[] = [];
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => Response.json(records),
+        log: (line) => logs.push(line),
+      });
+
+      await expect(client.listScheduleEntries(7)).rejects.toThrow(message);
+      expect(logs).toHaveLength(1);
+      expect(JSON.parse(logs[0]!)).toEqual({
+        event: "cw_request",
+        method: "GET",
+        status: 200,
+        latencyMs: expect.any(Number),
+        outcome: "upstream_error",
+      });
+    },
+  );
 
   it("rejects schedule reads without a mapped member before fetching", async () => {
     let requests = 0;
