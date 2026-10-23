@@ -1907,6 +1907,10 @@ export function createConnectWiseClient(
       | "agreements"
       | "board statuses"
       | "board types"
+      | "service boards"
+      | "service statuses"
+      | "service priorities"
+      | "service sources"
       | "companies"
       | "configurations"
       | "contacts"
@@ -2369,11 +2373,14 @@ export function createConnectWiseClient(
         "/service/boards",
         {
           fields: SERVICE_BOARD_COLLECTION_FIELDS,
-          orderBy: "name asc",
+          orderBy: "id asc",
           pageSize: 50,
         },
         50,
-        assertReferenceCollectionIdentities,
+        (records) => {
+          assertReferenceCollectionIdentities(records);
+          assertAscendingCatalogIds(records, "service boards");
+        },
       );
     },
 
@@ -2439,11 +2446,14 @@ export function createConnectWiseClient(
         "/service/statuses",
         {
           fields: SERVICE_STATUS_COLLECTION_FIELDS,
-          orderBy: "name asc",
+          orderBy: "id asc",
           pageSize: 50,
         },
         50,
-        assertReferenceCollectionIdentities,
+        (records) => {
+          assertReferenceCollectionIdentities(records);
+          assertAscendingCatalogIds(records, "service statuses");
+        },
       );
     },
 
@@ -2452,11 +2462,14 @@ export function createConnectWiseClient(
         "/service/priorities",
         {
           fields: SERVICE_PRIORITY_COLLECTION_FIELDS,
-          orderBy: "name asc",
+          orderBy: "id asc",
           pageSize: 50,
         },
         50,
-        assertReferenceCollectionIdentities,
+        (records) => {
+          assertReferenceCollectionIdentities(records);
+          assertAscendingCatalogIds(records, "service priorities");
+        },
       );
     },
 
@@ -2465,11 +2478,14 @@ export function createConnectWiseClient(
         "/service/sources",
         {
           fields: SERVICE_SOURCE_COLLECTION_FIELDS,
-          orderBy: "name asc",
+          orderBy: "id asc",
           pageSize: 50,
         },
         50,
-        assertReferenceCollectionIdentities,
+        (records) => {
+          assertReferenceCollectionIdentities(records);
+          assertAscendingCatalogIds(records, "service sources");
+        },
       );
     },
 

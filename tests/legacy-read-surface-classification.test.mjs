@@ -344,6 +344,15 @@ describe("legacy read-surface classification", () => {
     );
   });
 
+  it("documents deterministic bounded service-reference windows", () => {
+    expect(classification).toContain(
+      "Bounded service-board, service-status, service-priority, service-source, board-status, and board-type windows likewise use fixed ascending ID ordering",
+    );
+    expect(classification).toContain(
+      "reject missing, malformed, duplicate, or out-of-order IDs before reporting upstream success",
+    );
+  });
+
   it("keeps the attachment-download contract aligned with the runtime bound", () => {
     const documentedLimit = `${MAX_DOWNLOAD_BYTES / 1_000_000} MB`;
 
