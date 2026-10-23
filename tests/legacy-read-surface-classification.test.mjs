@@ -353,6 +353,15 @@ describe("legacy read-surface classification", () => {
     );
   });
 
+  it("documents deterministic bounded schedule windows", () => {
+    expect(classification).toContain(
+      "V2 requests the fixed 50-row upstream maximum, rejects a full candidate set as potentially truncated",
+    );
+    expect(classification).toContain(
+      "orders the proven-complete set locally by start instant and ID, and slices the requested deterministic window",
+    );
+  });
+
   it("keeps the attachment-download contract aligned with the runtime bound", () => {
     const documentedLimit = `${MAX_DOWNLOAD_BYTES / 1_000_000} MB`;
 

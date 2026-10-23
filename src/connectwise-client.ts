@@ -500,6 +500,8 @@ function scheduleDateStartTimestamps(value: unknown): number[] {
   return timestamps;
 }
 
+const SCHEDULE_CANDIDATE_PAGE_SIZE = 50;
+
 // CW rejects orderBy on schedule entries, so order them in the worker. Require
 // a unique positive ID as a total-order tie-breaker and fail closed when an
 // entry cannot participate in the promised deterministic ordering.
@@ -524,6 +526,20 @@ function sortByDateStart(value: unknown): unknown {
   return sortable
     .sort((a, b) => a.timestamp - b.timestamp || a.id - b.id)
     .map(({ entry }) => entry);
+}
+
+function deterministicScheduleWindow(
+  value: unknown,
+  pageSize: number,
+): unknown {
+  if (!Array.isArray(value)) {
+    throw new Error("ConnectWise schedule response was not a list");
+  }
+  if (value.length >= SCHEDULE_CANDIDATE_PAGE_SIZE) {
+    throw new Error("ConnectWise schedule candidate set may be truncated");
+  }
+  const sorted = sortByDateStart(value);
+  return (sorted as unknown[]).slice(0, pageSize);
 }
 
 export const CATALOG_ROUTE_IDS = [
@@ -717,11 +733,13 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
         ...scheduleDateConditions(p),
       ].join(" and "),
       fields: SCHEDULE_ENTRY_COLLECTION_FIELDS,
-      pageSize: p.pageSize ?? 20,
+      // CW cannot order this endpoint. Fetch the maximum bounded candidate set
+      // so the worker can prove it is complete before slicing the caller's
+      // requested deterministic window.
+      pageSize: SCHEDULE_CANDIDATE_PAGE_SIZE,
     }),
     required: ["memberId"],
     allowed: ["memberId", "startDate", "endDate", "pageSize"],
-    transform: sortByDateStart,
   },
 };
 
@@ -2600,22 +2618,23 @@ export function createConnectWiseClient(
     async listScheduleEntries(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
       const memberId = mappedMemberId("list_schedule_entries");
-      // CW rejects orderBy on /schedule/entries; validate and impose a stable
-      // local order instead of relying on the upstream response order.
+      // CW rejects orderBy on /schedule/entries. Fetch the maximum bounded
+      // candidate set, fail closed if it may be truncated, then impose a total
+      // local order before slicing the caller's requested window.
       const entries = await requestBoundedList(
         "/schedule/entries",
         {
           conditions: `member/id=${memberId}`,
           fields: SCHEDULE_ENTRY_COLLECTION_FIELDS,
-          pageSize,
+          pageSize: SCHEDULE_CANDIDATE_PAGE_SIZE,
         },
-        pageSize,
+        SCHEDULE_CANDIDATE_PAGE_SIZE,
         (result) => {
           assertMappedMemberList(result, memberId);
-          sortByDateStart(result);
+          deterministicScheduleWindow(result, pageSize);
         },
       );
-      return sortByDateStart(entries);
+      return deterministicScheduleWindow(entries, pageSize);
     },
 
     async getTimeSheets(pageSize: number): Promise<unknown> {
@@ -2842,16 +2861,20 @@ export function createConnectWiseClient(
       const query = definition.query
         ? definition.query(effectiveParams)
         : { pageSize: effectiveParams.pageSize ?? 20 };
-      const requestedPageSize = Number(query.pageSize);
+      const responsePageSize = Number(query.pageSize);
       if (TARGETED_SEARCH_CATALOG_ROUTES.has(route as CatalogRouteId)) {
-        targetedSearchPageSize(requestedPageSize);
+        targetedSearchPageSize(responsePageSize);
       } else {
-        boundedPageSize(requestedPageSize);
+        boundedPageSize(responsePageSize);
       }
+      const outputPageSize =
+        route === "schedule.entries.byMember"
+          ? Number(effectiveParams.pageSize ?? 20)
+          : responsePageSize;
       const result = await requestBoundedList(
         path,
         query,
-        requestedPageSize,
+        responsePageSize,
         (records) => {
           if (
             route === "service.boards.statuses" ||
@@ -2921,7 +2944,7 @@ export function createConnectWiseClient(
                 String(effectiveParams.endDate),
               );
             }
-            sortByDateStart(records);
+            deterministicScheduleWindow(records, outputPageSize);
           }
         },
       );
@@ -2931,6 +2954,9 @@ export function createConnectWiseClient(
           "Ticket",
           Number(effectiveParams.recordId),
         );
+      }
+      if (route === "schedule.entries.byMember") {
+        return deterministicScheduleWindow(result, outputPageSize);
       }
       return definition.transform ? definition.transform(result) : result;
     },

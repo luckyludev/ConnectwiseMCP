@@ -4408,6 +4408,7 @@ describe("ConnectWiseClient", () => {
     expect(new URL(urls[0]!).searchParams.get("conditions")).toBe(
       "member/id=149 and dateStart >= [2026-08-01] and dateStart <= [2026-08-15T23:59:59]",
     );
+    expect(new URL(urls[0]!).searchParams.get("pageSize")).toBe("50");
 
     await expect(
       client.catalogGet("schedule.entries.byMember", {
@@ -4636,6 +4637,40 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
+  it("builds stable schedule windows from complete candidate sets", async () => {
+    const entries = Array.from({ length: 8 }, (_, index) => {
+      const id = index + 1;
+      return {
+        id,
+        member: { id: 149 },
+        dateStart: `2026-08-01T12:${String(id).padStart(2, "0")}:00Z`,
+      };
+    });
+    const responses = [
+      [...entries].reverse(),
+      [...entries.slice(3), ...entries.slice(0, 3)],
+    ];
+    const urls: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input) => {
+        urls.push(String(input));
+        return Response.json(responses[urls.length - 1]);
+      },
+    });
+    const expected = entries.slice(0, 7);
+
+    await expect(
+      client.catalogGet("schedule.entries.byMember", {
+        memberId: 149,
+        pageSize: 7,
+      }),
+    ).resolves.toEqual(expected);
+    await expect(client.listScheduleEntries(7)).resolves.toEqual(expected);
+    expect(
+      urls.map((url) => new URL(url).searchParams.get("pageSize")),
+    ).toEqual(["50", "50"]);
+  });
+
   it.each([
     {
       records: [
@@ -4714,7 +4749,7 @@ describe("ConnectWiseClient", () => {
     expect(url.searchParams.getAll("fields")).toEqual([
       scheduleEntryCollectionFields,
     ]);
-    expect(url.searchParams.get("pageSize")).toBe("7");
+    expect(url.searchParams.get("pageSize")).toBe("50");
     expect(url.searchParams.has("orderBy")).toBe(false);
   });
 
@@ -5015,23 +5050,27 @@ describe("ConnectWiseClient", () => {
     ]);
   });
 
-  it("rejects oversized catalog responses before schedule sorting", async () => {
+  it("rejects potentially truncated schedule candidate sets", async () => {
     const urls: string[] = [];
-    const oversizedResponses = [
-      Array.from({ length: 21 }, (_, index) => ({
+    const responses = [
+      Array.from({ length: 50 }, (_, index) => ({
         id: index + 1,
-        dateStart: "2026-09-01T12:00:00Z",
+        member: { id: 149 },
+        dateStart: `2026-09-01T12:${String(index).padStart(2, "0")}:00Z`,
       })),
       Array.from({ length: 51 }, (_, index) => ({
         id: index + 1,
+        member: { id: 149 },
         dateStart: "2026-09-01T12:00:00Z",
       })),
     ];
+    const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input) => {
         urls.push(String(input));
-        return Response.json(oversizedResponses[urls.length - 1]);
+        return Response.json(responses[urls.length - 1]);
       },
+      log: (line) => logs.push(line),
     });
 
     await expect(
@@ -5040,18 +5079,17 @@ describe("ConnectWiseClient", () => {
         startDate: "2026-08-31",
         endDate: "2026-09-06",
       }),
-    ).rejects.toThrow("ConnectWise response exceeded requested page size");
-    await expect(
-      client.catalogGet("schedule.entries.byMember", {
-        memberId: 149,
-        startDate: "2026-08-31",
-        endDate: "2026-09-06",
-        pageSize: 50,
-      }),
-    ).rejects.toThrow("ConnectWise response exceeded requested page size");
+    ).rejects.toThrow("ConnectWise schedule candidate set may be truncated");
+    await expect(client.listScheduleEntries(20)).rejects.toThrow(
+      "ConnectWise response exceeded requested page size",
+    );
     expect(
       urls.map((url) => new URL(url).searchParams.get("pageSize")),
-    ).toEqual(["20", "50"]);
+    ).toEqual(["50", "50"]);
+    expect(logs.map((line) => JSON.parse(line).outcome)).toEqual([
+      "upstream_error",
+      "upstream_error",
+    ]);
   });
 
   it("filters byOwner on owner with open-only default and explicit fields", async () => {
