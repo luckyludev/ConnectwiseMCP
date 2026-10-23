@@ -144,10 +144,16 @@ Empty eligibility lists and absent secrets must remain fail-closed. Do not deplo
 A configuration change requires the normal repository review and CI process. Once the target release is merged, fetch the canonical `origin` remote, record the merged release's full lowercase 40-character commit SHA in the approved release evidence, and do not move or synthesize the local `origin/main` tracking ref. An authorized operator must use a dedicated checkout with no concurrent writers, check out that exact commit with a clean worktree, and explicitly supply the recorded SHA. First prepare and verify the bundle in a process that cannot access Cloudflare credentials or authenticated Wrangler state:
 
 ```bash
-STAGING_RELEASE_SHA=<approved-full-release-commit> npm run prepare:staging
+export STAGING_RELEASE_SHA=<approved-full-release-commit>
+npm run prepare:staging
+npm run verify:v2-evidence -- \
+  "$artifact_dir" staging "$STAGING_RELEASE_SHA" \
+  --candidate-manifest dist/staging-bundle-manifest.json
 ```
 
-After preparation succeeds, record the printed bundle, configuration, deployment-runtime, deployment-launcher, and deployment-entrypoint SHA-256 digests in the approved operations record. Also retain the lowercase SHA-256 of the reviewed Node executable; its file and parent directory must remain non-writable, and no concurrent writer may replace it during deployment. Still without Cloudflare credentials, review `scripts/bootstrap-verified-deployment.sh`, copy those exact reviewed bootstrap bytes to an independently controlled absolute path outside the checkout, and make that retained copy owner-executable and non-writable. The bootstrap copy is an operator-controlled trust anchor: do not replace it from the deployment checkout, copy it after credentials are available, or invoke the repository copy during deployment.
+Keep the private `artifact_dir` and shell state from the retained-evidence procedure open until this comparison finishes, or repeat that procedure—including all six GitHub attestation checks—in the credentialless preparation shell. The second verifier invocation accepts only the checkout-relative `dist/staging-bundle-manifest.json` candidate path, authenticates the local bundle, configuration, and lockfile bytes against that manifest through stable file descriptors, and then binds those values to canonical CI evidence: target, release commit, bundle bytes, reviewed configuration, and lockfile size/digest must match. Runtime-tree digests are intentionally not compared because platform-specific optional packages can differ; both manifests still undergo strict schema validation. A missing, malformed, changed, or mismatched candidate manifest or candidate file is a release stop condition.
+
+After both preparation and candidate comparison succeed, record the printed bundle, configuration, deployment-runtime, deployment-launcher, and deployment-entrypoint SHA-256 digests in the approved operations record. Also retain the lowercase SHA-256 of the reviewed Node executable; its file and parent directory must remain non-writable, and no concurrent writer may replace it during deployment. Still without Cloudflare credentials, review `scripts/bootstrap-verified-deployment.sh`, copy those exact reviewed bootstrap bytes to an independently controlled absolute path outside the checkout, and make that retained copy owner-executable and non-writable. The bootstrap copy is an operator-controlled trust anchor: do not replace it from the deployment checkout, copy it after credentials are available, or invoke the repository copy during deployment.
 
 ```bash
 # Credentialless preparation only; choose an approved operator-controlled path.

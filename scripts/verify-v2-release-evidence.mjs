@@ -10,14 +10,25 @@ import {
 } from "node:fs";
 import { join, posix } from "node:path";
 
-const [, , evidenceDirectory, target, expectedRelease] = process.argv;
+const [
+  ,
+  ,
+  evidenceDirectory,
+  target,
+  expectedRelease,
+  candidateFlag,
+  candidateManifestPath,
+] = process.argv;
+const hasCandidateManifest = candidateFlag === "--candidate-manifest";
 if (
-  process.argv.length !== 5 ||
+  (process.argv.length !== 5 &&
+    !(process.argv.length === 7 && hasCandidateManifest)) ||
   (target !== "staging" && target !== "production") ||
-  !/^[0-9a-f]{40}$/u.test(expectedRelease ?? "")
+  !/^[0-9a-f]{40}$/u.test(expectedRelease ?? "") ||
+  (hasCandidateManifest && !candidateManifestPath)
 ) {
   process.stderr.write(
-    "Usage: node scripts/verify-v2-release-evidence.mjs <evidence-directory> <staging|production> <full-lowercase-release-sha>\n",
+    "Usage: node scripts/verify-v2-release-evidence.mjs <evidence-directory> <staging|production> <full-lowercase-release-sha> [--candidate-manifest <path>]\n",
   );
   process.exit(1);
 }
@@ -75,6 +86,10 @@ function identity(stat) {
 
 function sameIdentity(left, right) {
   return Object.keys(left).every((key) => left[key] === right[key]);
+}
+
+function sameFilesystemObject(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
 }
 
 let directoryStat;
@@ -187,24 +202,27 @@ const hashFields = [
   "runtimeInventorySha256",
 ];
 const sizeFields = ["size", "configSize", "lockSize", "runtimeInventorySize"];
-if (
-  !exactKeys(manifest, manifestKeys) ||
-  manifest.schemaVersion !== 5 ||
-  manifest.target !== target ||
-  manifest.releaseCommit !== expectedRelease ||
-  manifest.bundlePath !== "dist/index.js" ||
-  manifest.configPath !== "wrangler.jsonc" ||
-  manifest.lockPath !== "package-lock.json" ||
-  manifest.runtimePath !== "node_modules" ||
-  manifest.runtimeInventoryPath !== `dist/${inventoryName}` ||
-  hashFields.some((field) => !/^[0-9a-f]{64}$/u.test(manifest[field] ?? "")) ||
-  sizeFields.some(
-    (field) => !Number.isSafeInteger(manifest[field]) || manifest[field] < 0,
-  ) ||
-  manifest.runtimeInventorySize < 1 ||
-  !Number.isSafeInteger(manifest.runtimeFileCount) ||
-  manifest.runtimeFileCount < 1
-) {
+function manifestHasExpectedSchema(value) {
+  return (
+    exactKeys(value, manifestKeys) &&
+    value.schemaVersion === 5 &&
+    value.target === target &&
+    value.releaseCommit === expectedRelease &&
+    value.bundlePath === "dist/index.js" &&
+    value.configPath === "wrangler.jsonc" &&
+    value.lockPath === "package-lock.json" &&
+    value.runtimePath === "node_modules" &&
+    value.runtimeInventoryPath === `dist/${inventoryName}` &&
+    !hashFields.some((field) => !/^[0-9a-f]{64}$/u.test(value[field] ?? "")) &&
+    !sizeFields.some(
+      (field) => !Number.isSafeInteger(value[field]) || value[field] < 0,
+    ) &&
+    value.runtimeInventorySize >= 1 &&
+    Number.isSafeInteger(value.runtimeFileCount) &&
+    value.runtimeFileCount >= 1
+  );
+}
+if (!manifestHasExpectedSchema(manifest)) {
   fail(`${manifestName} has an invalid strict schema or release binding`);
 }
 if (
@@ -213,6 +231,195 @@ if (
     .equals(Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`))
 ) {
   fail(`${manifestName} is not canonically encoded`);
+}
+
+let candidateDescriptor;
+let candidateIdentity;
+let candidateDirectoryIdentity;
+const candidateAssetDescriptors = new Map();
+const candidateAssetIdentities = new Map();
+if (hasCandidateManifest) {
+  const expectedCandidateManifestPath = join("dist", manifestName);
+  if (candidateManifestPath !== expectedCandidateManifestPath) {
+    fail(
+      `the candidate manifest path must be ${expectedCandidateManifestPath}`,
+    );
+  }
+  try {
+    const candidateDirectory = lstatSync("dist");
+    if (
+      !candidateDirectory.isDirectory() ||
+      candidateDirectory.isSymbolicLink()
+    ) {
+      fail("the candidate dist path must be a real directory");
+    }
+    candidateDirectoryIdentity = identity(candidateDirectory);
+    if (
+      sameFilesystemObject(candidateDirectoryIdentity, identity(directoryStat))
+    ) {
+      fail(
+        "the candidate dist directory must be separate from release evidence",
+      );
+    }
+  } catch (error) {
+    if (error?.message?.startsWith("V2 release evidence")) throw error;
+    fail("the candidate dist directory could not be opened safely");
+  }
+
+  let candidateBytes;
+  try {
+    const before = lstatSync(candidateManifestPath);
+    if (
+      !before.isFile() ||
+      before.isSymbolicLink() ||
+      before.nlink !== 1 ||
+      before.size > 64 * 1024
+    ) {
+      fail(
+        "the candidate manifest must be a bounded regular, non-symlink, single-link file",
+      );
+    }
+    candidateDescriptor = openSync(
+      candidateManifestPath,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    const opened = fstatSync(candidateDescriptor);
+    if (
+      !opened.isFile() ||
+      opened.nlink !== 1 ||
+      opened.dev !== before.dev ||
+      opened.ino !== before.ino ||
+      opened.size !== before.size ||
+      opened.ctimeMs !== before.ctimeMs ||
+      opened.mtimeMs !== before.mtimeMs
+    ) {
+      fail("the candidate manifest changed while it was opened");
+    }
+    candidateIdentity = identity(opened);
+    if (
+      sameFilesystemObject(candidateIdentity, fileIdentities.get(manifestName))
+    ) {
+      fail("the candidate manifest must be separate from release evidence");
+    }
+    candidateBytes = readFileSync(candidateDescriptor);
+    if (
+      !sameIdentity(candidateIdentity, identity(fstatSync(candidateDescriptor)))
+    ) {
+      fail("the candidate manifest changed while it was read");
+    }
+  } catch (error) {
+    if (error?.message?.startsWith("V2 release evidence")) throw error;
+    fail("the candidate manifest could not be read safely");
+  }
+
+  let candidateManifest;
+  try {
+    candidateManifest = JSON.parse(candidateBytes.toString("utf8"));
+  } catch {
+    fail("the candidate manifest is not valid JSON");
+  }
+  if (
+    !manifestHasExpectedSchema(candidateManifest) ||
+    !candidateBytes.equals(
+      Buffer.from(`${JSON.stringify(candidateManifest, null, 2)}\n`),
+    )
+  ) {
+    fail(
+      "the candidate manifest has an invalid canonical schema or release binding",
+    );
+  }
+  for (const field of [
+    "target",
+    "releaseCommit",
+    "sha256",
+    "size",
+    "configSha256",
+    "configSize",
+    "lockSha256",
+    "lockSize",
+  ]) {
+    if (candidateManifest[field] !== manifest[field]) {
+      fail(
+        `the candidate manifest does not match release evidence field ${field}`,
+      );
+    }
+  }
+
+  for (const [path, evidenceName, limit, sizeField, hashField] of [
+    [
+      join("dist", "index.js"),
+      "index.js",
+      1024 * 1024 * 1024,
+      "size",
+      "sha256",
+    ],
+    [
+      "wrangler.jsonc",
+      "wrangler.jsonc",
+      4 * 1024 * 1024,
+      "configSize",
+      "configSha256",
+    ],
+    [
+      "package-lock.json",
+      "package-lock.json",
+      64 * 1024 * 1024,
+      "lockSize",
+      "lockSha256",
+    ],
+  ]) {
+    let descriptor;
+    try {
+      const before = lstatSync(path);
+      if (
+        !before.isFile() ||
+        before.isSymbolicLink() ||
+        before.nlink !== 1 ||
+        before.size > limit
+      ) {
+        fail(
+          `${path} must be a bounded regular, non-symlink, single-link candidate file`,
+        );
+      }
+      descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const opened = fstatSync(descriptor);
+      if (
+        !opened.isFile() ||
+        opened.nlink !== 1 ||
+        opened.dev !== before.dev ||
+        opened.ino !== before.ino ||
+        opened.size !== before.size ||
+        opened.ctimeMs !== before.ctimeMs ||
+        opened.mtimeMs !== before.mtimeMs
+      ) {
+        fail(`${path} changed while it was opened`);
+      }
+      const openedIdentity = identity(opened);
+      if (
+        sameFilesystemObject(openedIdentity, fileIdentities.get(evidenceName))
+      ) {
+        fail(`${path} must be separate from release evidence`);
+      }
+      const bytes = readFileSync(descriptor);
+      if (!sameIdentity(openedIdentity, identity(fstatSync(descriptor)))) {
+        fail(`${path} changed while it was read`);
+      }
+      if (
+        bytes.length !== candidateManifest[sizeField] ||
+        sha256(bytes) !== candidateManifest[hashField]
+      ) {
+        fail(`${path} does not match the candidate manifest binding`);
+      }
+      candidateAssetDescriptors.set(path, descriptor);
+      candidateAssetIdentities.set(path, openedIdentity);
+      descriptor = undefined;
+    } catch (error) {
+      if (error?.message?.startsWith("V2 release evidence")) throw error;
+      fail(`${path} could not be read safely`);
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+    }
+  }
 }
 
 for (const [name, sizeField, hashField] of [
@@ -679,6 +886,37 @@ try {
       fail(`${name} changed during verification`);
     }
   }
+  if (hasCandidateManifest) {
+    if (
+      !sameIdentity(candidateDirectoryIdentity, identity(lstatSync("dist"))) ||
+      !sameIdentity(
+        candidateIdentity,
+        identity(fstatSync(candidateDescriptor)),
+      ) ||
+      !sameIdentity(
+        candidateIdentity,
+        identity(lstatSync(candidateManifestPath)),
+      )
+    ) {
+      fail(
+        "the candidate manifest or dist directory changed during verification",
+      );
+    }
+    for (const [path, descriptor] of candidateAssetDescriptors) {
+      if (
+        !sameIdentity(
+          candidateAssetIdentities.get(path),
+          identity(fstatSync(descriptor)),
+        ) ||
+        !sameIdentity(
+          candidateAssetIdentities.get(path),
+          identity(lstatSync(path)),
+        )
+      ) {
+        fail(`${path} changed during candidate verification`);
+      }
+    }
+  }
   if (
     JSON.stringify(readdirSync(evidenceDirectory).sort()) !==
     JSON.stringify(names)
@@ -690,7 +928,12 @@ try {
   fail("the evidence directory could not be revalidated safely");
 }
 for (const descriptor of fileDescriptors.values()) closeSync(descriptor);
+if (candidateDescriptor !== undefined) closeSync(candidateDescriptor);
+for (const descriptor of candidateAssetDescriptors.values())
+  closeSync(descriptor);
 
 process.stdout.write(
-  `Verified ${target} V2 release evidence for ${expectedRelease}.\n`,
+  hasCandidateManifest
+    ? `Verified ${target} V2 release evidence and matching candidate manifest for ${expectedRelease}.\n`
+    : `Verified ${target} V2 release evidence for ${expectedRelease}.\n`,
 );
