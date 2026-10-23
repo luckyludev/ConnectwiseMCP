@@ -317,7 +317,6 @@ describe("ConnectWiseClient", () => {
         client.getTicketAttachments(123, 20),
       (client: ReturnType<typeof createConnectWiseClient>) =>
         client.catalogGet("system.documents", {
-          recordType: "Ticket",
           recordId: 123,
           pageSize: 20,
         }),
@@ -399,17 +398,34 @@ describe("ConnectWiseClient", () => {
     }
   });
 
-  it("verifies and strips document relationships from catalog results", async () => {
+  it("forces ticket document relationships for catalog results", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
         Response.json([
           {
             id: 400,
             title: "router.pdf",
-            recordType: "Company",
+            recordType: "Ticket",
             recordId: 77,
           },
         ]),
+    });
+
+    await expect(
+      client.catalogGet("system.documents", {
+        recordId: 77,
+        pageSize: 20,
+      }),
+    ).resolves.toEqual([{ id: 400, title: "router.pdf" }]);
+  });
+
+  it("rejects caller-selected document types before fetch", async () => {
+    let fetches = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async () => {
+        fetches += 1;
+        return Response.json([]);
+      },
     });
 
     await expect(
@@ -418,18 +434,20 @@ describe("ConnectWiseClient", () => {
         recordId: 77,
         pageSize: 20,
       }),
-    ).resolves.toEqual([{ id: 400, title: "router.pdf" }]);
+    ).rejects.toThrow(
+      "Parameter recordType is not allowed for route system.documents",
+    );
+    expect(fetches).toBe(0);
   });
 
-  it("rejects mismatched document relationships from catalog results", async () => {
+  it("rejects mismatched ticket document relationships from catalog results", async () => {
     const client = createConnectWiseClient(credentials, {
       fetcher: async () =>
-        Response.json([{ id: 400, recordType: "Company", recordId: 78 }]),
+        Response.json([{ id: 400, recordType: "Project", recordId: 77 }]),
     });
 
     await expect(
       client.catalogGet("system.documents", {
-        recordType: "Company",
         recordId: 77,
         pageSize: 20,
       }),
@@ -3908,7 +3926,6 @@ describe("ConnectWiseClient", () => {
     );
 
     await client.catalogGet("system.documents", {
-      recordType: "Ticket",
       recordId: 77,
       pageSize: 20,
     });
@@ -3925,7 +3942,9 @@ describe("ConnectWiseClient", () => {
 
     await expect(
       client.catalogGet("system.documents", { recordType: "Raw", recordId: 7 }),
-    ).rejects.toThrow("Unsupported document record type");
+    ).rejects.toThrow(
+      "Parameter recordType is not allowed for route system.documents",
+    );
 
     await expect(
       client.catalogGet("service.boards.statuses", { pageSize: 5 }),
