@@ -500,15 +500,29 @@ function scheduleDateStartTimestamps(value: unknown): number[] {
   return timestamps;
 }
 
-// CW rejects orderBy on schedule entries, so order them in the worker. Fail
-// closed when an entry cannot participate in the promised chronological order.
+// CW rejects orderBy on schedule entries, so order them in the worker. Require
+// a unique positive ID as a total-order tie-breaker and fail closed when an
+// entry cannot participate in the promised deterministic ordering.
 function sortByDateStart(value: unknown): unknown {
   if (!Array.isArray(value) || value.length === 0) return value;
   const items = value as Array<Record<string, unknown>>;
   const timestamps = scheduleDateStartTimestamps(items);
-  return items
-    .map((entry, index) => ({ entry, timestamp: timestamps[index]! }))
-    .sort((a, b) => a.timestamp - b.timestamp)
+  const seenIds = new Set<number>();
+  const sortable = items.map((entry, index) => {
+    const id = entry.id;
+    if (
+      typeof id !== "number" ||
+      !Number.isSafeInteger(id) ||
+      id <= 0 ||
+      seenIds.has(id)
+    ) {
+      throw new Error("ConnectWise schedule entry has invalid or duplicate ID");
+    }
+    seenIds.add(id);
+    return { entry, id, timestamp: timestamps[index]! };
+  });
+  return sortable
+    .sort((a, b) => a.timestamp - b.timestamp || a.id - b.id)
     .map(({ entry }) => entry);
 }
 
@@ -2595,8 +2609,9 @@ export function createConnectWiseClient(
     async listScheduleEntries(pageSize: number): Promise<unknown> {
       boundedPageSize(pageSize);
       const memberId = mappedMemberId("list_schedule_entries");
-      // CW rejects orderBy on /schedule/entries; do not imply recency here.
-      return requestBoundedList(
+      // CW rejects orderBy on /schedule/entries; validate and impose a stable
+      // local order instead of relying on the upstream response order.
+      const entries = await requestBoundedList(
         "/schedule/entries",
         {
           conditions: `member/id=${memberId}`,
@@ -2604,8 +2619,12 @@ export function createConnectWiseClient(
           pageSize,
         },
         pageSize,
-        (result) => assertMappedMemberList(result, memberId),
+        (result) => {
+          assertMappedMemberList(result, memberId);
+          sortByDateStart(result);
+        },
       );
+      return sortByDateStart(entries);
     },
 
     async getTimeSheets(pageSize: number): Promise<unknown> {
@@ -2916,9 +2935,8 @@ export function createConnectWiseClient(
                 String(effectiveParams.startDate),
                 String(effectiveParams.endDate),
               );
-            } else {
-              scheduleDateStartTimestamps(records);
             }
+            sortByDateStart(records);
           }
         },
       );
