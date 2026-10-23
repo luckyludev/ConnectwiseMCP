@@ -448,6 +448,7 @@ describe("legacy rollback deployment surface", () => {
     ]);
     expect(legacyWorkflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(1);
     expect(v2Workflow.match(/- "deploy\/\*\*"/gu)).toHaveLength(1);
+    expect(v2Workflow.match(/- "README\.md"/gu)).toHaveLength(1);
     expect(v2Workflow.match(/- "\.github\/workflows\/\*\*"/gu)).toHaveLength(1);
 
     const legacyPushTrigger = legacyWorkflow.match(

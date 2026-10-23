@@ -22,6 +22,7 @@ on:
       - "wrangler.jsonc"
       - ".prettierignore"
       - ".gitignore"
+      - "README.md"
       - "docs/**"
       - "deploy/**"
       - ".github/dependabot.yml"
