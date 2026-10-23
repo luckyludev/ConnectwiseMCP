@@ -3043,7 +3043,7 @@ describe("ConnectWiseClient", () => {
     });
 
     await client.getServiceBoards();
-    expect(new URL(urls[0]!).searchParams.get("orderBy")).toBe("name asc");
+    expect(new URL(urls[0]!).searchParams.get("orderBy")).toBe("id asc");
     expect(new URL(urls[0]!).pathname).toBe(
       "/v4_6_release/apis/3.0/service/boards",
     );
@@ -3370,6 +3370,12 @@ describe("ConnectWiseClient", () => {
 
   it.each([
     {
+      name: "direct service boards",
+      resource: "service boards",
+      exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.getServiceBoards(),
+    },
+    {
       name: "direct board statuses",
       resource: "board statuses",
       exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
@@ -3380,6 +3386,24 @@ describe("ConnectWiseClient", () => {
       resource: "board types",
       exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
         client.getBoardTypes(32),
+    },
+    {
+      name: "direct service statuses",
+      resource: "service statuses",
+      exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.getServiceStatuses(),
+    },
+    {
+      name: "direct service priorities",
+      resource: "service priorities",
+      exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.getServicePriorities(),
+    },
+    {
+      name: "direct service sources",
+      resource: "service sources",
+      exercise: (client: ReturnType<typeof createConnectWiseClient>) =>
+        client.getServiceSources(),
     },
     {
       name: "catalog board statuses",
@@ -3451,7 +3475,7 @@ describe("ConnectWiseClient", () => {
     expect(urls).toHaveLength(8);
     expect(Object.fromEntries(new URL(urls[0]!).searchParams)).toEqual({
       fields: serviceBoardCollectionFields,
-      orderBy: "name asc",
+      orderBy: "id asc",
       pageSize: "50",
     });
     expect(Object.fromEntries(new URL(urls[1]!).searchParams)).toEqual({
@@ -3466,17 +3490,17 @@ describe("ConnectWiseClient", () => {
     });
     expect(Object.fromEntries(new URL(urls[3]!).searchParams)).toEqual({
       fields: serviceStatusCollectionFields,
-      orderBy: "name asc",
+      orderBy: "id asc",
       pageSize: "50",
     });
     expect(Object.fromEntries(new URL(urls[4]!).searchParams)).toEqual({
       fields: servicePriorityCollectionFields,
-      orderBy: "name asc",
+      orderBy: "id asc",
       pageSize: "50",
     });
     expect(Object.fromEntries(new URL(urls[5]!).searchParams)).toEqual({
       fields: serviceSourceCollectionFields,
-      orderBy: "name asc",
+      orderBy: "id asc",
       pageSize: "50",
     });
     expect(Object.fromEntries(new URL(urls[6]!).searchParams)).toEqual({
