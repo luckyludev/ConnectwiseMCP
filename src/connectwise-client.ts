@@ -598,6 +598,7 @@ const TIME_ENTRY_COLLECTION_FIELDS =
   "id,actualHours,timeStart,member,notes,workType";
 const TICKET_TIME_ENTRY_RELATIONSHIP_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},dateEntered,chargeToType,chargeToId`;
 const TIME_ENTRY_READ_FIELDS = `${TIME_ENTRY_COLLECTION_FIELDS},dateEntered,chargeToType`;
+const TIME_ENTRY_CREATE_RESULT_FIELDS = `${TIME_ENTRY_READ_FIELDS},timeEnd,chargeToId,billableOption`;
 const SCHEDULE_ENTRY_COLLECTION_FIELDS =
   "id,member,dateStart,dateEnd,name,hours,doneFlag,type,status";
 const SCHEDULE_ENTRY_OBJECT_RELATIONSHIP_FIELDS = `${SCHEDULE_ENTRY_COLLECTION_FIELDS},objectId`;
@@ -3713,11 +3714,29 @@ export function createConnectWiseClient(
       if (input.chargeToId !== undefined) {
         positiveId(input.chargeToId, "chargeTo ID");
       }
+      if (input.ticketId !== undefined && input.chargeToId !== undefined) {
+        throw new Error("ticketId and chargeToId are mutually exclusive");
+      }
       if (input.workTypeId !== undefined) {
         positiveId(input.workTypeId, "workType ID");
       }
       if (input.notes !== undefined && input.notes.length > 2000) {
         throw new Error("notes are too long");
+      }
+      if (input.ticketId !== undefined) {
+        const ticketId = input.ticketId;
+        const ticket = await requestJson(
+          "GET",
+          `/service/tickets/${ticketId}`,
+          { fields: SERVICE_TICKET_LOOKUP_FIELDS },
+          undefined,
+          undefined,
+          undefined,
+          (record) => {
+            verifiedRecordIdentity(record, ticketId, "service ticket");
+          },
+        );
+        verifiedRecordIdentity(ticket, ticketId, "service ticket");
       }
       // Writing into a submitted timesheet fails server-side; fail fast with
       // a clear recall instruction instead of a generic CW error.
@@ -3762,21 +3781,94 @@ export function createConnectWiseClient(
       const created = verifiedCreatedRecord(
         await requestJson("POST", "/time/entries", undefined, payload),
       );
+      const expectedChargeToId = input.ticketId ?? input.chargeToId;
+      const expectedChargeToType =
+        input.ticketId !== undefined
+          ? "ServiceTicket"
+          : input.chargeToId !== undefined
+            ? "ChargeCode"
+            : undefined;
       try {
-        assertMappedMember(created, memberId);
+        // ConnectWise create receipts may omit fields. Reject contradictions in
+        // the receipt, then confirm the persisted target from an exact-ID read.
+        assertOptionalCreatedReference(created, "member", memberId);
         assertOptionalCreatedValue(created, "timeStart", timeStart);
         assertOptionalCreatedValue(created, "timeEnd", timeEnd);
         if (input.ticketId !== undefined) {
           assertOptionalCreatedReference(created, "ticket", input.ticketId);
         }
-        const expectedChargeToId = input.chargeToId ?? input.ticketId;
         if (expectedChargeToId !== undefined) {
           assertOptionalCreatedValue(created, "chargeToId", expectedChargeToId);
         }
+        if (expectedChargeToType !== undefined) {
+          assertOptionalCreatedValue(
+            created,
+            "chargeToType",
+            expectedChargeToType,
+          );
+        }
+        if (input.workTypeId !== undefined) {
+          assertOptionalCreatedReference(created, "workType", input.workTypeId);
+        }
+        if (input.notes !== undefined && input.notes.length > 0) {
+          assertOptionalCreatedValue(created, "notes", input.notes);
+        }
+        assertOptionalCreatedValue(
+          created,
+          "billableOption",
+          input.billableOption ?? "Billable",
+        );
       } catch {
         throw new ConnectWiseIndeterminateWriteError();
       }
-      return created;
+
+      const entryId = created.id as number;
+      const confirmCreatedEntry = (
+        record: unknown,
+      ): Record<string, unknown> => {
+        const confirmed = verifiedRecordIdentity(record, entryId, "time entry");
+        assertMappedMember(confirmed, memberId);
+        const referenceId = (field: string): unknown => {
+          const value = confirmed[field];
+          return value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, unknown>).id
+            : undefined;
+        };
+        const matches =
+          confirmed.timeStart === timeStart &&
+          confirmed.timeEnd === timeEnd &&
+          (expectedChargeToId === undefined ||
+            (confirmed.chargeToId === expectedChargeToId &&
+              confirmed.chargeToType === expectedChargeToType)) &&
+          (input.workTypeId === undefined ||
+            referenceId("workType") === input.workTypeId) &&
+          (input.notes === undefined ||
+            input.notes.length === 0 ||
+            confirmed.notes === input.notes) &&
+          confirmed.billableOption === (input.billableOption ?? "Billable");
+        if (!matches) {
+          throw new Error(
+            "ConnectWise created time entry could not be confirmed",
+          );
+        }
+        return confirmed;
+      };
+      try {
+        const confirmed = await requestJson(
+          "GET",
+          `/time/entries/${entryId}`,
+          { fields: TIME_ENTRY_CREATE_RESULT_FIELDS },
+          undefined,
+          undefined,
+          undefined,
+          (record) => {
+            confirmCreatedEntry(record);
+          },
+        );
+        return confirmCreatedEntry(confirmed);
+      } catch {
+        throw new ConnectWiseIndeterminateWriteError();
+      }
     },
   };
 }

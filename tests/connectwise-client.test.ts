@@ -7697,27 +7697,134 @@ describe("ConnectWiseClient", () => {
     },
   );
 
-  it("verifies the created time entry identity and mapped member", async () => {
-    const created = {
-      id: 123,
-      member: { id: 149, name: "mapped-member" },
-      timeStart: "2026-09-01T16:00:00Z",
-      timeEnd: "2026-09-01T17:00:00Z",
-      notes: "completed work",
-    };
+  it("rejects ambiguous time-entry targets before contacting ConnectWise", async () => {
+    let requests = 0;
     const client = createConnectWiseClient(credentials, {
-      fetcher: async (input) =>
-        String(input).includes("/time/sheets")
-          ? Response.json([])
-          : Response.json(created, { status: 201 }),
+      fetcher: async () => {
+        requests += 1;
+        return Response.json([]);
+      },
     });
 
     await expect(
       client.createTimeEntry({
         timeStart: "2026-09-01T12:00:00-04:00",
         timeEnd: "2026-09-01T13:00:00-04:00",
+        ticketId: 456,
+        chargeToId: 13,
       }),
-    ).resolves.toEqual(created);
+    ).rejects.toThrow("ticketId and chargeToId are mutually exclusive");
+    expect(requests).toBe(0);
+  });
+
+  it("rejects a non-service ticket target before creating a time entry", async () => {
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        methods.push(init?.method ?? "GET");
+        return Response.json({ message: "not found" }, { status: 404 });
+      },
+    });
+
+    await expect(
+      client.createTimeEntry({
+        timeStart: "2026-09-01T12:00:00-04:00",
+        timeEnd: "2026-09-01T13:00:00-04:00",
+        ticketId: 456,
+      }),
+    ).rejects.toBeInstanceOf(ConnectWiseRequestError);
+    expect(methods).toEqual(["GET"]);
+  });
+
+  it("confirms the stored time entry target after a sparse create receipt", async () => {
+    const confirmed = {
+      id: 123,
+      actualHours: 1,
+      member: { id: 149, name: "mapped-member" },
+      timeStart: "2026-09-01T16:00:00Z",
+      timeEnd: "2026-09-01T17:00:00Z",
+      dateEntered: "2026-09-01T17:01:00Z",
+      chargeToId: 456,
+      chargeToType: "ServiceTicket",
+      workType: { id: 25 },
+      billableOption: "DoNotBill",
+      notes: "completed work",
+    };
+    const calls: Array<{ method: string; url: string }> = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        const method = init?.method ?? "GET";
+        const url = String(input);
+        calls.push({ method, url });
+        if (url.includes("/service/tickets/456")) {
+          return Response.json({ id: 456, status: { id: 1 } });
+        }
+        if (url.includes("/time/sheets")) return Response.json([]);
+        if (method === "POST")
+          return Response.json({ id: 123 }, { status: 201 });
+        return Response.json(confirmed);
+      },
+    });
+
+    await expect(
+      client.createTimeEntry({
+        timeStart: "2026-09-01T12:00:00-04:00",
+        timeEnd: "2026-09-01T13:00:00-04:00",
+        ticketId: 456,
+        workTypeId: 25,
+        billableOption: "DoNotBill",
+        notes: "completed work",
+      }),
+    ).resolves.toEqual(confirmed);
+    expect(calls.map(({ method }) => method)).toEqual([
+      "GET",
+      "GET",
+      "POST",
+      "GET",
+    ]);
+    const ticketUrl = new URL(calls[0]!.url);
+    expect(ticketUrl.pathname).toBe(
+      "/v4_6_release/apis/3.0/service/tickets/456",
+    );
+    expect(ticketUrl.searchParams.get("fields")).toBe("id,status");
+    const confirmationUrl = new URL(calls[3]!.url);
+    expect(confirmationUrl.pathname).toBe(
+      "/v4_6_release/apis/3.0/time/entries/123",
+    );
+    expect(confirmationUrl.searchParams.get("fields")).toBe(
+      "id,actualHours,timeStart,member,notes,workType,dateEntered,chargeToType,timeEnd,chargeToId,billableOption",
+    );
+  });
+
+  it("confirms a standalone charge code by both ID and target type", async () => {
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        if (String(input).includes("/time/sheets")) return Response.json([]);
+        if (init?.method === "POST") return Response.json({ id: 123 });
+        return Response.json({
+          id: 123,
+          member: { id: 149 },
+          timeStart: "2026-09-01T16:00:00Z",
+          timeEnd: "2026-09-01T17:00:00Z",
+          chargeToId: 13,
+          chargeToType: "ChargeCode",
+          billableOption: "DoNotBill",
+        });
+      },
+    });
+
+    await expect(
+      client.createTimeEntry({
+        timeStart: "2026-09-01T12:00:00-04:00",
+        timeEnd: "2026-09-01T13:00:00-04:00",
+        chargeToId: 13,
+        billableOption: "DoNotBill",
+      }),
+    ).resolves.toMatchObject({
+      id: 123,
+      chargeToId: 13,
+      chargeToType: "ChargeCode",
+    });
   });
 
   it.each([
@@ -7825,6 +7932,82 @@ describe("ConnectWiseClient", () => {
         chargeToId: 13,
       }),
     ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+  });
+
+  it.each([
+    ["identity", { id: 124 }],
+    ["member", { member: { id: 150 } }],
+    ["start", { timeStart: "2026-09-01T16:00:01Z" }],
+    ["end", { timeEnd: "2026-09-01T17:00:01Z" }],
+    ["charge target", { chargeToId: 457 }],
+    ["charge target type", { chargeToType: "ProjectTicket" }],
+    ["work type", { workType: { id: 26 } }],
+    ["notes", { notes: "different work" }],
+    ["billable option", { billableOption: "Billable" }],
+  ])(
+    "classifies a mismatched stored time-entry %s as indeterminate",
+    async (_case, mismatch) => {
+      let postRequests = 0;
+      const stored = {
+        id: 123,
+        member: { id: 149 },
+        timeStart: "2026-09-01T16:00:00Z",
+        timeEnd: "2026-09-01T17:00:00Z",
+        chargeToId: 456,
+        chargeToType: "ServiceTicket",
+        workType: { id: 25 },
+        notes: "completed work",
+        billableOption: "DoNotBill",
+        ...mismatch,
+      };
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async (input, init) => {
+          if (String(input).includes("/service/tickets/456")) {
+            return Response.json({ id: 456, status: { id: 1 } });
+          }
+          if (String(input).includes("/time/sheets")) return Response.json([]);
+          if (init?.method === "POST") {
+            postRequests += 1;
+            return Response.json({ id: 123 }, { status: 201 });
+          }
+          return Response.json(stored);
+        },
+      });
+
+      await expect(
+        client.createTimeEntry({
+          timeStart: "2026-09-01T12:00:00-04:00",
+          timeEnd: "2026-09-01T13:00:00-04:00",
+          ticketId: 456,
+          workTypeId: 25,
+          billableOption: "DoNotBill",
+          notes: "completed work",
+        }),
+      ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+      expect(postRequests).toBe(1);
+    },
+  );
+
+  it("classifies a failed time-entry confirmation read as indeterminate without repeating the write", async () => {
+    let postRequests = 0;
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (input, init) => {
+        if (String(input).includes("/time/sheets")) return Response.json([]);
+        if (init?.method === "POST") {
+          postRequests += 1;
+          return Response.json({ id: 123 }, { status: 201 });
+        }
+        return Response.json({ message: "missing" }, { status: 404 });
+      },
+    });
+
+    await expect(
+      client.createTimeEntry({
+        timeStart: "2026-09-01T12:00:00-04:00",
+        timeEnd: "2026-09-01T13:00:00-04:00",
+      }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    expect(postRequests).toBe(1);
   });
 
   it("downloads a document as bounded base64 and rejects oversized bodies", async () => {
