@@ -1313,7 +1313,24 @@ describe("staging deployment configuration", () => {
       "Require GitHub attestation verification for all six retained files and `npm run verify:v2-evidence -- <downloaded-directory> staging <release-commit>` to pass",
     );
     expect(stagingChecklist).toContain(
-      "Missing, expired, substituted, or unverifiable evidence blocks staging acceptance",
+      "require the same credentialless verifier to pass again with `--candidate-manifest dist/staging-bundle-manifest.json`",
+    );
+    expect(stagingChecklist).toContain(
+      "Missing, expired, substituted, unverifiable, or candidate-mismatched evidence blocks staging acceptance",
+    );
+    const preparationOffset = stagingHowto.indexOf("npm run prepare:staging");
+    const candidateVerificationOffset = stagingHowto.indexOf(
+      "--candidate-manifest dist/staging-bundle-manifest.json",
+      preparationOffset,
+    );
+    const bootstrapCopyOffset = stagingHowto.indexOf(
+      "install -m 0500 scripts/bootstrap-verified-deployment.sh",
+      preparationOffset,
+    );
+    expect(candidateVerificationOffset).toBeGreaterThan(preparationOffset);
+    expect(bootstrapCopyOffset).toBeGreaterThan(candidateVerificationOffset);
+    expect(stagingHowto).toContain(
+      "target, release commit, bundle bytes, reviewed configuration, and lockfile size/digest must match",
     );
   });
 
