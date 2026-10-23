@@ -3105,9 +3105,13 @@ describe("authenticated MCP transport", () => {
       return Response.json({
         id: 9001,
         member: { id: 149 },
+        objectId: 1892065,
+        type: { id: 4 },
         dateStart: "2026-08-31T12:30:00Z",
         dateEnd: "2026-08-31T21:00:00Z",
         status: { id: 1 },
+        allowScheduleConflictsFlag: false,
+        doneFlag: false,
       });
     };
     const handler = createMcpHandler(
@@ -3161,6 +3165,13 @@ describe("authenticated MCP transport", () => {
     expect(wire.dateEnd).toBe("2026-08-31T21:00:00Z");
     expect((wire.member as { id: number }).id).toBe(149);
     expect((wire.type as { id: number }).id).toBe(4);
+    expect(
+      bodies.some(
+        (body) =>
+          body.method === "GET" &&
+          new URL(body.url).pathname.endsWith("/schedule/entries/9001"),
+      ),
+    ).toBe(true);
     expect(text).toContain('\\"id\\":9001');
   });
 

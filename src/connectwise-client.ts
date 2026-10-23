@@ -569,6 +569,8 @@ const TARGETED_SEARCH_CATALOG_ROUTES = new Set<CatalogRouteId>([
 
 const SERVICE_TICKET_LOOKUP_FIELDS = "id,status";
 const SERVICE_TICKET_UPDATE_SOURCE_FIELDS = "id";
+const SCHEDULE_ENTRY_CREATE_RESULT_FIELDS =
+  "id,member,objectId,type,status,dateStart,dateEnd,doneFlag,name,where,allowScheduleConflictsFlag";
 const SCHEDULE_ENTRY_UPDATE_RESULT_FIELDS =
   "id,member,status,dateStart,dateEnd,doneFlag,name,where,allowScheduleConflictsFlag";
 const SCHEDULE_ENTRY_OWNERSHIP_FIELDS = "id,member";
@@ -3392,7 +3394,10 @@ export function createConnectWiseClient(
         await requestJson("POST", "/schedule/entries", undefined, payload),
       );
       try {
-        assertMappedMember(scheduleEntry, memberId);
+        // Reject an explicitly contradictory receipt before using its ID for a
+        // confirmation read. ConnectWise may omit these fields from a valid
+        // create response, so omitted values are confirmed from stored state.
+        assertOptionalCreatedReference(scheduleEntry, "member", memberId);
         assertOptionalCreatedValue(scheduleEntry, "dateStart", dateStart);
         assertOptionalCreatedValue(scheduleEntry, "dateEnd", dateEnd);
         if (input.objectId !== undefined) {
@@ -3407,7 +3412,60 @@ export function createConnectWiseClient(
       } catch {
         throw new ConnectWiseIndeterminateWriteError();
       }
-      return scheduleEntry;
+
+      const entryId = scheduleEntry.id as number;
+      const confirmCreatedEntry = (
+        record: unknown,
+      ): Record<string, unknown> => {
+        const confirmed = verifiedRecordIdentity(
+          record,
+          entryId,
+          "schedule entry",
+        );
+        assertMappedMember(confirmed, memberId);
+        const referenceId = (field: string): unknown => {
+          const value = confirmed[field];
+          return value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, unknown>).id
+            : undefined;
+        };
+        const matches =
+          confirmed.dateStart === dateStart &&
+          confirmed.dateEnd === dateEnd &&
+          (input.objectId === undefined
+            ? confirmed.objectId === undefined || confirmed.objectId === null
+            : confirmed.objectId === input.objectId) &&
+          referenceId("type") === objectType &&
+          referenceId("status") === (input.statusId ?? 1) &&
+          confirmed.allowScheduleConflictsFlag ===
+            (input.allowConflicts ?? false) &&
+          confirmed.doneFlag === (input.doneFlag ?? false) &&
+          (input.name === undefined || confirmed.name === input.name) &&
+          (input.whereId === undefined ||
+            referenceId("where") === input.whereId);
+        if (!matches) {
+          throw new Error(
+            "ConnectWise created schedule entry could not be confirmed",
+          );
+        }
+        return confirmed;
+      };
+      try {
+        const confirmed = await requestJson(
+          "GET",
+          `/schedule/entries/${entryId}`,
+          { fields: SCHEDULE_ENTRY_CREATE_RESULT_FIELDS },
+          undefined,
+          undefined,
+          undefined,
+          (record) => {
+            confirmCreatedEntry(record);
+          },
+        );
+        return confirmCreatedEntry(confirmed);
+      } catch {
+        throw new ConnectWiseIndeterminateWriteError();
+      }
     },
 
     async updateScheduleEntry(entryId, input): Promise<unknown> {
