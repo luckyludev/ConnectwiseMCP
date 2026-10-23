@@ -2403,7 +2403,6 @@ describe("authenticated MCP transport", () => {
             name: "call_connectwise",
             arguments: {
               route: "system.documents",
-              recordType: "Ticket",
               recordId: 77,
             },
           },
@@ -2413,15 +2412,44 @@ describe("authenticated MCP transport", () => {
     const secondBody = await second.text();
     expect(calls[1]?.params).toEqual(
       expect.objectContaining({
-        recordType: "Ticket",
         recordId: 77,
       }),
     );
+    expect(calls[1]?.params).not.toHaveProperty("recordType");
     expect(secondBody).toContain('\\"fileName\\":\\"Onsite Log.pdf\\"');
     expect(secondBody).not.toContain("must-not-escape");
     expect(secondBody).not.toContain("password");
     expect(secondBody).not.toContain("privateKey");
     expect(secondBody).not.toContain("unexpected");
+
+    const rejectedDocumentType = await handler.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          Host: "localhost",
+          "MCP-Protocol-Version": "2025-06-18",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 530,
+          method: "tools/call",
+          params: {
+            name: "call_connectwise",
+            arguments: {
+              route: "system.documents",
+              recordType: "Company",
+              recordId: 77,
+            },
+          },
+        }),
+      }),
+    );
+    const rejectedDocumentTypeBody = await rejectedDocumentType.text();
+    expect(rejectedDocumentTypeBody).toContain("Invalid arguments");
+    expect(rejectedDocumentTypeBody).not.toContain("Company");
+    expect(calls).toHaveLength(2);
 
     const third = await handler.fetch(
       new Request("http://localhost/mcp", {

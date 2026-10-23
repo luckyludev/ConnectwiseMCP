@@ -526,15 +526,6 @@ function sortByDateStart(value: unknown): unknown {
     .map(({ entry }) => entry);
 }
 
-const CATALOG_DOCUMENT_RECORD_TYPES = new Set([
-  "Ticket",
-  "Project",
-  "Agreement",
-  "Company",
-  "Contact",
-  "Vendor",
-]);
-
 export const CATALOG_ROUTE_IDS = [
   "service.boards.statuses",
   "service.boards.types",
@@ -687,14 +678,14 @@ const CATALOG_ROUTES: Record<CatalogRouteId, CatalogRoute> = {
   "system.documents": {
     path: () => "/system/documents",
     query: (p) => ({
-      recordType: p.recordType ?? "Ticket",
+      recordType: "Ticket",
       recordId: Number(p.recordId),
       fields: TICKET_ATTACHMENT_RELATIONSHIP_FIELDS,
       orderBy: "id asc",
       pageSize: p.pageSize ?? 20,
     }),
     required: ["recordId"],
-    allowed: ["recordId", "recordType", "pageSize"],
+    allowed: ["recordId", "pageSize"],
   },
   "finance.agreements.byName": {
     path: () => "/finance/agreements",
@@ -2828,12 +2819,6 @@ export function createConnectWiseClient(
           throw new Error(`Invalid ${key}`);
         }
       }
-      if (
-        effectiveParams.recordType !== undefined &&
-        !CATALOG_DOCUMENT_RECORD_TYPES.has(String(effectiveParams.recordType))
-      ) {
-        throw new Error("Unsupported document record type");
-      }
       if (effectiveParams.pageSize !== undefined) {
         const catalogPageSize = Number(effectiveParams.pageSize);
         if (TARGETED_SEARCH_CATALOG_ROUTES.has(route as CatalogRouteId)) {
@@ -2883,7 +2868,7 @@ export function createConnectWiseClient(
           if (route === "system.documents") {
             verifiedDocumentList(
               records,
-              String(effectiveParams.recordType ?? "Ticket"),
+              "Ticket",
               Number(effectiveParams.recordId),
             );
             assertAscendingCatalogIds(records, "documents");
@@ -2943,7 +2928,7 @@ export function createConnectWiseClient(
       if (route === "system.documents") {
         return verifiedDocumentList(
           result,
-          String(effectiveParams.recordType ?? "Ticket"),
+          "Ticket",
           Number(effectiveParams.recordId),
         );
       }

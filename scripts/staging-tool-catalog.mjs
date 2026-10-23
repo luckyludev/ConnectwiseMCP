@@ -65,7 +65,7 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   download_ticket_attachment:
     "bfa957cbe67666ba8257e49f9b742a6792c41d327f260fee220606191cf57dbc",
   call_connectwise:
-    "9014fd72f00704345d3ce4fdff2cfd215a17a81b820b0812ef1606bb7a504c61",
+    "ce53778f0fd3c7127be5abbd2ff8f4cc9fae044e7abc1970ef45fe54a7a7f18b",
   create_service_ticket:
     "5767fbe407089a9067ccc9aa2f504540f68d1d049e5ad833e432afef249a3f82",
   update_service_ticket:
