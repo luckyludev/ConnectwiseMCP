@@ -5811,18 +5811,34 @@ describe("ConnectWiseClient", () => {
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
     const client = createConnectWiseClient(credentials, {
       fetcher: async (input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
         calls.push({
-          method: (init as { method?: string } | undefined)?.method ?? "GET",
+          method,
           url: String(input),
           ...((init as { body?: string } | undefined)?.body
             ? { body: JSON.parse((init as { body: string }).body) }
             : {}),
         });
+        if (method === "POST") {
+          // ConnectWise create receipts can omit the target relationship.
+          return Response.json({
+            id: 777,
+            dateStart: "2026-08-31T16:30:00Z",
+            dateEnd: "2026-08-31T21:00:00Z",
+          });
+        }
         return Response.json({
           id: 777,
           member: { id: 149 },
+          objectId: 1892065,
+          type: { id: 4 },
+          status: { id: 1 },
           dateStart: "2026-08-31T16:30:00Z",
           dateEnd: "2026-08-31T21:00:00Z",
+          allowScheduleConflictsFlag: true,
+          doneFlag: false,
+          name: "Test from pi",
         });
       },
     });
@@ -5845,6 +5861,14 @@ describe("ConnectWiseClient", () => {
     expect(body.dateEnd).toBe("2026-08-31T21:00:00Z");
     expect(body.allowScheduleConflictsFlag).toBe(true);
     expect((body.member as { id: number }).id).toBe(149);
+    expect(calls[1]!.method).toBe("GET");
+    const confirmationUrl = new URL(calls[1]!.url);
+    expect(confirmationUrl.pathname).toBe(
+      "/v4_6_release/apis/3.0/schedule/entries/777",
+    );
+    expect(confirmationUrl.searchParams.get("fields")).toBe(
+      "id,member,objectId,type,status,dateStart,dateEnd,doneFlag,name,where,allowScheduleConflictsFlag",
+    );
 
     await expect(
       client.createScheduleEntry({
@@ -5898,6 +5922,40 @@ describe("ConnectWiseClient", () => {
     },
   );
 
+  it("rejects a created schedule entry whose stored target cannot be confirmed", async () => {
+    const methods: string[] = [];
+    const client = createConnectWiseClient(credentials, {
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        methods.push(method);
+        if (method === "POST") {
+          return Response.json({ id: 777, member: { id: 149 } });
+        }
+        return Response.json({
+          id: 777,
+          member: { id: 149 },
+          objectId: 42,
+          type: { id: 4 },
+          status: { id: 1 },
+          dateStart: "2026-08-31T16:30:00Z",
+          dateEnd: "2026-08-31T21:00:00Z",
+          allowScheduleConflictsFlag: false,
+          doneFlag: false,
+        });
+      },
+    });
+
+    await expect(
+      client.createScheduleEntry({
+        objectId: 1892065,
+        dateStart: "2026-08-31T12:30:00-04:00",
+        dateEnd: "2026-08-31T17:00:00-04:00",
+      }),
+    ).rejects.toBeInstanceOf(ConnectWiseIndeterminateWriteError);
+    expect(methods).toEqual(["POST", "GET"]);
+  });
+
   it("rejects malformed or foreign created schedule entries", async () => {
     const invalidResponses: unknown[] = [
       null,
@@ -5905,7 +5963,6 @@ describe("ConnectWiseClient", () => {
       {},
       { id: 0, member: { id: 149 } },
       { id: Number.MAX_SAFE_INTEGER + 1, member: { id: 149 } },
-      { id: 777 },
       { id: 777, member: { id: "149" } },
       { id: 777, member: { id: 150 } },
       { id: 777, member: { id: 149 }, objectId: 42 },
@@ -5980,7 +6037,24 @@ describe("ConnectWiseClient", () => {
   it("logs only allowlisted request metadata", async () => {
     const logs: string[] = [];
     const client = createConnectWiseClient(credentials, {
-      fetcher: async () => Response.json({ id: 777, member: { id: 149 } }),
+      fetcher: async (_input, init) => {
+        const method =
+          (init as { method?: string } | undefined)?.method ?? "GET";
+        return method === "POST"
+          ? Response.json({ id: 777, member: { id: 149 } })
+          : Response.json({
+              id: 777,
+              member: { id: 149 },
+              objectId: 1892065,
+              type: { id: 4 },
+              status: { id: 1 },
+              dateStart: "2026-08-31T12:30:00Z",
+              dateEnd: "2026-08-31T21:00:00Z",
+              allowScheduleConflictsFlag: false,
+              doneFlag: false,
+              name: "Sync test",
+            });
+      },
       log: (message) => logs.push(message),
     });
     await client.createScheduleEntry({
@@ -5990,24 +6064,33 @@ describe("ConnectWiseClient", () => {
       dateEnd: "2026-08-31T17:00:00-04:00",
       name: "Sync test",
     });
-    const logLine = logs.find((l) => l.includes("cw_request"))!;
-    const requestLog = JSON.parse(logLine) as Record<string, unknown>;
-    expect(Object.keys(requestLog).sort()).toEqual([
-      "event",
-      "latencyMs",
-      "method",
-      "outcome",
-      "status",
-    ]);
-    expect(requestLog).toMatchObject({
+    const requestLogs = logs
+      .filter((line) => line.includes("cw_request"))
+      .map((line) => ({
+        line,
+        entry: JSON.parse(line) as Record<string, unknown>,
+      }));
+    expect(requestLogs).toHaveLength(2);
+    for (const { line, entry } of requestLogs) {
+      expect(Object.keys(entry).sort()).toEqual([
+        "event",
+        "latencyMs",
+        "method",
+        "outcome",
+        "status",
+      ]);
+      expect(line).not.toContain("Sync test");
+      expect(line).not.toContain("1892065");
+      expect(line).not.toContain("api-na.myconnectwise.net");
+    }
+    expect(
+      requestLogs.find(({ entry }) => entry.method === "POST")?.entry,
+    ).toMatchObject({
       event: "cw_request",
       method: "POST",
       outcome: "success",
       status: 200,
     });
-    expect(logLine).not.toContain("Sync test");
-    expect(logLine).not.toContain("1892065");
-    expect(logLine).not.toContain("api-na.myconnectwise.net");
   });
 
   it.each([
