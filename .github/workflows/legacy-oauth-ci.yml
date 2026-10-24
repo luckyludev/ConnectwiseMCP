@@ -150,6 +150,14 @@ jobs:
           expected_image_id='${{ steps.cloudflared.outputs.image-id }}'
           test -n "$expected_image_id"
           test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-cloudflared-ci)" = "$expected_image_id"
+      - name: Generate cloudflared rollback image CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: connectwise-legacy-cloudflared-ci
+          format: cyclonedx
+          output: connectwise-legacy-rollback-cloudflared-image.cdx.json
+          scanners: vuln
+          vuln-type: os,library
       - name: Build rollback image
         run: >-
           docker build --tag connectwise-legacy-rollback-ci
@@ -194,6 +202,7 @@ jobs:
           manifest=connectwise-legacy-rollback-image.json
           checksum=connectwise-legacy-rollback-image.sha256
           sbom=connectwise-legacy-rollback-image.cdx.json
+          cloudflared_sbom=connectwise-legacy-rollback-cloudflared-image.cdx.json
           compose=connectwise-legacy-rollback-compose.yml
           git diff --exit-code "$GITHUB_SHA" -- deploy/http-gateway/docker-compose.yml
           cp deploy/http-gateway/docker-compose.yml "$compose"
@@ -212,14 +221,15 @@ jobs:
           archive_sha256=$(sha256sum "$archive" | cut -d ' ' -f 1)
           cloudflared_archive_sha256=$(sha256sum "$cloudflared_archive" | cut -d ' ' -f 1)
           sbom_sha256=$(sha256sum "$sbom" | cut -d ' ' -f 1)
+          cloudflared_sbom_sha256=$(sha256sum "$cloudflared_sbom" | cut -d ' ' -f 1)
           compose_sha256=$(sha256sum "$compose" | cut -d ' ' -f 1)
           printf '%s  %s\n%s  %s\n' \
             "$archive_sha256" "$archive" \
             "$cloudflared_archive_sha256" "$cloudflared_archive" > "$checksum"
-          printf '{"schemaVersion":4,"releaseCommit":"%s","workflowRunId":"%s","imageRepository":"connectwise-legacy-rollback-ci","imageId":"%s","archive":"%s","archiveSha256":"%s","cloudflaredImage":"%s","cloudflaredImageId":"%s","cloudflaredArchive":"%s","cloudflaredArchiveSha256":"%s","sbom":"%s","sbomSha256":"%s","compose":"%s","composeSha256":"%s"}\n' \
+          printf '{"schemaVersion":5,"releaseCommit":"%s","workflowRunId":"%s","imageRepository":"connectwise-legacy-rollback-ci","imageId":"%s","archive":"%s","archiveSha256":"%s","cloudflaredImage":"%s","cloudflaredImageId":"%s","cloudflaredArchive":"%s","cloudflaredArchiveSha256":"%s","sbom":"%s","sbomSha256":"%s","cloudflaredSbom":"%s","cloudflaredSbomSha256":"%s","compose":"%s","composeSha256":"%s"}\n' \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" \
             "$cloudflared_image" "$cloudflared_image_id" "$cloudflared_archive" "$cloudflared_archive_sha256" \
-            "$sbom" "$sbom_sha256" "$compose" "$compose_sha256" > "$manifest"
+            "$sbom" "$sbom_sha256" "$cloudflared_sbom" "$cloudflared_sbom_sha256" "$compose" "$compose_sha256" > "$manifest"
       - name: Verify packaged rollback artifact bindings and checksum
         run: >-
           python deploy/http-gateway/tests/verify_rollback_artifact.py
@@ -253,6 +263,7 @@ jobs:
             connectwise-legacy-rollback-image.sha256
             connectwise-legacy-rollback-image.json
             connectwise-legacy-rollback-image.cdx.json
+            connectwise-legacy-rollback-cloudflared-image.cdx.json
             connectwise-legacy-rollback-compose.yml
           if-no-files-found: error
           compression-level: 0
@@ -293,4 +304,5 @@ jobs:
             release-evidence/rollback/connectwise-legacy-rollback-image.sha256
             release-evidence/rollback/connectwise-legacy-rollback-image.json
             release-evidence/rollback/connectwise-legacy-rollback-image.cdx.json
+            release-evidence/rollback/connectwise-legacy-rollback-cloudflared-image.cdx.json
             release-evidence/rollback/connectwise-legacy-rollback-compose.yml

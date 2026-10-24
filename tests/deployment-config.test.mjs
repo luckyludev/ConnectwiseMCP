@@ -719,6 +719,9 @@ describe("legacy rollback image security", () => {
         "utf8",
       ),
     ]);
+    const cloudflaredSbomOffset = workflow.indexOf(
+      "- name: Generate cloudflared rollback image CycloneDX SBOM",
+    );
     const buildOffset = workflow.indexOf("- name: Build rollback image");
     const scanOffset = workflow.indexOf(
       "- name: Scan rollback image for fixable severe vulnerabilities",
@@ -775,10 +778,12 @@ describe("legacy rollback image security", () => {
       "connectwise-legacy-rollback-image.sha256",
       "connectwise-legacy-rollback-image.json",
       "connectwise-legacy-rollback-image.cdx.json",
+      "connectwise-legacy-rollback-cloudflared-image.cdx.json",
       "connectwise-legacy-rollback-compose.yml",
     ];
 
-    expect(buildOffset).toBeGreaterThan(-1);
+    expect(cloudflaredSbomOffset).toBeGreaterThan(-1);
+    expect(buildOffset).toBeGreaterThan(cloudflaredSbomOffset);
     expect(scanOffset).toBeGreaterThan(buildOffset);
     expect(sbomOffset).toBeGreaterThan(scanOffset);
     expect(contentValidationOffset).toBeGreaterThan(sbomOffset);
@@ -811,6 +816,12 @@ describe("legacy rollback image security", () => {
     expect(workflow).toContain("format: cyclonedx");
     expect(workflow).toContain(
       "output: connectwise-legacy-rollback-image.cdx.json",
+    );
+    expect(workflow).toContain(
+      "output: connectwise-legacy-rollback-cloudflared-image.cdx.json",
+    );
+    expect(workflow).toContain(
+      "cloudflared_sbom_sha256=$(sha256sum \"$cloudflared_sbom\" | cut -d ' ' -f 1)",
     );
     expect(workflow).toContain(
       "sbom_sha256=$(sha256sum \"$sbom\" | cut -d ' ' -f 1)",
@@ -850,7 +861,7 @@ describe("legacy rollback image security", () => {
     );
     expect(workflow).toContain("printf '%s  %s\\n%s  %s\\n' \\");
     for (const manifestBinding of [
-      '"schemaVersion":4',
+      '"schemaVersion":5',
       '"releaseCommit":"%s"',
       '"workflowRunId":"%s"',
       '"imageRepository":"connectwise-legacy-rollback-ci"',
@@ -863,11 +874,13 @@ describe("legacy rollback image security", () => {
       '"cloudflaredArchiveSha256":"%s"',
       '"sbom":"%s"',
       '"sbomSha256":"%s"',
+      '"cloudflaredSbom":"%s"',
+      '"cloudflaredSbomSha256":"%s"',
       '"compose":"%s"',
       '"composeSha256":"%s"',
       '"$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" \\',
       '"$cloudflared_image" "$cloudflared_image_id" "$cloudflared_archive" "$cloudflared_archive_sha256" \\',
-      '"$sbom" "$sbom_sha256" "$compose" "$compose_sha256" > "$manifest"',
+      '"$sbom" "$sbom_sha256" "$cloudflared_sbom" "$cloudflared_sbom_sha256" "$compose" "$compose_sha256" > "$manifest"',
     ]) {
       expect(workflow).toContain(manifestBinding);
     }
@@ -1829,7 +1842,7 @@ describe("staging deployment configuration", () => {
     expect(localVerificationOffset).toBeGreaterThan(provenanceOffset);
     expect(imageLoadOffset).toBeGreaterThan(localVerificationOffset);
     expect(runbook).toContain(
-      "for artifact_file in \\\n  connectwise-legacy-rollback-image.tar.gz \\\n  connectwise-legacy-rollback-cloudflared-image.tar.gz \\\n  connectwise-legacy-rollback-image.sha256 \\\n  connectwise-legacy-rollback-image.json \\\n  connectwise-legacy-rollback-image.cdx.json \\\n  connectwise-legacy-rollback-compose.yml\ndo",
+      "for artifact_file in \\\n  connectwise-legacy-rollback-image.tar.gz \\\n  connectwise-legacy-rollback-cloudflared-image.tar.gz \\\n  connectwise-legacy-rollback-image.sha256 \\\n  connectwise-legacy-rollback-image.json \\\n  connectwise-legacy-rollback-image.cdx.json \\\n  connectwise-legacy-rollback-cloudflared-image.cdx.json \\\n  connectwise-legacy-rollback-compose.yml\ndo",
     );
     expect(runbook.match(/^\s*docker compose \\$/gmu)).toHaveLength(7);
     expect(
