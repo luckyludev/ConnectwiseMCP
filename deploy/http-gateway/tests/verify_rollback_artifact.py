@@ -272,6 +272,8 @@ def _verify_sbom(
     directory_descriptor: int,
     name: str,
     expected_sha256: str,
+    expected_image_id: str,
+    expected_repo_digest: str | None,
     label: str,
 ) -> None:
     try:
@@ -303,6 +305,39 @@ def _verify_sbom(
         )
     ):
         raise ValueError(f"{label} must be a valid CycloneDX component inventory")
+
+    metadata = sbom.get("metadata")
+    root = metadata.get("component") if isinstance(metadata, dict) else None
+    properties = root.get("properties") if isinstance(root, dict) else None
+    if (
+        not isinstance(root, dict)
+        or root.get("type") != "container"
+        or not isinstance(properties, list)
+        or any(
+            not isinstance(prop, dict)
+            or type(prop.get("name")) is not str
+            or type(prop.get("value")) is not str
+            for prop in properties
+        )
+    ):
+        raise ValueError(f"{label} must identify a scanned container image")
+
+    image_ids = [
+        prop["value"]
+        for prop in properties
+        if prop["name"] == "aquasecurity:trivy:ImageID"
+    ]
+    if image_ids != [expected_image_id]:
+        raise ValueError(f"{label} image ID does not match the manifest")
+
+    if expected_repo_digest is not None:
+        repo_digests = [
+            prop["value"]
+            for prop in properties
+            if prop["name"] == "aquasecurity:trivy:RepoDigest"
+        ]
+        if repo_digests != [expected_repo_digest]:
+            raise ValueError(f"{label} repository digest does not match the manifest")
 
 
 def _verify_rollback_artifact(
@@ -442,12 +477,16 @@ def _verify_rollback_artifact(
             directory_descriptor,
             SBOM_NAME,
             sbom_sha256,
+            image_id,
+            None,
             "Rollback image SBOM",
         )
         _verify_sbom(
             directory_descriptor,
             CLOUDFLARED_SBOM_NAME,
             cloudflared_sbom_sha256,
+            cloudflared_image_id,
+            cloudflared_image.replace(":latest@", "@", 1),
             "Cloudflared image SBOM",
         )
 
