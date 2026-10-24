@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 ARCHIVE_NAME = "connectwise-legacy-rollback-image.tar.gz"
+CLOUDFLARED_ARCHIVE_NAME = "connectwise-legacy-rollback-cloudflared-image.tar.gz"
 CHECKSUM_NAME = "connectwise-legacy-rollback-image.sha256"
 MANIFEST_NAME = "connectwise-legacy-rollback-image.json"
 SBOM_NAME = "connectwise-legacy-rollback-image.cdx.json"
@@ -21,6 +22,9 @@ COMPOSE_NAME = "connectwise-legacy-rollback-compose.yml"
 MAX_SBOM_BYTES = 16 * 1024 * 1024
 MAX_COMPOSE_BYTES = 256 * 1024
 IMAGE_REPOSITORY = "connectwise-legacy-rollback-ci"
+CLOUDFLARED_IMAGE_RE = re.compile(
+    r"cloudflare/cloudflared:latest@sha256:[0-9a-f]{64}"
+)
 MANIFEST_KEYS = {
     "schemaVersion",
     "releaseCommit",
@@ -29,6 +33,10 @@ MANIFEST_KEYS = {
     "imageId",
     "archive",
     "archiveSha256",
+    "cloudflaredImage",
+    "cloudflaredImageId",
+    "cloudflaredArchive",
+    "cloudflaredArchiveSha256",
     "sbom",
     "sbomSha256",
     "compose",
@@ -190,6 +198,30 @@ def _write_private_verified_copy(
         _write_all(descriptor, content, label)
 
 
+def _verify_archive(
+    directory_descriptor: int,
+    name: str,
+    expected_sha256: str,
+    verified_output: Path | None,
+    label: str,
+    created_outputs: set[Path],
+) -> None:
+    digest = hashlib.sha256()
+    with _regular_file(directory_descriptor, name) as archive_file:
+        if verified_output is None:
+            for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        else:
+            with _private_verified_output(
+                verified_output, label, created_outputs
+            ) as archive_output:
+                for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    _write_all(archive_output, chunk, label)
+    if digest.hexdigest() != expected_sha256:
+        raise ValueError(f"{label.capitalize()} SHA-256 mismatch")
+
+
 def _verify_rollback_artifact(
     directory: Path,
     expected_release_commit: str,
@@ -197,6 +229,9 @@ def _verify_rollback_artifact(
     verified_compose_output: Path | None,
     verified_archive_output: Path | None,
     verified_image_id_output: Path | None,
+    verified_cloudflared_archive_output: Path | None,
+    verified_cloudflared_image_id_output: Path | None,
+    verified_cloudflared_image_output: Path | None,
     created_outputs: set[Path],
 ) -> dict[str, Any]:
     if not COMMIT_RE.fullmatch(expected_release_commit):
@@ -214,8 +249,8 @@ def _verify_rollback_artifact(
             raise ValueError("Manifest must be valid UTF-8 JSON") from exc
         if not isinstance(manifest, dict) or set(manifest) != MANIFEST_KEYS:
             raise ValueError("Manifest must contain exactly the required fields")
-        if type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 3:
-            raise ValueError("Manifest schemaVersion must be 3")
+        if type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 4:
+            raise ValueError("Manifest schemaVersion must be 4")
 
         _require_exact_string(
             manifest["releaseCommit"], expected_release_commit, "releaseCommit"
@@ -227,6 +262,11 @@ def _verify_rollback_artifact(
             manifest["imageRepository"], IMAGE_REPOSITORY, "imageRepository"
         )
         _require_exact_string(manifest["archive"], ARCHIVE_NAME, "archive")
+        _require_exact_string(
+            manifest["cloudflaredArchive"],
+            CLOUDFLARED_ARCHIVE_NAME,
+            "cloudflaredArchive",
+        )
         _require_exact_string(manifest["sbom"], SBOM_NAME, "sbom")
         _require_exact_string(manifest["compose"], COMPOSE_NAME, "compose")
 
@@ -235,10 +275,34 @@ def _verify_rollback_artifact(
             raise ValueError(
                 "Manifest imageId must be a lowercase sha256 Docker image ID"
             )
+        cloudflared_image = manifest["cloudflaredImage"]
+        if (
+            type(cloudflared_image) is not str
+            or not CLOUDFLARED_IMAGE_RE.fullmatch(cloudflared_image)
+        ):
+            raise ValueError(
+                "Manifest cloudflaredImage must be the digest-pinned Cloudflare image"
+            )
+        cloudflared_image_id = manifest["cloudflaredImageId"]
+        if (
+            type(cloudflared_image_id) is not str
+            or not IMAGE_ID_RE.fullmatch(cloudflared_image_id)
+        ):
+            raise ValueError(
+                "Manifest cloudflaredImageId must be a lowercase sha256 Docker image ID"
+            )
         archive_sha256 = manifest["archiveSha256"]
         if type(archive_sha256) is not str or not SHA256_RE.fullmatch(archive_sha256):
             raise ValueError(
                 "Manifest archiveSha256 must be a lowercase SHA-256 digest"
+            )
+        cloudflared_archive_sha256 = manifest["cloudflaredArchiveSha256"]
+        if (
+            type(cloudflared_archive_sha256) is not str
+            or not SHA256_RE.fullmatch(cloudflared_archive_sha256)
+        ):
+            raise ValueError(
+                "Manifest cloudflaredArchiveSha256 must be a lowercase SHA-256 digest"
             )
         sbom_sha256 = manifest["sbomSha256"]
         if type(sbom_sha256) is not str or not SHA256_RE.fullmatch(sbom_sha256):
@@ -254,28 +318,31 @@ def _verify_rollback_artifact(
                 checksum_text = checksum_file.read().decode("ascii")
         except UnicodeDecodeError as exc:
             raise ValueError("Checksum file must be ASCII") from exc
-        expected_checksum = f"{archive_sha256}  {ARCHIVE_NAME}\n"
+        expected_checksum = (
+            f"{archive_sha256}  {ARCHIVE_NAME}\n"
+            f"{cloudflared_archive_sha256}  {CLOUDFLARED_ARCHIVE_NAME}\n"
+        )
         if checksum_text != expected_checksum:
             raise ValueError(
-                "Checksum file does not exactly match the manifest and archive name"
+                "Checksum file does not exactly match the manifest and archive names"
             )
 
-        digest = hashlib.sha256()
-        with _regular_file(directory_descriptor, ARCHIVE_NAME) as archive_file:
-            if verified_archive_output is None:
-                for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
-                    digest.update(chunk)
-            else:
-                with _private_verified_output(
-                    verified_archive_output, "archive", created_outputs
-                ) as archive_output:
-                    for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
-                        digest.update(chunk)
-                        _write_all(archive_output, chunk, "archive")
-                    if digest.hexdigest() != archive_sha256:
-                        raise ValueError("Rollback image archive SHA-256 mismatch")
-        if digest.hexdigest() != archive_sha256:
-            raise ValueError("Rollback image archive SHA-256 mismatch")
+        _verify_archive(
+            directory_descriptor,
+            ARCHIVE_NAME,
+            archive_sha256,
+            verified_archive_output,
+            "rollback image archive",
+            created_outputs,
+        )
+        _verify_archive(
+            directory_descriptor,
+            CLOUDFLARED_ARCHIVE_NAME,
+            cloudflared_archive_sha256,
+            verified_cloudflared_archive_output,
+            "cloudflared image archive",
+            created_outputs,
+        )
 
         try:
             with _regular_file(directory_descriptor, SBOM_NAME) as sbom_file:
@@ -326,6 +393,20 @@ def _verify_rollback_artifact(
                 "image ID",
                 created_outputs,
             )
+        if verified_cloudflared_image_id_output is not None:
+            _write_private_verified_copy(
+                verified_cloudflared_image_id_output,
+                f"{cloudflared_image_id}\n".encode("ascii"),
+                "cloudflared image ID",
+                created_outputs,
+            )
+        if verified_cloudflared_image_output is not None:
+            _write_private_verified_copy(
+                verified_cloudflared_image_output,
+                f"{cloudflared_image}\n".encode("ascii"),
+                "cloudflared image reference",
+                created_outputs,
+            )
         return manifest
 
 
@@ -336,6 +417,9 @@ def verify_rollback_artifact(
     verified_compose_output: Path | None = None,
     verified_archive_output: Path | None = None,
     verified_image_id_output: Path | None = None,
+    verified_cloudflared_archive_output: Path | None = None,
+    verified_cloudflared_image_id_output: Path | None = None,
+    verified_cloudflared_image_output: Path | None = None,
 ) -> dict[str, Any]:
     created_outputs: set[Path] = set()
     try:
@@ -346,6 +430,9 @@ def verify_rollback_artifact(
             verified_compose_output,
             verified_archive_output,
             verified_image_id_output,
+            verified_cloudflared_archive_output,
+            verified_cloudflared_image_id_output,
+            verified_cloudflared_image_output,
             created_outputs,
         )
     except BaseException:
@@ -379,6 +466,21 @@ def main() -> None:
         type=Path,
         help="write the verified manifest image ID once to a new private file",
     )
+    parser.add_argument(
+        "--verified-cloudflared-archive-output",
+        type=Path,
+        help="write the descriptor-bound cloudflared archive once to a new private file",
+    )
+    parser.add_argument(
+        "--verified-cloudflared-image-id-output",
+        type=Path,
+        help="write the verified cloudflared image ID once to a new private file",
+    )
+    parser.add_argument(
+        "--verified-cloudflared-image-output",
+        type=Path,
+        help="write the verified cloudflared image reference once to a new private file",
+    )
     args = parser.parse_args()
     try:
         verify_rollback_artifact(
@@ -388,6 +490,9 @@ def main() -> None:
             args.verified_compose_output,
             args.verified_archive_output,
             args.verified_image_id_output,
+            args.verified_cloudflared_archive_output,
+            args.verified_cloudflared_image_id_output,
+            args.verified_cloudflared_image_output,
         )
     except ValueError as exc:
         raise SystemExit(f"rollback artifact verification failed: {exc}") from exc
