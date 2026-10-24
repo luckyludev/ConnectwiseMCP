@@ -698,6 +698,41 @@ describe("legacy rollback image security", () => {
     );
   });
 
+  it("blocks packaging when the retained cloudflared image has fixable severe vulnerabilities", async () => {
+    const workflow = await readFile(
+      new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+      "utf8",
+    );
+    const pullOffset = workflow.indexOf('docker pull "$cloudflared_image"');
+    const tagOffset = workflow.indexOf(
+      'docker tag "$cloudflared_image" connectwise-legacy-cloudflared-ci',
+    );
+    const scanOffset = workflow.indexOf(
+      "- name: Scan cloudflared rollback image for fixable severe vulnerabilities",
+    );
+    const buildOffset = workflow.indexOf("- name: Build rollback image");
+    const packageOffset = workflow.indexOf(
+      "- name: Package the verified rollback image",
+    );
+    const scanStep = workflow.slice(scanOffset, buildOffset);
+
+    expect(pullOffset).toBeGreaterThan(-1);
+    expect(tagOffset).toBeGreaterThan(pullOffset);
+    expect(scanOffset).toBeGreaterThan(tagOffset);
+    expect(buildOffset).toBeGreaterThan(scanOffset);
+    expect(packageOffset).toBeGreaterThan(buildOffset);
+    expect(scanStep).toContain(
+      "uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
+    );
+    expect(scanStep).toContain("image-ref: connectwise-legacy-cloudflared-ci");
+    expect(scanStep).toContain("format: table");
+    expect(scanStep).toContain("scanners: vuln");
+    expect(scanStep).toContain("vuln-type: os,library");
+    expect(scanStep).toContain("severity: HIGH,CRITICAL");
+    expect(scanStep).toContain("ignore-unfixed: true");
+    expect(scanStep).toContain('exit-code: "1"');
+  });
+
   it("fails CI on severe findings and retains the exact smoke-tested image", async () => {
     const [workflow, dockerfile, compose] = await Promise.all([
       readFile(

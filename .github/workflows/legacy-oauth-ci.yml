@@ -131,6 +131,17 @@ jobs:
           docker pull "$cloudflared_image"
           docker run --rm --cap-drop ALL --security-opt no-new-privileges:true --read-only "$cloudflared_image" --version
           bash deploy/http-gateway/tests/smoke_cloudflared_read_only.sh "$cloudflared_image"
+          docker tag "$cloudflared_image" connectwise-legacy-cloudflared-ci
+      - name: Scan cloudflared rollback image for fixable severe vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: connectwise-legacy-cloudflared-ci
+          format: table
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
       - name: Build rollback image
         run: >-
           docker build --tag connectwise-legacy-rollback-ci
