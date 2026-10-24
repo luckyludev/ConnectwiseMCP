@@ -198,6 +198,49 @@ def _write_private_verified_copy(
         _write_all(descriptor, content, label)
 
 
+def _verify_compose_cloudflared_image(
+    compose_bytes: bytes, expected_image: str
+) -> None:
+    try:
+        compose_lines = compose_bytes.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError("Compose file must be valid UTF-8") from exc
+
+    services_starts = [
+        index for index, line in enumerate(compose_lines) if line == "services:"
+    ]
+    if len(services_starts) != 1:
+        raise ValueError("Compose file must define exactly one top-level services mapping")
+
+    services_start = services_starts[0]
+    services_end = len(compose_lines)
+    for index, line in enumerate(compose_lines[services_start + 1 :], services_start + 1):
+        if line and not line.startswith((" ", "#")):
+            services_end = index
+            break
+
+    service_starts = [
+        index
+        for index, line in enumerate(compose_lines[services_start + 1 : services_end], services_start + 1)
+        if line == "  cloudflared:"
+    ]
+    if len(service_starts) != 1:
+        raise ValueError("Compose services must define exactly one cloudflared service")
+
+    image_values: list[str] = []
+    for line in compose_lines[service_starts[0] + 1 : services_end]:
+        if line.startswith("  ") and not line.startswith("    "):
+            break
+        if line.startswith("    image:"):
+            image_values.append(line.removeprefix("    image:").strip())
+
+    expected_value = f"${{CLOUDFLARED_IMAGE:-{expected_image}}}"
+    if image_values != [expected_value]:
+        raise ValueError(
+            "Compose cloudflared image default does not match the manifest reference"
+        )
+
+
 def _verify_archive(
     directory_descriptor: int,
     name: str,
@@ -382,6 +425,7 @@ def _verify_rollback_artifact(
             raise ValueError("Compose file must not be empty")
         if hashlib.sha256(compose_bytes).hexdigest() != compose_sha256:
             raise ValueError("Rollback Compose file SHA-256 mismatch")
+        _verify_compose_cloudflared_image(compose_bytes, cloudflared_image)
         if verified_compose_output is not None:
             _write_private_verified_copy(
                 verified_compose_output, compose_bytes, "Compose", created_outputs
