@@ -107,6 +107,7 @@ jobs:
             fi
           done
       - name: Validate rollback compose configuration and secret isolation
+        id: cloudflared
         env:
           MCP_STATIC_TOKEN: compose-canary-mcp-static-token
           SERVER_URL: compose-canary-server-url
@@ -124,6 +125,7 @@ jobs:
           AZURE_SCOPES: compose-canary-azure-scopes
           CLOUDFLARE_TUNNEL_TOKEN: compose-canary-cloudflare-tunnel-token
         run: |
+          set -euo pipefail
           cp deploy/http-gateway/.env.example deploy/http-gateway/.env
           docker compose --env-file deploy/http-gateway/.env --file deploy/http-gateway/docker-compose.yml config --format json > /tmp/rollback-compose.json
           python deploy/http-gateway/tests/verify_compose_secret_isolation.py /tmp/rollback-compose.json --verify-canaries
@@ -131,7 +133,10 @@ jobs:
           docker pull "$cloudflared_image"
           docker run --rm --cap-drop ALL --security-opt no-new-privileges:true --read-only "$cloudflared_image" --version
           bash deploy/http-gateway/tests/smoke_cloudflared_read_only.sh "$cloudflared_image"
+          cloudflared_image_id=$(docker image inspect --format '{{.Id}}' "$cloudflared_image")
           docker tag "$cloudflared_image" connectwise-legacy-cloudflared-ci
+          test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-cloudflared-ci)" = "$cloudflared_image_id"
+          printf 'image-id=%s\n' "$cloudflared_image_id" >> "$GITHUB_OUTPUT"
       - name: Scan cloudflared rollback image for fixable severe vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -142,6 +147,13 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+      - name: Verify scanned cloudflared image identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_image_id='${{ steps.cloudflared.outputs.image-id }}'
+          test -n "$expected_image_id"
+          test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-cloudflared-ci)" = "$expected_image_id"
       - name: Build rollback image
         run: >-
           docker build --tag connectwise-legacy-rollback-ci
@@ -193,9 +205,12 @@ jobs:
           python deploy/http-gateway/tests/verify_compose_secret_isolation.py /tmp/packaged-rollback-compose.json
           cloudflared_image="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["services"]["cloudflared"]["image"])' /tmp/packaged-rollback-compose.json)"
           cloudflared_repository=connectwise-legacy-cloudflared-ci
+          expected_cloudflared_image_id='${{ steps.cloudflared.outputs.image-id }}'
           image_id=$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)
-          docker tag "$cloudflared_image" "$cloudflared_repository"
-          cloudflared_image_id=$(docker image inspect --format '{{.Id}}' "$cloudflared_repository")
+          test -n "$expected_cloudflared_image_id"
+          test "$(docker image inspect --format '{{.Id}}' "$cloudflared_image")" = "$expected_cloudflared_image_id"
+          test "$(docker image inspect --format '{{.Id}}' "$cloudflared_repository")" = "$expected_cloudflared_image_id"
+          cloudflared_image_id=$expected_cloudflared_image_id
           docker save connectwise-legacy-rollback-ci | gzip -n -9 > "$archive"
           docker save "$cloudflared_repository" | gzip -n -9 > "$cloudflared_archive"
           archive_sha256=$(sha256sum "$archive" | cut -d ' ' -f 1)

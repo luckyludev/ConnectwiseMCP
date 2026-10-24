@@ -707,19 +707,36 @@ describe("legacy rollback image security", () => {
     const tagOffset = workflow.indexOf(
       'docker tag "$cloudflared_image" connectwise-legacy-cloudflared-ci',
     );
+    const captureOffset = workflow.indexOf(
+      "cloudflared_image_id=$(docker image inspect --format '{{.Id}}' \"$cloudflared_image\")",
+    );
+    const outputOffset = workflow.indexOf(
+      'printf \'image-id=%s\\n\' "$cloudflared_image_id" >> "$GITHUB_OUTPUT"',
+    );
     const scanOffset = workflow.indexOf(
       "- name: Scan cloudflared rollback image for fixable severe vulnerabilities",
+    );
+    const identityOffset = workflow.indexOf(
+      "- name: Verify scanned cloudflared image identity",
     );
     const buildOffset = workflow.indexOf("- name: Build rollback image");
     const packageOffset = workflow.indexOf(
       "- name: Package the verified rollback image",
     );
-    const scanStep = workflow.slice(scanOffset, buildOffset);
+    const verifyArtifactOffset = workflow.indexOf(
+      "- name: Verify packaged rollback artifact bindings and checksum",
+    );
+    const scanStep = workflow.slice(scanOffset, identityOffset);
+    const identityStep = workflow.slice(identityOffset, buildOffset);
+    const packageStep = workflow.slice(packageOffset, verifyArtifactOffset);
 
     expect(pullOffset).toBeGreaterThan(-1);
-    expect(tagOffset).toBeGreaterThan(pullOffset);
-    expect(scanOffset).toBeGreaterThan(tagOffset);
-    expect(buildOffset).toBeGreaterThan(scanOffset);
+    expect(captureOffset).toBeGreaterThan(pullOffset);
+    expect(tagOffset).toBeGreaterThan(captureOffset);
+    expect(outputOffset).toBeGreaterThan(tagOffset);
+    expect(scanOffset).toBeGreaterThan(outputOffset);
+    expect(identityOffset).toBeGreaterThan(scanOffset);
+    expect(buildOffset).toBeGreaterThan(identityOffset);
     expect(packageOffset).toBeGreaterThan(buildOffset);
     expect(scanStep).toContain(
       "uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
@@ -731,6 +748,25 @@ describe("legacy rollback image security", () => {
     expect(scanStep).toContain("severity: HIGH,CRITICAL");
     expect(scanStep).toContain("ignore-unfixed: true");
     expect(scanStep).toContain('exit-code: "1"');
+    expect(identityStep).toContain(
+      "expected_image_id='${{ steps.cloudflared.outputs.image-id }}'",
+    );
+    expect(identityStep).toContain('test -n "$expected_image_id"');
+    expect(identityStep).toContain(
+      'test "$(docker image inspect --format \'{{.Id}}\' connectwise-legacy-cloudflared-ci)" = "$expected_image_id"',
+    );
+    expect(packageStep).toContain(
+      "expected_cloudflared_image_id='${{ steps.cloudflared.outputs.image-id }}'",
+    );
+    expect(packageStep).toContain(
+      'test "$(docker image inspect --format \'{{.Id}}\' "$cloudflared_image")" = "$expected_cloudflared_image_id"',
+    );
+    expect(packageStep).toContain(
+      'test "$(docker image inspect --format \'{{.Id}}\' "$cloudflared_repository")" = "$expected_cloudflared_image_id"',
+    );
+    expect(packageStep).toContain(
+      "cloudflared_image_id=$expected_cloudflared_image_id",
+    );
   });
 
   it("fails CI on severe findings and retains the exact smoke-tested image", async () => {
@@ -863,16 +899,13 @@ describe("legacy rollback image security", () => {
       "docker save connectwise-legacy-rollback-ci | gzip -n -9",
     );
     expect(workflow).toContain(
-      'docker tag "$cloudflared_image" "$cloudflared_repository"',
-    );
-    expect(workflow).toContain(
       'docker save "$cloudflared_repository" | gzip -n -9 > "$cloudflared_archive"',
     );
     expect(workflow).toContain(
       "image_id=$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)",
     );
     expect(workflow).toContain(
-      "cloudflared_image_id=$(docker image inspect --format '{{.Id}}' \"$cloudflared_repository\")",
+      "cloudflared_image_id=$expected_cloudflared_image_id",
     );
     expect(workflow).toContain(
       "archive_sha256=$(sha256sum \"$archive\" | cut -d ' ' -f 1)",
