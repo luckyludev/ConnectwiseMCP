@@ -47,7 +47,11 @@ def artifact_bundle(tmp_path):
     sbom_digest = hashlib.sha256(sbom.read_bytes()).hexdigest()
     compose = tmp_path / COMPOSE_NAME
     compose.write_text(
-        'services:\n  mcp-gateway:\n    image: "${MCP_GATEWAY_IMAGE}"\n',
+        "services:\n"
+        "  mcp-gateway:\n"
+        '    image: "${MCP_GATEWAY_IMAGE}"\n'
+        "  cloudflared:\n"
+        f"    image: ${{CLOUDFLARED_IMAGE:-{CLOUDFLARED_IMAGE}}}\n",
         encoding="utf-8",
     )
     compose_digest = hashlib.sha256(compose.read_bytes()).hexdigest()
@@ -83,6 +87,13 @@ def write_manifest(tmp_path, manifest):
     (tmp_path / MANIFEST_NAME).write_text(
         json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8"
     )
+
+
+def write_bound_compose(tmp_path, manifest, content):
+    compose = tmp_path / COMPOSE_NAME
+    compose.write_text(content, encoding="utf-8")
+    manifest["composeSha256"] = hashlib.sha256(compose.read_bytes()).hexdigest()
+    write_manifest(tmp_path, manifest)
 
 
 def test_accepts_exact_bound_artifact_bundle(tmp_path):
@@ -501,6 +512,74 @@ def test_rejects_compose_digest_mismatch(tmp_path):
     (tmp_path / COMPOSE_NAME).write_text("services: {}\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="Compose file SHA-256 mismatch"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+def test_rejects_manifest_cloudflared_image_not_bound_to_compose(tmp_path):
+    manifest = artifact_bundle(tmp_path)
+    manifest["cloudflaredImage"] = "cloudflare/cloudflared:latest@sha256:" + "e" * 64
+    write_manifest(tmp_path, manifest)
+
+    with pytest.raises(ValueError, match="image default does not match"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+def test_rejects_compose_without_cloudflared_service(tmp_path):
+    manifest = artifact_bundle(tmp_path)
+    write_bound_compose(
+        tmp_path,
+        manifest,
+        "services:\n  mcp-gateway:\n    image: rollback\n",
+    )
+
+    with pytest.raises(ValueError, match="exactly one cloudflared service"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+def test_rejects_cloudflared_decoy_outside_services(tmp_path):
+    manifest = artifact_bundle(tmp_path)
+    write_bound_compose(
+        tmp_path,
+        manifest,
+        "x-decoy:\n"
+        "  cloudflared:\n"
+        f"    image: ${{CLOUDFLARED_IMAGE:-{CLOUDFLARED_IMAGE}}}\n"
+        "services:\n"
+        "  mcp-gateway:\n"
+        "    image: rollback\n",
+    )
+
+    with pytest.raises(ValueError, match="exactly one cloudflared service"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+def test_checked_in_compose_binds_cloudflared_manifest_reference():
+    compose = verifier.Path(__file__).parents[1] / "docker-compose.yml"
+    checked_in_image = (
+        "cloudflare/cloudflared:latest@sha256:"
+        "b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4"
+    )
+
+    verifier._verify_compose_cloudflared_image(compose.read_bytes(), checked_in_image)
+
+
+@pytest.mark.parametrize(
+    "decoy",
+    [
+        f"  # cloudflared:\n  #   image: ${{CLOUDFLARED_IMAGE:-{CLOUDFLARED_IMAGE}}}\n",
+        f"  other:\n    image: ${{CLOUDFLARED_IMAGE:-{CLOUDFLARED_IMAGE}}}\n",
+        f"  cloudflared:\n    command: echo ${{CLOUDFLARED_IMAGE:-{CLOUDFLARED_IMAGE}}}\n",
+    ],
+)
+def test_rejects_cloudflared_reference_only_in_comment_or_unrelated_field(
+    tmp_path, decoy
+):
+    manifest = artifact_bundle(tmp_path)
+    write_bound_compose(tmp_path, manifest, f"services:\n{decoy}")
+
+    with pytest.raises(
+        ValueError, match="cloudflared service|image default does not match"
+    ):
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
 
 
