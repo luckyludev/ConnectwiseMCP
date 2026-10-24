@@ -167,6 +167,7 @@ jobs:
         run: |
           set -euo pipefail
           archive=connectwise-legacy-rollback-image.tar.gz
+          cloudflared_archive=connectwise-legacy-rollback-cloudflared-image.tar.gz
           manifest=connectwise-legacy-rollback-image.json
           checksum=connectwise-legacy-rollback-image.sha256
           sbom=connectwise-legacy-rollback-image.cdx.json
@@ -175,26 +176,44 @@ jobs:
           cp deploy/http-gateway/docker-compose.yml "$compose"
           docker compose --env-file deploy/http-gateway/.env --file "$compose" --project-directory deploy/http-gateway config --format json > /tmp/packaged-rollback-compose.json
           python deploy/http-gateway/tests/verify_compose_secret_isolation.py /tmp/packaged-rollback-compose.json
+          cloudflared_image="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["services"]["cloudflared"]["image"])' /tmp/packaged-rollback-compose.json)"
+          cloudflared_repository=connectwise-legacy-cloudflared-ci
           image_id=$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)
+          docker tag "$cloudflared_image" "$cloudflared_repository"
+          cloudflared_image_id=$(docker image inspect --format '{{.Id}}' "$cloudflared_repository")
           docker save connectwise-legacy-rollback-ci | gzip -n -9 > "$archive"
+          docker save "$cloudflared_repository" | gzip -n -9 > "$cloudflared_archive"
           archive_sha256=$(sha256sum "$archive" | cut -d ' ' -f 1)
+          cloudflared_archive_sha256=$(sha256sum "$cloudflared_archive" | cut -d ' ' -f 1)
           sbom_sha256=$(sha256sum "$sbom" | cut -d ' ' -f 1)
           compose_sha256=$(sha256sum "$compose" | cut -d ' ' -f 1)
-          printf '%s  %s\n' "$archive_sha256" "$archive" > "$checksum"
-          printf '{"schemaVersion":3,"releaseCommit":"%s","workflowRunId":"%s","imageRepository":"connectwise-legacy-rollback-ci","imageId":"%s","archive":"%s","archiveSha256":"%s","sbom":"%s","sbomSha256":"%s","compose":"%s","composeSha256":"%s"}\n' \
-            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" "$sbom" "$sbom_sha256" "$compose" "$compose_sha256" > "$manifest"
+          printf '%s  %s\n%s  %s\n' \
+            "$archive_sha256" "$archive" \
+            "$cloudflared_archive_sha256" "$cloudflared_archive" > "$checksum"
+          printf '{"schemaVersion":4,"releaseCommit":"%s","workflowRunId":"%s","imageRepository":"connectwise-legacy-rollback-ci","imageId":"%s","archive":"%s","archiveSha256":"%s","cloudflaredImage":"%s","cloudflaredImageId":"%s","cloudflaredArchive":"%s","cloudflaredArchiveSha256":"%s","sbom":"%s","sbomSha256":"%s","compose":"%s","composeSha256":"%s"}\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" \
+            "$cloudflared_image" "$cloudflared_image_id" "$cloudflared_archive" "$cloudflared_archive_sha256" \
+            "$sbom" "$sbom_sha256" "$compose" "$compose_sha256" > "$manifest"
       - name: Verify packaged rollback artifact bindings and checksum
         run: >-
           python deploy/http-gateway/tests/verify_rollback_artifact.py
           . "$GITHUB_SHA" "$GITHUB_RUN_ID"
-      - name: Reload the verified rollback image
+      - name: Reload the verified rollback images
         shell: bash
         run: |
           set -euo pipefail
           image_id=$(python -c 'import json; print(json.load(open("connectwise-legacy-rollback-image.json", encoding="utf-8"))["imageId"])')
+          cloudflared_image=$(python -c 'import json; print(json.load(open("connectwise-legacy-rollback-image.json", encoding="utf-8"))["cloudflaredImage"])')
+          cloudflared_image_id=$(python -c 'import json; print(json.load(open("connectwise-legacy-rollback-image.json", encoding="utf-8"))["cloudflaredImageId"])')
+          cloudflared_repository=connectwise-legacy-cloudflared-ci
           docker image rm connectwise-legacy-rollback-ci
+          docker image rm "$cloudflared_repository"
+          docker image rm "$cloudflared_image"
           gzip -dc connectwise-legacy-rollback-image.tar.gz | docker load
+          gzip -dc connectwise-legacy-rollback-cloudflared-image.tar.gz | docker load
           test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)" = "$image_id"
+          test "$(docker image inspect --format '{{.Id}}' "$cloudflared_repository")" = "$cloudflared_image_id"
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges:true "$cloudflared_repository" --version
       - name: Smoke-test packaged rollback image startup and auth boundary
         run: bash deploy/http-gateway/tests/smoke_rollback_image.sh
       - name: Retain the verified rollback image
@@ -204,6 +223,7 @@ jobs:
           name: legacy-rollback-image-${{ github.sha }}
           path: |
             connectwise-legacy-rollback-image.tar.gz
+            connectwise-legacy-rollback-cloudflared-image.tar.gz
             connectwise-legacy-rollback-image.sha256
             connectwise-legacy-rollback-image.json
             connectwise-legacy-rollback-image.cdx.json
@@ -243,6 +263,7 @@ jobs:
         with:
           subject-path: |
             release-evidence/rollback/connectwise-legacy-rollback-image.tar.gz
+            release-evidence/rollback/connectwise-legacy-rollback-cloudflared-image.tar.gz
             release-evidence/rollback/connectwise-legacy-rollback-image.sha256
             release-evidence/rollback/connectwise-legacy-rollback-image.json
             release-evidence/rollback/connectwise-legacy-rollback-image.cdx.json

@@ -700,6 +700,7 @@ describe("legacy rollback image security", () => {
     const attestStep = workflow.slice(attestOffset);
     const artifactFiles = [
       "connectwise-legacy-rollback-image.tar.gz",
+      "connectwise-legacy-rollback-cloudflared-image.tar.gz",
       "connectwise-legacy-rollback-image.sha256",
       "connectwise-legacy-rollback-image.json",
       "connectwise-legacy-rollback-image.cdx.json",
@@ -762,27 +763,43 @@ describe("legacy rollback image security", () => {
       "docker save connectwise-legacy-rollback-ci | gzip -n -9",
     );
     expect(workflow).toContain(
+      'docker tag "$cloudflared_image" "$cloudflared_repository"',
+    );
+    expect(workflow).toContain(
+      'docker save "$cloudflared_repository" | gzip -n -9 > "$cloudflared_archive"',
+    );
+    expect(workflow).toContain(
       "image_id=$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)",
+    );
+    expect(workflow).toContain(
+      "cloudflared_image_id=$(docker image inspect --format '{{.Id}}' \"$cloudflared_repository\")",
     );
     expect(workflow).toContain(
       "archive_sha256=$(sha256sum \"$archive\" | cut -d ' ' -f 1)",
     );
     expect(workflow).toContain(
-      'printf \'%s  %s\\n\' "$archive_sha256" "$archive" > "$checksum"',
+      "cloudflared_archive_sha256=$(sha256sum \"$cloudflared_archive\" | cut -d ' ' -f 1)",
     );
+    expect(workflow).toContain("printf '%s  %s\\n%s  %s\\n' \\");
     for (const manifestBinding of [
-      '"schemaVersion":3',
+      '"schemaVersion":4',
       '"releaseCommit":"%s"',
       '"workflowRunId":"%s"',
       '"imageRepository":"connectwise-legacy-rollback-ci"',
       '"imageId":"%s"',
       '"archive":"%s"',
       '"archiveSha256":"%s"',
+      '"cloudflaredImage":"%s"',
+      '"cloudflaredImageId":"%s"',
+      '"cloudflaredArchive":"%s"',
+      '"cloudflaredArchiveSha256":"%s"',
       '"sbom":"%s"',
       '"sbomSha256":"%s"',
       '"compose":"%s"',
       '"composeSha256":"%s"',
-      '"$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" "$sbom" "$sbom_sha256" "$compose" "$compose_sha256"',
+      '"$GITHUB_SHA" "$GITHUB_RUN_ID" "$image_id" "$archive" "$archive_sha256" \\',
+      '"$cloudflared_image" "$cloudflared_image_id" "$cloudflared_archive" "$cloudflared_archive_sha256" \\',
+      '"$sbom" "$sbom_sha256" "$compose" "$compose_sha256" > "$manifest"',
     ]) {
       expect(workflow).toContain(manifestBinding);
     }
@@ -793,11 +810,22 @@ describe("legacy rollback image security", () => {
     expect(workflow).toContain(
       "docker image rm connectwise-legacy-rollback-ci",
     );
+    expect(workflow).toContain('docker image rm "$cloudflared_repository"');
+    expect(workflow).toContain('docker image rm "$cloudflared_image"');
     expect(workflow).toContain(
       "gzip -dc connectwise-legacy-rollback-image.tar.gz | docker load",
     );
     expect(workflow).toContain(
+      "gzip -dc connectwise-legacy-rollback-cloudflared-image.tar.gz | docker load",
+    );
+    expect(workflow).toContain(
       'test "$(docker image inspect --format \'{{.Id}}\' connectwise-legacy-rollback-ci)" = "$image_id"',
+    );
+    expect(workflow).toContain(
+      'test "$(docker image inspect --format \'{{.Id}}\' "$cloudflared_repository")" = "$cloudflared_image_id"',
+    );
+    expect(workflow).toContain(
+      'docker run --rm --cap-drop ALL --security-opt no-new-privileges:true "$cloudflared_repository" --version',
     );
     expect(attestJob).toContain(
       "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
@@ -1695,13 +1723,25 @@ describe("staging deployment configuration", () => {
       '--verified-compose-output "$verified_compose"',
       '--verified-archive-output "$verified_archive"',
       '--verified-image-id-output "$verified_image_id"',
+      '--verified-cloudflared-archive-output "$verified_cloudflared_archive"',
+      '--verified-cloudflared-image-id-output "$verified_cloudflared_image_id"',
+      '--verified-cloudflared-image-output "$verified_cloudflared_image"',
       'gzip -dc "$verified_archive" | docker load',
+      'gzip -dc "$verified_cloudflared_archive" | docker load',
       'expected_image_id=$(cat "$verified_image_id")',
+      'expected_cloudflared_image_id=$(cat "$verified_cloudflared_image_id")',
+      'cloudflared_source_image=$(cat "$verified_cloudflared_image")',
+      "cloudflared_image=connectwise-legacy-cloudflared-ci",
+      'export CLOUDFLARED_IMAGE="$cloudflared_image"',
       '--file "$verified_compose"',
       "--project-directory <REVIEWED_REPOSITORY_CHECKOUT>/deploy/http-gateway",
-      "up -d --no-build --pull never mcp-gateway",
       "stop cloudflared || exit 1",
-      "The image-ID comparison must pass before starting the tunnel or routing any client",
+      "up -d --no-build --pull never mcp-gateway",
+      "create --no-build --pull never cloudflared",
+      "actual_cloudflared_image_id=$(docker inspect --format '{{.Image}}' connectwise-mcp-cloudflared)",
+      "rm -f -s cloudflared",
+      "start cloudflared",
+      "Both image-ID comparisons must pass before routing any client",
       "A pull-request merge commit, a failed run, an expired artifact, an unattested file, or a local rebuild is not rollback evidence",
     ]) {
       expect(runbook).toContain(requiredControl);
@@ -1721,17 +1761,17 @@ describe("staging deployment configuration", () => {
     expect(localVerificationOffset).toBeGreaterThan(provenanceOffset);
     expect(imageLoadOffset).toBeGreaterThan(localVerificationOffset);
     expect(runbook).toContain(
-      "for artifact_file in \\\n  connectwise-legacy-rollback-image.tar.gz \\\n  connectwise-legacy-rollback-image.sha256 \\\n  connectwise-legacy-rollback-image.json \\\n  connectwise-legacy-rollback-image.cdx.json \\\n  connectwise-legacy-rollback-compose.yml\ndo",
+      "for artifact_file in \\\n  connectwise-legacy-rollback-image.tar.gz \\\n  connectwise-legacy-rollback-cloudflared-image.tar.gz \\\n  connectwise-legacy-rollback-image.sha256 \\\n  connectwise-legacy-rollback-image.json \\\n  connectwise-legacy-rollback-image.cdx.json \\\n  connectwise-legacy-rollback-compose.yml\ndo",
     );
-    expect(runbook.match(/^\s*docker compose \\$/gmu)).toHaveLength(4);
+    expect(runbook.match(/^\s*docker compose \\$/gmu)).toHaveLength(7);
     expect(
       runbook.match(/^\s*--file "\$verified_compose" \\$/gmu),
-    ).toHaveLength(4);
+    ).toHaveLength(7);
     expect(
       runbook.match(
         /^\s*--project-directory <REVIEWED_REPOSITORY_CHECKOUT>\/deploy\/http-gateway \\$/gmu,
       ),
-    ).toHaveLength(4);
+    ).toHaveLength(7);
     const legacyHealthOffset = runbook.indexOf(
       "Confirm the legacy gateway and tunnel are access-restricted and healthy",
     );

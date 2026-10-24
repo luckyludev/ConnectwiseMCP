@@ -8,6 +8,7 @@ import verify_rollback_artifact as verifier
 from verify_rollback_artifact import (
     ARCHIVE_NAME,
     CHECKSUM_NAME,
+    CLOUDFLARED_ARCHIVE_NAME,
     COMPOSE_NAME,
     IMAGE_REPOSITORY,
     MANIFEST_NAME,
@@ -18,12 +19,17 @@ from verify_rollback_artifact import (
 RELEASE_COMMIT = "a" * 40
 WORKFLOW_RUN_ID = "123456789"
 IMAGE_ID = "sha256:" + "b" * 64
+CLOUDFLARED_IMAGE_ID = "sha256:" + "c" * 64
+CLOUDFLARED_IMAGE = "cloudflare/cloudflared:latest@sha256:" + "d" * 64
 
 
 def artifact_bundle(tmp_path):
     archive = tmp_path / ARCHIVE_NAME
     archive.write_bytes(b"verified rollback image archive")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    cloudflared_archive = tmp_path / CLOUDFLARED_ARCHIVE_NAME
+    cloudflared_archive.write_bytes(b"verified cloudflared image archive")
+    cloudflared_digest = hashlib.sha256(cloudflared_archive.read_bytes()).hexdigest()
     sbom = tmp_path / SBOM_NAME
     sbom.write_text(
         json.dumps(
@@ -46,13 +52,17 @@ def artifact_bundle(tmp_path):
     )
     compose_digest = hashlib.sha256(compose.read_bytes()).hexdigest()
     manifest = {
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "releaseCommit": RELEASE_COMMIT,
         "workflowRunId": WORKFLOW_RUN_ID,
         "imageRepository": IMAGE_REPOSITORY,
         "imageId": IMAGE_ID,
         "archive": ARCHIVE_NAME,
         "archiveSha256": digest,
+        "cloudflaredImage": CLOUDFLARED_IMAGE,
+        "cloudflaredImageId": CLOUDFLARED_IMAGE_ID,
+        "cloudflaredArchive": CLOUDFLARED_ARCHIVE_NAME,
+        "cloudflaredArchiveSha256": cloudflared_digest,
         "sbom": SBOM_NAME,
         "sbomSha256": sbom_digest,
         "compose": COMPOSE_NAME,
@@ -62,7 +72,9 @@ def artifact_bundle(tmp_path):
         json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8"
     )
     (tmp_path / CHECKSUM_NAME).write_text(
-        f"{digest}  {ARCHIVE_NAME}\n", encoding="ascii"
+        f"{digest}  {ARCHIVE_NAME}\n"
+        f"{cloudflared_digest}  {CLOUDFLARED_ARCHIVE_NAME}\n",
+        encoding="ascii",
     )
     return manifest
 
@@ -88,6 +100,9 @@ def test_writes_exact_verified_outputs_to_new_private_files(tmp_path):
     compose_output = private_directory / "verified-compose.yml"
     archive_output = private_directory / "verified-archive.tar.gz"
     image_id_output = private_directory / "verified-image-id"
+    cloudflared_archive_output = private_directory / "verified-cloudflared.tar.gz"
+    cloudflared_image_id_output = private_directory / "verified-cloudflared-image-id"
+    cloudflared_image_output = private_directory / "verified-cloudflared-image"
 
     verify_rollback_artifact(
         tmp_path,
@@ -96,13 +111,70 @@ def test_writes_exact_verified_outputs_to_new_private_files(tmp_path):
         verified_compose_output=compose_output,
         verified_archive_output=archive_output,
         verified_image_id_output=image_id_output,
+        verified_cloudflared_archive_output=cloudflared_archive_output,
+        verified_cloudflared_image_id_output=cloudflared_image_id_output,
+        verified_cloudflared_image_output=cloudflared_image_output,
     )
 
     assert compose_output.read_bytes() == (tmp_path / COMPOSE_NAME).read_bytes()
     assert archive_output.read_bytes() == (tmp_path / ARCHIVE_NAME).read_bytes()
     assert image_id_output.read_text(encoding="ascii") == f"{IMAGE_ID}\n"
-    for output in (compose_output, archive_output, image_id_output):
+    assert cloudflared_archive_output.read_bytes() == (
+        tmp_path / CLOUDFLARED_ARCHIVE_NAME
+    ).read_bytes()
+    assert (
+        cloudflared_image_id_output.read_text(encoding="ascii")
+        == f"{CLOUDFLARED_IMAGE_ID}\n"
+    )
+    assert (
+        cloudflared_image_output.read_text(encoding="ascii")
+        == f"{CLOUDFLARED_IMAGE}\n"
+    )
+    for output in (
+        compose_output,
+        archive_output,
+        image_id_output,
+        cloudflared_archive_output,
+        cloudflared_image_id_output,
+        cloudflared_image_output,
+    ):
         assert stat.S_IMODE(output.stat().st_mode) == 0o400
+
+
+def test_removes_all_new_outputs_when_later_output_already_exists(tmp_path):
+    artifact_bundle(tmp_path)
+    private_directory = tmp_path / "private"
+    private_directory.mkdir(mode=0o700)
+    compose_output = private_directory / "verified-compose.yml"
+    archive_output = private_directory / "verified-archive.tar.gz"
+    image_id_output = private_directory / "verified-image-id"
+    cloudflared_archive_output = private_directory / "verified-cloudflared.tar.gz"
+    cloudflared_image_id_output = private_directory / "verified-cloudflared-image-id"
+    cloudflared_image_output = private_directory / "existing-cloudflared-image"
+    cloudflared_image_output.write_text("do not replace\n", encoding="ascii")
+
+    with pytest.raises(ValueError, match="must not already exist"):
+        verify_rollback_artifact(
+            tmp_path,
+            RELEASE_COMMIT,
+            WORKFLOW_RUN_ID,
+            verified_compose_output=compose_output,
+            verified_archive_output=archive_output,
+            verified_image_id_output=image_id_output,
+            verified_cloudflared_archive_output=cloudflared_archive_output,
+            verified_cloudflared_image_id_output=cloudflared_image_id_output,
+            verified_cloudflared_image_output=cloudflared_image_output,
+        )
+
+    for output in (
+        compose_output,
+        archive_output,
+        image_id_output,
+        cloudflared_archive_output,
+        cloudflared_image_id_output,
+    ):
+        assert not output.exists()
+    assert cloudflared_image_output.read_text(encoding="ascii") == "do not replace\n"
 
 
 def test_private_outputs_survive_download_path_replacement(tmp_path):
@@ -275,6 +347,14 @@ def test_rejects_invalid_or_stale_expected_bindings(
         ("imageId", "b" * 64, "imageId"),
         ("archive", "renamed.tar.gz", "archive"),
         ("archiveSha256", "A" * 64, "archiveSha256"),
+        ("cloudflaredImage", "cloudflare/cloudflared:latest", "cloudflaredImage"),
+        ("cloudflaredImageId", "c" * 64, "cloudflaredImageId"),
+        ("cloudflaredArchive", "renamed-cloudflared.tar.gz", "cloudflaredArchive"),
+        (
+            "cloudflaredArchiveSha256",
+            "A" * 64,
+            "cloudflaredArchiveSha256",
+        ),
         ("sbom", "renamed.cdx.json", "sbom"),
         ("sbomSha256", "A" * 64, "sbomSha256"),
         ("compose", "renamed.yml", "compose"),
@@ -327,6 +407,26 @@ def test_rejects_archive_digest_mismatch_and_removes_partial_private_copy(tmp_pa
             verified_archive_output=archive_output,
         )
     assert not archive_output.exists()
+
+
+def test_rejects_cloudflared_archive_digest_mismatch_and_removes_outputs(tmp_path):
+    artifact_bundle(tmp_path)
+    (tmp_path / CLOUDFLARED_ARCHIVE_NAME).write_bytes(b"tampered")
+    private_directory = tmp_path / "private"
+    private_directory.mkdir(mode=0o700)
+    archive_output = private_directory / "verified-archive.tar.gz"
+    cloudflared_output = private_directory / "verified-cloudflared.tar.gz"
+
+    with pytest.raises(ValueError, match="Cloudflared image archive SHA-256 mismatch"):
+        verify_rollback_artifact(
+            tmp_path,
+            RELEASE_COMMIT,
+            WORKFLOW_RUN_ID,
+            verified_archive_output=archive_output,
+            verified_cloudflared_archive_output=cloudflared_output,
+        )
+    assert not archive_output.exists()
+    assert not cloudflared_output.exists()
 
 
 def test_rejects_sbom_digest_mismatch_and_removes_archive_output(tmp_path):
@@ -428,7 +528,15 @@ def test_rejects_oversized_compose(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME, COMPOSE_NAME]
+    "name",
+    [
+        ARCHIVE_NAME,
+        CLOUDFLARED_ARCHIVE_NAME,
+        CHECKSUM_NAME,
+        MANIFEST_NAME,
+        SBOM_NAME,
+        COMPOSE_NAME,
+    ],
 )
 def test_rejects_missing_required_file(tmp_path, name):
     artifact_bundle(tmp_path)
@@ -439,7 +547,15 @@ def test_rejects_missing_required_file(tmp_path, name):
 
 
 @pytest.mark.parametrize(
-    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME, COMPOSE_NAME]
+    "name",
+    [
+        ARCHIVE_NAME,
+        CLOUDFLARED_ARCHIVE_NAME,
+        CHECKSUM_NAME,
+        MANIFEST_NAME,
+        SBOM_NAME,
+        COMPOSE_NAME,
+    ],
 )
 def test_rejects_symlinked_artifact_file(tmp_path, name):
     artifact_bundle(tmp_path)
@@ -453,7 +569,15 @@ def test_rejects_symlinked_artifact_file(tmp_path, name):
 
 
 @pytest.mark.parametrize(
-    "name", [ARCHIVE_NAME, CHECKSUM_NAME, MANIFEST_NAME, SBOM_NAME, COMPOSE_NAME]
+    "name",
+    [
+        ARCHIVE_NAME,
+        CLOUDFLARED_ARCHIVE_NAME,
+        CHECKSUM_NAME,
+        MANIFEST_NAME,
+        SBOM_NAME,
+        COMPOSE_NAME,
+    ],
 )
 def test_rejects_hardlinked_artifact_file(tmp_path, name):
     artifact_bundle(tmp_path)
