@@ -155,6 +155,23 @@ describe("dependency maintenance configuration", () => {
     expect(v2Workflow.match(/- "\.npmrc"/gu)).toHaveLength(1);
   });
 
+  it("pins patched transitive dependencies surfaced by the audit gate", async () => {
+    const [rootPackage, lock] = await Promise.all([
+      readJson("../package.json"),
+      readJson("../package-lock.json"),
+    ]);
+    const patched = {
+      "body-parser": "2.4.0",
+      "fast-uri": "3.1.9",
+      undici: "7.30.1",
+    };
+
+    for (const [name, version] of Object.entries(patched)) {
+      expect(rootPackage.overrides?.[name]).toBe(version);
+      expect(lock.packages?.[`node_modules/${name}`]?.version).toBe(version);
+    }
+  });
+
   it("pins and verifies the npm CLI before dependency operations", async () => {
     const expectedVersion = "11.6.1";
     const expectedPolicy = {
@@ -1302,6 +1319,49 @@ describe("staging deployment configuration", () => {
     );
     expect(runbook).toContain(
       "all twelve successful provenance checks and both offline-verifier results",
+    );
+    const productionGateOffset = runbook.indexOf(
+      "### Production release artifact gate",
+    );
+    const productionGateEnd = runbook.indexOf(
+      "\nComplete immediately before routing production clients:",
+      productionGateOffset,
+    );
+    const productionGate = runbook.slice(
+      productionGateOffset,
+      productionGateEnd,
+    );
+    const productionOfflineEvidenceOffset = productionGate.indexOf(
+      "both offline-verifier results",
+    );
+    const runbookProductionDryRunOffset = productionGate.indexOf(
+      "npm run dry-run:production",
+    );
+    const productionCandidateOffset = productionGate.indexOf(
+      "--candidate-manifest dist/production-bundle-manifest.json",
+      runbookProductionDryRunOffset,
+    );
+    const productionApprovalOffset = productionGate.indexOf(
+      "Record sanitized evidence of the successful commands",
+    );
+    expect(productionGateOffset).toBeGreaterThan(-1);
+    expect(productionGateEnd).toBeGreaterThan(productionGateOffset);
+    expect(productionOfflineEvidenceOffset).toBeGreaterThan(-1);
+    expect(runbookProductionDryRunOffset).toBeGreaterThan(
+      productionOfflineEvidenceOffset,
+    );
+    expect(productionCandidateOffset).toBeGreaterThan(
+      runbookProductionDryRunOffset,
+    );
+    expect(productionApprovalOffset).toBeGreaterThan(productionCandidateOffset);
+    expect(productionGate).toContain(
+      '"$artifact_dir" production "$PRODUCTION_RELEASE_SHA"',
+    );
+    expect(productionGate).toContain(
+      "do not let the procedure's exit trap remove that directory before candidate comparison",
+    );
+    expect(productionGate).toContain(
+      "local self-consistency is not sufficient for approval",
     );
     expect(runbook).toContain(
       "successful canonical `v2-ci` run, and verified references to its attested staging and production release-evidence artifacts",

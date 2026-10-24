@@ -292,15 +292,18 @@ describe("offline V2 release evidence verifier", () => {
     },
   );
 
-  it("matches a prepared candidate to the canonical release manifest", async () => {
-    const fixture = await makeEvidence();
-    const result = verify({ ...fixture, withCandidate: true });
+  it.each(["staging", "production"])(
+    "matches a prepared %s candidate to the canonical release manifest",
+    async (target) => {
+      const fixture = await makeEvidence(target);
+      const result = verify({ ...fixture, withCandidate: true });
 
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe(
-      `Verified staging V2 release evidence and matching candidate manifest for ${fixture.release}.\n`,
-    );
-  });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe(
+        `Verified ${target} V2 release evidence and matching candidate manifest for ${fixture.release}.\n`,
+      );
+    },
+  );
 
   it("rejects using the canonical evidence manifest as the candidate path", async () => {
     const fixture = await makeEvidence();
@@ -344,19 +347,22 @@ describe("offline V2 release evidence verifier", () => {
     },
   );
 
-  it("rejects local candidate assets that do not match the candidate manifest", async () => {
-    const fixture = await makeEvidence();
-    await writeFile(
-      join(fixture.cwd, "dist", "index.js"),
-      "unbound local build\n",
-    );
+  it.each(["staging", "production"])(
+    "rejects %s candidate assets that do not match the candidate manifest",
+    async (target) => {
+      const fixture = await makeEvidence(target);
+      await writeFile(
+        join(fixture.cwd, "dist", "index.js"),
+        "unbound local build\n",
+      );
 
-    const result = verify({ ...fixture, withCandidate: true });
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      `${join("dist", "index.js")} does not match the candidate manifest binding`,
-    );
-  });
+      const result = verify({ ...fixture, withCandidate: true });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        `${join("dist", "index.js")} does not match the candidate manifest binding`,
+      );
+    },
+  );
 
   it.each([
     ["sha256", "bundle"],
