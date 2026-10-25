@@ -34,6 +34,7 @@ EXPECTED_LOGGING = {
     "driver": "json-file",
     "options": {"max-file": "3", "max-size": "10m"},
 }
+EXPECTED_PIDS_LIMIT = 128
 EXPECTED_GATEWAY_BUILD_CONTEXT = Path(__file__).resolve().parents[2]
 EXPECTED_GATEWAY_TMPFS = [
     "/run/connectwise-memory:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700"
@@ -49,6 +50,7 @@ ALLOWED_SERVICE_FIELDS = {
         "image",
         "logging",
         "networks",
+        "pids_limit",
         "ports",
         "read_only",
         "restart",
@@ -65,6 +67,7 @@ ALLOWED_SERVICE_FIELDS = {
         "image",
         "logging",
         "networks",
+        "pids_limit",
         "ports",
         "read_only",
         "restart",
@@ -138,6 +141,12 @@ def _validate_runtime_restrictions(service: Any, name: str) -> None:
             f"{name} contains non-allowlisted service fields: "
             + ", ".join(sorted(unexpected_fields))
         )
+
+
+def _validate_process_limit(service: dict[str, Any], name: str) -> None:
+    pids_limit = service.get("pids_limit")
+    if type(pids_limit) is not int or pids_limit != EXPECTED_PIDS_LIMIT:
+        raise ValueError(f"{name} process limit must be exactly 128")
 
 
 def _validate_bounded_logging(service: dict[str, Any], name: str) -> None:
@@ -239,6 +248,8 @@ def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> No
     tunnel_keys = _environment_keys(tunnel, "cloudflared")
     _validate_runtime_restrictions(gateway, "mcp-gateway")
     _validate_runtime_restrictions(tunnel, "cloudflared")
+    _validate_process_limit(gateway, "mcp-gateway")
+    _validate_process_limit(tunnel, "cloudflared")
     _validate_bounded_logging(gateway, "mcp-gateway")
     _validate_bounded_logging(tunnel, "cloudflared")
     _validate_ephemeral_storage(gateway)

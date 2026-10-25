@@ -39,6 +39,7 @@ runtime_security=(
   --cap-drop ALL
   --security-opt no-new-privileges:true
   --read-only
+  --pids-limit 128
   --tmpfs /run/connectwise-memory:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700
 )
 
@@ -71,6 +72,10 @@ docker run --detach --name "$container" \
   --env JWT_SECRET_KEY=ci-only-jwt-secret-00000000000000000000000000 \
   "${common_env[@]}" \
   "$image" >/dev/null
+
+if [[ "$(docker inspect --format '{{.HostConfig.PidsLimit}}' "$container")" != "128" ]]; then
+  fail_with_logs "$container" "Rollback image did not run with the exact 128-process PID ceiling."
+fi
 
 healthy=false
 for ((attempt = 1; attempt <= 45; attempt += 1)); do

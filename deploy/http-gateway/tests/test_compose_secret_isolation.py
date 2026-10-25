@@ -5,6 +5,7 @@ from verify_compose_secret_isolation import (
     EXPECTED_GATEWAY_BUILD_CONTEXT,
     EXPECTED_GATEWAY_TMPFS,
     EXPECTED_LOGGING,
+    EXPECTED_PIDS_LIMIT,
     GATEWAY_ENVIRONMENT,
     TUNNEL_ENVIRONMENT,
     validate_compose_config,
@@ -25,6 +26,7 @@ def compose_config() -> dict:
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
                 "read_only": True,
+                "pids_limit": EXPECTED_PIDS_LIMIT,
                 "tmpfs": EXPECTED_GATEWAY_TMPFS.copy(),
                 "logging": EXPECTED_LOGGING.copy() | {
                     "options": EXPECTED_LOGGING["options"].copy()
@@ -49,6 +51,7 @@ def compose_config() -> dict:
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
                 "read_only": True,
+                "pids_limit": EXPECTED_PIDS_LIMIT,
                 "logging": EXPECTED_LOGGING.copy() | {
                     "options": EXPECTED_LOGGING["options"].copy()
                 },
@@ -156,6 +159,19 @@ def test_rejects_writable_or_non_boolean_root_filesystem(service, read_only):
         config["services"][service]["read_only"] = read_only
 
     with pytest.raises(ValueError, match="root filesystem must be read-only"):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
+@pytest.mark.parametrize("pids_limit", [None, 0, -1, 64, 129, "128", True])
+def test_rejects_missing_unbounded_or_altered_process_limit(service, pids_limit):
+    config = compose_config()
+    if pids_limit is None:
+        del config["services"][service]["pids_limit"]
+    else:
+        config["services"][service]["pids_limit"] = pids_limit
+
+    with pytest.raises(ValueError, match="process limit must be exactly 128"):
         validate_compose_config(config)
 
 
