@@ -6,6 +6,7 @@ from verify_compose_secret_isolation import (
     EXPECTED_GATEWAY_TMPFS,
     EXPECTED_LOGGING,
     EXPECTED_PIDS_LIMIT,
+    EXPECTED_RUNTIME_USERS,
     GATEWAY_ENVIRONMENT,
     TUNNEL_ENVIRONMENT,
     validate_compose_config,
@@ -26,6 +27,7 @@ def compose_config() -> dict:
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
                 "read_only": True,
+                "user": EXPECTED_RUNTIME_USERS["mcp-gateway"],
                 "pids_limit": EXPECTED_PIDS_LIMIT,
                 "tmpfs": EXPECTED_GATEWAY_TMPFS.copy(),
                 "logging": EXPECTED_LOGGING.copy() | {
@@ -51,6 +53,7 @@ def compose_config() -> dict:
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
                 "read_only": True,
+                "user": EXPECTED_RUNTIME_USERS["cloudflared"],
                 "pids_limit": EXPECTED_PIDS_LIMIT,
                 "logging": EXPECTED_LOGGING.copy() | {
                     "options": EXPECTED_LOGGING["options"].copy()
@@ -159,6 +162,22 @@ def test_rejects_writable_or_non_boolean_root_filesystem(service, read_only):
         config["services"][service]["read_only"] = read_only
 
     with pytest.raises(ValueError, match="root filesystem must be read-only"):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
+@pytest.mark.parametrize(
+    "user",
+    [None, "0", "0:0", 0, "root", "10001", "65532", "10001:0", "65532:0"],
+)
+def test_rejects_missing_root_named_or_altered_runtime_user(service, user):
+    config = compose_config()
+    if user is None:
+        del config["services"][service]["user"]
+    else:
+        config["services"][service]["user"] = user
+
+    with pytest.raises(ValueError, match="runtime user must be exactly"):
         validate_compose_config(config)
 
 

@@ -610,26 +610,37 @@ describe("legacy rollback deployment surface", () => {
 
 describe("legacy rollback image security", () => {
   it("smoke-tests the digest-pinned cloudflared image rendered from Compose", async () => {
-    const [workflow, compose, cloudflaredSmoke] = await Promise.all([
-      readFile(
-        new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
-        "utf8",
-      ),
-      readFile(
-        new URL("../deploy/http-gateway/docker-compose.yml", import.meta.url),
-        "utf8",
-      ),
-      readFile(
-        new URL(
-          "../deploy/http-gateway/tests/smoke_cloudflared_read_only.sh",
-          import.meta.url,
+    const [workflow, compose, cloudflaredSmoke, gatewaySmoke] =
+      await Promise.all([
+        readFile(
+          new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+          "utf8",
         ),
-        "utf8",
-      ),
-    ]);
+        readFile(
+          new URL("../deploy/http-gateway/docker-compose.yml", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../deploy/http-gateway/tests/smoke_cloudflared_read_only.sh",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+        readFile(
+          new URL(
+            "../deploy/http-gateway/tests/smoke_rollback_image.sh",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ]);
     const imagePattern = /cloudflare\/cloudflared:latest@sha256:[0-9a-f]{64}/gu;
+    const composeConfig = parseYaml(compose);
 
     expect(compose.match(imagePattern)).toHaveLength(1);
+    expect(composeConfig.services["mcp-gateway"].user).toBe("10001:10001");
+    expect(composeConfig.services.cloudflared.user).toBe("65532:65532");
     expect(workflow.match(imagePattern)).toBeNull();
     expect(workflow).toContain(
       'cloudflared_image="$(python -c \'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["services"]["cloudflared"]["image"])\' /tmp/rollback-compose.json)"',
@@ -642,6 +653,11 @@ describe("legacy rollback image security", () => {
       'bash deploy/http-gateway/tests/smoke_cloudflared_read_only.sh "$cloudflared_image"',
     );
     expect(cloudflaredSmoke).toContain("--read-only");
+    expect(cloudflaredSmoke).toContain('expected_user="65532:65532"');
+    expect(cloudflaredSmoke).toContain('--user "$expected_user"');
+    expect(cloudflaredSmoke).toContain("{{.Config.User}}");
+    expect(gatewaySmoke).toContain("--user 10001:10001");
+    expect(gatewaySmoke).toContain('[[ "$runtime_uid" != "10001" ]]');
     expect(cloudflaredSmoke).toContain('"$image" tunnel run');
     expect(cloudflaredSmoke).toContain(
       "cloudflared tunnel command remained running with a read-only root filesystem.",

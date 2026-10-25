@@ -35,6 +35,10 @@ EXPECTED_LOGGING = {
     "options": {"max-file": "3", "max-size": "10m"},
 }
 EXPECTED_PIDS_LIMIT = 128
+EXPECTED_RUNTIME_USERS = {
+    "mcp-gateway": "10001:10001",
+    "cloudflared": "65532:65532",
+}
 EXPECTED_GATEWAY_BUILD_CONTEXT = Path(__file__).resolve().parents[2]
 EXPECTED_GATEWAY_TMPFS = [
     "/run/connectwise-memory:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700"
@@ -56,6 +60,7 @@ ALLOWED_SERVICE_FIELDS = {
         "restart",
         "security_opt",
         "tmpfs",
+        "user",
     },
     "cloudflared": {
         "cap_drop",
@@ -72,6 +77,7 @@ ALLOWED_SERVICE_FIELDS = {
         "read_only",
         "restart",
         "security_opt",
+        "user",
     },
 }
 CANARY_VALUES = {
@@ -99,6 +105,10 @@ def _validate_runtime_restrictions(service: Any, name: str) -> None:
         raise ValueError(f"{name} must forbid privilege acquisition")
     if service.get("read_only") is not True:
         raise ValueError(f"{name} root filesystem must be read-only")
+    if service.get("user") != EXPECTED_RUNTIME_USERS[name]:
+        raise ValueError(
+            f"{name} runtime user must be exactly {EXPECTED_RUNTIME_USERS[name]}"
+        )
     privileged = service.get("privileged")
     if privileged is not None and privileged is not False:
         raise ValueError(f"{name} must not run in privileged mode")
