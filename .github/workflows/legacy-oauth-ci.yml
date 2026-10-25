@@ -64,8 +64,10 @@ jobs:
           deploy/http-gateway/app
           deploy/http-gateway/tests
           deploy/cwm-mcp
-      - name: Validate rollback image smoke script
-        run: bash -n deploy/http-gateway/tests/smoke_rollback_image.sh
+      - name: Validate rollback image smoke scripts
+        run: |
+          bash -n deploy/http-gateway/tests/smoke_rollback_image.sh
+          bash -n deploy/http-gateway/tests/smoke_cloudflared_read_only.sh
       - name: Run core Python checks
         run: >-
           ruff check --select E4,E7,E9,F
@@ -126,7 +128,8 @@ jobs:
           python deploy/http-gateway/tests/verify_compose_secret_isolation.py /tmp/rollback-compose.json --verify-canaries
           cloudflared_image="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["services"]["cloudflared"]["image"])' /tmp/rollback-compose.json)"
           docker pull "$cloudflared_image"
-          docker run --rm --cap-drop ALL --security-opt no-new-privileges:true "$cloudflared_image" --version
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges:true --read-only "$cloudflared_image" --version
+          bash deploy/http-gateway/tests/smoke_cloudflared_read_only.sh "$cloudflared_image"
       - name: Build rollback image
         run: >-
           docker build --tag connectwise-legacy-rollback-ci
@@ -213,7 +216,8 @@ jobs:
           gzip -dc connectwise-legacy-rollback-cloudflared-image.tar.gz | docker load
           test "$(docker image inspect --format '{{.Id}}' connectwise-legacy-rollback-ci)" = "$image_id"
           test "$(docker image inspect --format '{{.Id}}' "$cloudflared_repository")" = "$cloudflared_image_id"
-          docker run --rm --cap-drop ALL --security-opt no-new-privileges:true "$cloudflared_repository" --version
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges:true --read-only "$cloudflared_repository" --version
+          bash deploy/http-gateway/tests/smoke_cloudflared_read_only.sh "$cloudflared_repository"
       - name: Smoke-test packaged rollback image startup and auth boundary
         run: bash deploy/http-gateway/tests/smoke_rollback_image.sh
       - name: Retain the verified rollback image

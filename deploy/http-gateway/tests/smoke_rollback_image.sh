@@ -38,6 +38,8 @@ common_env=(
 runtime_security=(
   --cap-drop ALL
   --security-opt no-new-privileges:true
+  --read-only
+  --tmpfs /run/connectwise-memory:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700
 )
 
 runtime_uid="$(docker run --rm "${runtime_security[@]}" --entrypoint python "$image" -c 'import os; print(os.geteuid())')"
@@ -45,6 +47,18 @@ if [[ ! "$runtime_uid" =~ ^[0-9]+$ || "$runtime_uid" -eq 0 ]]; then
   printf '%s\n' "Rollback image must run as a numeric non-root user." >&2
   exit 1
 fi
+
+if docker run --rm "${runtime_security[@]}" --entrypoint python "$image" \
+  -c 'from pathlib import Path; Path("/app/unexpected-write").write_text("must fail", encoding="utf-8")'
+then
+  printf '%s\n' "Rollback image root filesystem unexpectedly accepted a write." >&2
+  exit 1
+fi
+
+docker run --rm "${runtime_security[@]}" --entrypoint python "$image" -c \
+  'from api_gateway.fast_memory_db import FastMemoryDB; db = FastMemoryDB("/run/connectwise-memory/fast_memory_api.db"); db.save_query("ephemeral-canary", "/ephemeral-canary", "GET"); db.close()'
+docker run --rm "${runtime_security[@]}" --entrypoint python "$image" -c \
+  'from pathlib import Path; assert not Path("/run/connectwise-memory/fast_memory_api.db").exists()'
 
 docker run --detach --name "$container" \
   "${runtime_security[@]}" \

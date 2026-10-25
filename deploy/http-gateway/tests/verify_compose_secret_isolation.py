@@ -35,6 +35,9 @@ EXPECTED_LOGGING = {
     "options": {"max-file": "3", "max-size": "10m"},
 }
 EXPECTED_GATEWAY_BUILD_CONTEXT = Path(__file__).resolve().parents[2]
+EXPECTED_GATEWAY_TMPFS = [
+    "/run/connectwise-memory:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700"
+]
 ALLOWED_SERVICE_FIELDS = {
     "mcp-gateway": {
         "build",
@@ -47,8 +50,10 @@ ALLOWED_SERVICE_FIELDS = {
         "logging",
         "networks",
         "ports",
+        "read_only",
         "restart",
         "security_opt",
+        "tmpfs",
     },
     "cloudflared": {
         "cap_drop",
@@ -61,6 +66,7 @@ ALLOWED_SERVICE_FIELDS = {
         "logging",
         "networks",
         "ports",
+        "read_only",
         "restart",
         "security_opt",
     },
@@ -88,6 +94,8 @@ def _validate_runtime_restrictions(service: Any, name: str) -> None:
         raise ValueError(f"{name} must drop all Linux capabilities")
     if service.get("security_opt") != ["no-new-privileges:true"]:
         raise ValueError(f"{name} must forbid privilege acquisition")
+    if service.get("read_only") is not True:
+        raise ValueError(f"{name} root filesystem must be read-only")
     privileged = service.get("privileged")
     if privileged is not None and privileged is not False:
         raise ValueError(f"{name} must not run in privileged mode")
@@ -136,6 +144,13 @@ def _validate_bounded_logging(service: dict[str, Any], name: str) -> None:
     if service.get("logging") != EXPECTED_LOGGING:
         raise ValueError(
             f"{name} logging must use json-file with max-size 10m and max-file 3"
+        )
+
+
+def _validate_ephemeral_storage(gateway: dict[str, Any]) -> None:
+    if gateway.get("tmpfs") != EXPECTED_GATEWAY_TMPFS:
+        raise ValueError(
+            "mcp-gateway must use only the bounded, restricted Fast Memory tmpfs"
         )
 
 
@@ -226,6 +241,7 @@ def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> No
     _validate_runtime_restrictions(tunnel, "cloudflared")
     _validate_bounded_logging(gateway, "mcp-gateway")
     _validate_bounded_logging(tunnel, "cloudflared")
+    _validate_ephemeral_storage(gateway)
     _validate_gateway_build(gateway)
     _validate_service_execution(gateway, tunnel)
     _validate_networks(config, gateway, tunnel)

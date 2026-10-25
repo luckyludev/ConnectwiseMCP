@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir --require-hashes --only-binary=:all: -r /app/requ
   && useradd --uid 10001 --gid app --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin app
 
 # Copy only the MCP modules and database required by the rollback gateway. Keep
-# the writable legacy database under app-user ownership without broad COPYs
+# the read-only API catalog under the unprivileged app user without broad COPYs
 # that could embed local credentials, logs, backups, or other workspace files.
 COPY --chown=app:app \
   cwm-mcp/api_gateway/__init__.py \

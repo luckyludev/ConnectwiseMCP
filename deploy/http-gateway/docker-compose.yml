@@ -15,6 +15,9 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run/connectwise-memory:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700
     ports:
       - "127.0.0.1:8000:8000"
     environment:
@@ -46,6 +49,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    read_only: true
     command: tunnel run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}

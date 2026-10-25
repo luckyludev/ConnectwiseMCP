@@ -29,16 +29,11 @@ from mcp.server.fastmcp import FastMCP
 from api_gateway.api_db_utils import APIDatabase
 from api_gateway.fast_memory_db import FastMemoryDB
 
-# Logging setup
-log_dir = os.path.dirname(os.path.abspath(__file__))
-log_file = os.path.join(log_dir, "api_gateway.log")
+# Logging setup: emit only to the container log stream, which Compose bounds.
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger("api_gateway")
 # HTTPX logs complete request URLs, including paths and encoded query strings,
@@ -58,9 +53,10 @@ PUBLIC_KEY = None
 PRIVATE_KEY = None
 AUTH_PREFIX = None
 
-# Database paths
+# Database paths. The API catalog ships read-only in the image; Fast Memory is
+# ephemeral and limited to the dedicated Compose tmpfs.
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "connectwise_api.db")
-FAST_MEMORY_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fast_memory_api.db")
+FAST_MEMORY_DB_PATH = "/run/connectwise-memory/fast_memory_api.db"
 
 api_db: Optional[APIDatabase] = None
 fast_memory_db: Optional[FastMemoryDB] = None

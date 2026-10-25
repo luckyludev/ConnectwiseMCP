@@ -30,6 +30,52 @@ def legacy_server():
                 sys.modules[name] = saved_module
 
 
+def test_logging_uses_only_the_bounded_container_stream(legacy_server):
+    source = Path(legacy_server.__file__).read_text(encoding="utf-8")
+
+    assert "logging.FileHandler" not in source
+    assert "api_gateway.log" not in source
+    assert not hasattr(legacy_server, "log_file")
+    assert (
+        legacy_server.FAST_MEMORY_DB_PATH
+        == "/run/connectwise-memory/fast_memory_api.db"
+    )
+
+
+def test_fast_memory_logs_do_not_expose_saved_query_content(
+    legacy_server, tmp_path, caplog
+):
+    canaries = {
+        "description": "description-canary",
+        "path": "/service/tickets/path-canary",
+        "method": "method-canary",
+        "params": "params-canary",
+        "data": "data-canary",
+    }
+
+    with caplog.at_level(logging.INFO):
+        database = legacy_server.FastMemoryDB(str(tmp_path / "memory.db"))
+        try:
+            database.save_query(
+                canaries["description"],
+                canaries["path"],
+                canaries["method"],
+                params={"conditions": canaries["params"]},
+                data={"notes": canaries["data"]},
+            )
+            database.save_query(
+                canaries["description"],
+                canaries["path"],
+                canaries["method"],
+            )
+        finally:
+            database.close()
+
+    assert all(value not in caplog.text for value in canaries.values())
+    assert "Saved new Fast Memory query" in caplog.text
+    assert "Updated existing Fast Memory query" in caplog.text
+
+
 def test_api_request_does_not_expose_request_or_response_content(
     legacy_server, monkeypatch, caplog
 ):

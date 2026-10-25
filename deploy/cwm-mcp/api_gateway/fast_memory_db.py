@@ -112,7 +112,7 @@ class FastMemoryDB:
                 existing['id']
             ))
             self.conn.commit()
-            logger.info(f"Updated existing query: {path} {method}")
+            logger.info("Updated existing Fast Memory query")
             return existing['id']
         
         # Insert new query
@@ -130,7 +130,7 @@ class FastMemoryDB:
         
         self.conn.commit()
         query_id = cursor.lastrowid
-        logger.info(f"Saved new query: {path} {method} with ID {query_id}")
+        logger.info("Saved new Fast Memory query")
         return query_id
     
     def find_query(self, path: str, method: str) -> Optional[Dict[str, Any]]:
