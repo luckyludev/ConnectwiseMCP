@@ -9,6 +9,16 @@ const toolAuditReasons = [
   "operation_failed",
   "invalid_arguments",
 ] as const;
+const toolAuditResultAllowlist: ReadonlySet<string> = new Set([
+  "success:ok",
+  "denied:insufficient_scope",
+  "denied:profile_unavailable",
+  "denied:connectwise_denied",
+  "denied:invalid_arguments",
+  "failure:lookup_failed",
+  "failure:write_outcome_unknown",
+  "failure:operation_failed",
+]);
 const toolAuditNames = [
   "whoami",
   "get_service_ticket",
@@ -60,6 +70,11 @@ const resourceAuditReasons = [
   "insufficient_scope",
   "profile_unavailable",
 ] as const;
+const resourceAuditResultAllowlist: ReadonlySet<string> = new Set([
+  "success:ok",
+  "denied:insufficient_scope",
+  "denied:profile_unavailable",
+]);
 
 export type ToolAuditOutcome = (typeof toolAuditOutcomes)[number];
 export type ToolAuditReason = (typeof toolAuditReasons)[number];
@@ -68,22 +83,22 @@ export type ResourceAuditName = (typeof resourceAuditNames)[number];
 export type ResourceAuditOutcome = (typeof resourceAuditOutcomes)[number];
 export type ResourceAuditReason = (typeof resourceAuditReasons)[number];
 
-const toolAuditOutcomeAllowlist: ReadonlySet<unknown> = new Set(
-  toolAuditOutcomes,
-);
-const toolAuditReasonAllowlist: ReadonlySet<unknown> = new Set(
-  toolAuditReasons,
-);
 const toolAuditNameAllowlist: ReadonlySet<unknown> = new Set(toolAuditNames);
 const resourceAuditNameAllowlist: ReadonlySet<unknown> = new Set(
   resourceAuditNames,
 );
-const resourceAuditOutcomeAllowlist: ReadonlySet<unknown> = new Set(
-  resourceAuditOutcomes,
-);
-const resourceAuditReasonAllowlist: ReadonlySet<unknown> = new Set(
-  resourceAuditReasons,
-);
+
+function isAllowlistedAuditResult(
+  allowlist: ReadonlySet<string>,
+  outcome: unknown,
+  reason: unknown,
+): boolean {
+  return (
+    typeof outcome === "string" &&
+    typeof reason === "string" &&
+    allowlist.has(`${outcome}:${reason}`)
+  );
+}
 
 export function isToolAuditName(value: unknown): value is ToolAuditName {
   return toolAuditNameAllowlist.has(value);
@@ -143,8 +158,7 @@ export function emitToolAudit(
       !Number.isFinite(startedAtMs) ||
       !entraIdPattern.test(correlationId) ||
       !toolAuditNameAllowlist.has(tool) ||
-      !toolAuditOutcomeAllowlist.has(outcome) ||
-      !toolAuditReasonAllowlist.has(reason)
+      !isAllowlistedAuditResult(toolAuditResultAllowlist, outcome, reason)
     ) {
       return;
     }
@@ -198,8 +212,7 @@ export function emitResourceAudit(
       !Number.isFinite(startedAtMs) ||
       !entraIdPattern.test(correlationId) ||
       !resourceAuditNameAllowlist.has(resource) ||
-      !resourceAuditOutcomeAllowlist.has(outcome) ||
-      !resourceAuditReasonAllowlist.has(reason)
+      !isAllowlistedAuditResult(resourceAuditResultAllowlist, outcome, reason)
     ) {
       return;
     }
