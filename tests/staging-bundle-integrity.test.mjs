@@ -1203,6 +1203,17 @@ if (messageFlag < 0 || process.argv[messageFlag + 1] !== ${JSON.stringify(`Conne
     });
   });
 
+  it("binds explicit secret env files ahead of Wrangler defaults", async () => {
+    const wranglerCli = await readFile(
+      join(projectNodeModules, "wrangler", "wrangler-dist", "cli.js"),
+      "utf8",
+    );
+
+    expect(wranglerCli).toContain(
+      'args["env-file"] ?? getDefaultEnvFiles(args.env)',
+    );
+  });
+
   it("uses approved artifacts and a private read-only runtime and config for secret entry", async () => {
     await withCheckout(async ({ cwd, head }) => {
       const wrangler = join(cwd, "node_modules", ".bin", "wrangler");
@@ -1214,12 +1225,16 @@ import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 const args = process.argv.slice(2);
 const config = args[args.indexOf("--config") + 1];
+const environment = args[args.indexOf("--env-file") + 1];
 const runtime = dirname(dirname(process.argv[1]));
 writeFileSync(process.env.SECRET_MARKER, JSON.stringify({
   args,
   config,
   configBytes: readFileSync(config, "utf8"),
   configMode: statSync(config).mode & 0o777,
+  environment,
+  environmentBytes: readFileSync(environment, "utf8"),
+  environmentMode: statSync(environment).mode & 0o777,
   entrypoint: process.argv[1],
   runtime,
   runtimeMode: statSync(runtime).mode & 0o777,
@@ -1227,6 +1242,10 @@ writeFileSync(process.env.SECRET_MARKER, JSON.stringify({
 `,
       );
       await chmod(wrangler, 0o755);
+      await writeFile(
+        join(cwd, ".env.staging"),
+        "CLOUDFLARE_API_BASE_URL=https://attacker.invalid\nWRANGLER_LOG=debug\n",
+      );
       expect(run(cwd, "create").status).toBe(0);
 
       const result = runSecret(cwd, "ENTRA_CLIENT_SECRET", head, {
@@ -1244,12 +1263,19 @@ writeFileSync(process.env.SECRET_MARKER, JSON.stringify({
         "staging",
         "--config",
         captured.config,
+        "--env-file",
+        captured.environment,
       ]);
       expect(captured.configBytes).toContain("connectwise-staging-bundle-test");
       expect(captured.configMode).toBe(0o400);
+      expect(captured.environmentBytes).toBe("");
+      expect(captured.environmentMode).toBe(0o400);
       expect(captured.runtimeMode).toBe(0o500);
       expect(captured.entrypoint).not.toContain(join(cwd, "node_modules"));
       await expect(readFile(captured.config)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readFile(captured.environment)).rejects.toMatchObject({
         code: "ENOENT",
       });
       await expect(readdir(captured.runtime)).rejects.toMatchObject({
@@ -1280,13 +1306,43 @@ writeFileSync(process.env.SECRET_MARKER, JSON.stringify({
     });
   });
 
+  it("rejects mutation of the private secret environment file", async () => {
+    await withCheckout(async ({ cwd, head }) => {
+      const wrangler = join(cwd, "node_modules", ".bin", "wrangler");
+      const marker = join(cwd, "mutated-secret-environment.json");
+      await writeFile(
+        wrangler,
+        `#!${process.execPath}\nimport { chmodSync, writeFileSync } from "node:fs";\nimport { dirname } from "node:path";\nconst args = process.argv.slice(2);\nconst environment = args[args.indexOf("--env-file") + 1];\nconst runtime = dirname(dirname(process.argv[1]));\nwriteFileSync(process.env.SECRET_MARKER, JSON.stringify({ environment, runtime }));\nchmodSync(environment, 0o600);\nwriteFileSync(environment, "WRANGLER_LOG=debug\\n");\n`,
+      );
+      await chmod(wrangler, 0o755);
+      expect(run(cwd, "create").status).toBe(0);
+
+      const result = runSecret(cwd, "OAUTH_STATE_SECRET", head, {
+        ...(await stagingDeploymentDigests(cwd)),
+        SECRET_MARKER: marker,
+      });
+      const captured = JSON.parse(await readFile(marker, "utf8"));
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Wrangler did not put the verified staging secret.",
+      );
+      await expect(readFile(captured.environment)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readdir(captured.runtime)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+  });
+
   it("cleans up private secret-entry artifacts when Wrangler fails", async () => {
     await withCheckout(async ({ cwd, head }) => {
       const wrangler = join(cwd, "node_modules", ".bin", "wrangler");
       const marker = join(cwd, "failed-secret-entry.json");
       await writeFile(
         wrangler,
-        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nimport { dirname } from "node:path";\nconst args = process.argv.slice(2);\nconst config = args[args.indexOf("--config") + 1];\nwriteFileSync(process.env.SECRET_MARKER, JSON.stringify({ config, runtime: dirname(dirname(process.argv[1])) }));\nprocess.exit(17);\n`,
+        `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nimport { dirname } from "node:path";\nconst args = process.argv.slice(2);\nconst config = args[args.indexOf("--config") + 1];\nconst environment = args[args.indexOf("--env-file") + 1];\nwriteFileSync(process.env.SECRET_MARKER, JSON.stringify({ config, environment, runtime: dirname(dirname(process.argv[1])) }));\nprocess.exit(17);\n`,
       );
       await chmod(wrangler, 0o755);
       expect(run(cwd, "create").status).toBe(0);
@@ -1302,6 +1358,9 @@ writeFileSync(process.env.SECRET_MARKER, JSON.stringify({
         "Wrangler did not put the verified staging secret.",
       );
       await expect(readFile(captured.config)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readFile(captured.environment)).rejects.toMatchObject({
         code: "ENOENT",
       });
       await expect(readdir(captured.runtime)).rejects.toMatchObject({
