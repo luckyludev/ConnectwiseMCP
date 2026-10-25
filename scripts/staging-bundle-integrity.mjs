@@ -920,7 +920,9 @@ function putVerifiedStagingSecret(
   let runtimeDirectory;
   let temporaryRuntime;
   let temporaryConfig;
+  let temporaryEnvironment;
   let configWriteDescriptor;
+  let environmentWriteDescriptor;
   let runtimeSnapshotDirectories = [];
   let result;
   try {
@@ -929,6 +931,7 @@ function putVerifiedStagingSecret(
     );
     temporaryRuntime = join(runtimeDirectory, "node_modules");
     temporaryConfig = join(runtimeDirectory, "wrangler.jsonc");
+    temporaryEnvironment = join(runtimeDirectory, "empty.env");
     configWriteDescriptor = openSync(
       temporaryConfig,
       constants.O_WRONLY |
@@ -941,6 +944,18 @@ function putVerifiedStagingSecret(
     fsyncSync(configWriteDescriptor);
     closeSync(configWriteDescriptor);
     configWriteDescriptor = undefined;
+
+    environmentWriteDescriptor = openSync(
+      temporaryEnvironment,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    fsyncSync(environmentWriteDescriptor);
+    closeSync(environmentWriteDescriptor);
+    environmentWriteDescriptor = undefined;
 
     const runtimeSnapshot = deploymentRuntimeDigest(
       temporaryRuntime,
@@ -959,6 +974,7 @@ function putVerifiedStagingSecret(
     }
 
     chmodSync(temporaryConfig, 0o400);
+    chmodSync(temporaryEnvironment, 0o400);
     chmodSync(runtimeDirectory, 0o500);
     if (!result) {
       const secretEnvironment = { ...process.env };
@@ -981,20 +997,37 @@ function putVerifiedStagingSecret(
           "staging",
           "--config",
           temporaryConfig,
+          "--env-file",
+          temporaryEnvironment,
         ],
         { env: secretEnvironment, stdio: "inherit" },
       );
     }
     try {
       verifyPrivateCopy(temporaryConfig, config, "private configuration");
+      verifyPrivateCopy(
+        temporaryEnvironment,
+        Buffer.alloc(0),
+        "private environment",
+      );
     } catch (error) {
       result = { status: 1, error };
     }
   } catch (error) {
     result = { status: 1, error };
   } finally {
-    if (configWriteDescriptor !== undefined) closeSync(configWriteDescriptor);
     let cleanupError;
+    for (const descriptor of [
+      configWriteDescriptor,
+      environmentWriteDescriptor,
+    ]) {
+      if (descriptor === undefined) continue;
+      try {
+        closeSync(descriptor);
+      } catch (error) {
+        if (!cleanupError) cleanupError = error;
+      }
+    }
     if (runtimeDirectory) {
       try {
         const runtimeDirectoryStat = lstatSync(runtimeDirectory);
