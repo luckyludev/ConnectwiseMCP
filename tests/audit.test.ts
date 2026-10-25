@@ -5,6 +5,58 @@ const tenantId = "11111111-1111-4111-8111-111111111111";
 const objectId = "22222222-2222-4222-8222-222222222222";
 const correlationId = "33333333-3333-4333-8333-333333333333";
 
+const toolAuditResults = [
+  ["success", "ok"],
+  ["denied", "insufficient_scope"],
+  ["denied", "profile_unavailable"],
+  ["denied", "connectwise_denied"],
+  ["denied", "invalid_arguments"],
+  ["failure", "lookup_failed"],
+  ["failure", "write_outcome_unknown"],
+  ["failure", "operation_failed"],
+] as const;
+const toolAuditOutcomes = ["success", "denied", "failure"] as const;
+const toolAuditReasons = [
+  "ok",
+  "insufficient_scope",
+  "profile_unavailable",
+  "lookup_failed",
+  "connectwise_denied",
+  "write_outcome_unknown",
+  "operation_failed",
+  "invalid_arguments",
+] as const;
+const allowedToolAuditResults = new Set(
+  toolAuditResults.map(([outcome, reason]) => `${outcome}:${reason}`),
+);
+const invalidToolAuditResults = toolAuditOutcomes.flatMap((outcome) =>
+  toolAuditReasons
+    .filter((reason) => !allowedToolAuditResults.has(`${outcome}:${reason}`))
+    .map((reason) => ({ outcome, reason })),
+);
+
+const resourceAuditResults = [
+  ["success", "ok"],
+  ["denied", "insufficient_scope"],
+  ["denied", "profile_unavailable"],
+] as const;
+const resourceAuditOutcomes = ["success", "denied"] as const;
+const resourceAuditReasons = [
+  "ok",
+  "insufficient_scope",
+  "profile_unavailable",
+] as const;
+const allowedResourceAuditResults = new Set(
+  resourceAuditResults.map(([outcome, reason]) => `${outcome}:${reason}`),
+);
+const invalidResourceAuditResults = resourceAuditOutcomes.flatMap((outcome) =>
+  resourceAuditReasons
+    .filter(
+      (reason) => !allowedResourceAuditResults.has(`${outcome}:${reason}`),
+    )
+    .map((reason) => ({ outcome, reason })),
+);
+
 describe("emitToolAudit", () => {
   it.each([
     {
@@ -77,6 +129,54 @@ describe("emitToolAudit", () => {
     ).not.toThrow();
     expect(messages).toEqual([]);
   });
+
+  it.each(invalidToolAuditResults)(
+    "suppresses the invalid $outcome/$reason result pair",
+    ({ outcome, reason }) => {
+      const messages: string[] = [];
+
+      emitToolAudit(
+        {
+          props: { tenantId, objectId, profileAlias: "LUIS" },
+          tool: "get_service_ticket",
+          outcome,
+          reason,
+          startedAtMs: 0,
+        },
+        {
+          logger: (message) => messages.push(message),
+          now: () => 1,
+          createCorrelationId: () => correlationId,
+        },
+      );
+
+      expect(messages).toEqual([]);
+    },
+  );
+
+  it.each(toolAuditResults)(
+    "emits the allowlisted %s/%s result pair",
+    (outcome, reason) => {
+      const messages: string[] = [];
+
+      emitToolAudit(
+        {
+          props: { tenantId, objectId, profileAlias: "LUIS" },
+          tool: "get_service_ticket",
+          outcome,
+          reason,
+          startedAtMs: 0,
+        },
+        {
+          logger: (message) => messages.push(message),
+          now: () => 1,
+          createCorrelationId: () => correlationId,
+        },
+      );
+
+      expect(JSON.parse(messages[0]!)).toMatchObject({ outcome, reason });
+    },
+  );
 
   it("bounds the emitted duration", () => {
     const messages: string[] = [];
@@ -309,6 +409,54 @@ describe("emitResourceAudit", () => {
 
     expect(messages).toEqual([]);
   });
+
+  it.each(invalidResourceAuditResults)(
+    "suppresses the invalid $outcome/$reason result pair",
+    ({ outcome, reason }) => {
+      const messages: string[] = [];
+
+      emitResourceAudit(
+        {
+          props: { tenantId, objectId, profileAlias: "LUIS" },
+          resource: "ui://connectwise/attachment-uploader.html",
+          outcome,
+          reason,
+          startedAtMs: 0,
+        },
+        {
+          logger: (message) => messages.push(message),
+          now: () => 1,
+          createCorrelationId: () => correlationId,
+        },
+      );
+
+      expect(messages).toEqual([]);
+    },
+  );
+
+  it.each(resourceAuditResults)(
+    "emits the allowlisted %s/%s result pair",
+    (outcome, reason) => {
+      const messages: string[] = [];
+
+      emitResourceAudit(
+        {
+          props: { tenantId, objectId, profileAlias: "LUIS" },
+          resource: "ui://connectwise/attachment-uploader.html",
+          outcome,
+          reason,
+          startedAtMs: 0,
+        },
+        {
+          logger: (message) => messages.push(message),
+          now: () => 1,
+          createCorrelationId: () => correlationId,
+        },
+      );
+
+      expect(JSON.parse(messages[0]!)).toMatchObject({ outcome, reason });
+    },
+  );
 
   it("does not throw when the resource audit logger fails", () => {
     expect(() =>
