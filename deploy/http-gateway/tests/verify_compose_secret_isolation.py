@@ -30,6 +30,10 @@ GATEWAY_ENVIRONMENT = {
 }
 TUNNEL_ENVIRONMENT = {"TUNNEL_TOKEN"}
 EXPECTED_SERVICES = {"mcp-gateway", "cloudflared"}
+EXPECTED_LOGGING = {
+    "driver": "json-file",
+    "options": {"max-file": "3", "max-size": "10m"},
+}
 EXPECTED_GATEWAY_BUILD_CONTEXT = Path(__file__).resolve().parents[2]
 ALLOWED_SERVICE_FIELDS = {
     "mcp-gateway": {
@@ -40,6 +44,7 @@ ALLOWED_SERVICE_FIELDS = {
         "entrypoint",
         "environment",
         "image",
+        "logging",
         "networks",
         "ports",
         "restart",
@@ -53,6 +58,7 @@ ALLOWED_SERVICE_FIELDS = {
         "entrypoint",
         "environment",
         "image",
+        "logging",
         "networks",
         "ports",
         "restart",
@@ -123,6 +129,13 @@ def _validate_runtime_restrictions(service: Any, name: str) -> None:
         raise ValueError(
             f"{name} contains non-allowlisted service fields: "
             + ", ".join(sorted(unexpected_fields))
+        )
+
+
+def _validate_bounded_logging(service: dict[str, Any], name: str) -> None:
+    if service.get("logging") != EXPECTED_LOGGING:
+        raise ValueError(
+            f"{name} logging must use json-file with max-size 10m and max-file 3"
         )
 
 
@@ -211,6 +224,8 @@ def validate_compose_config(config: Any, *, verify_canaries: bool = False) -> No
     tunnel_keys = _environment_keys(tunnel, "cloudflared")
     _validate_runtime_restrictions(gateway, "mcp-gateway")
     _validate_runtime_restrictions(tunnel, "cloudflared")
+    _validate_bounded_logging(gateway, "mcp-gateway")
+    _validate_bounded_logging(tunnel, "cloudflared")
     _validate_gateway_build(gateway)
     _validate_service_execution(gateway, tunnel)
     _validate_networks(config, gateway, tunnel)

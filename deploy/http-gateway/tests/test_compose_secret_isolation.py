@@ -3,6 +3,7 @@ import pytest
 from verify_compose_secret_isolation import (
     CANARY_VALUES,
     EXPECTED_GATEWAY_BUILD_CONTEXT,
+    EXPECTED_LOGGING,
     GATEWAY_ENVIRONMENT,
     TUNNEL_ENVIRONMENT,
     validate_compose_config,
@@ -22,6 +23,9 @@ def compose_config() -> dict:
                 "environment": {name: f"gateway-{name}" for name in GATEWAY_ENVIRONMENT},
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
+                "logging": EXPECTED_LOGGING.copy() | {
+                    "options": EXPECTED_LOGGING["options"].copy()
+                },
                 "networks": {"default": None},
                 "ports": [
                     {
@@ -41,6 +45,9 @@ def compose_config() -> dict:
                 "environment": {name: f"tunnel-{name}" for name in TUNNEL_ENVIRONMENT},
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
+                "logging": EXPECTED_LOGGING.copy() | {
+                    "options": EXPECTED_LOGGING["options"].copy()
+                },
                 "networks": {"default": None},
                 "depends_on": {
                     "mcp-gateway": {
@@ -58,6 +65,40 @@ def compose_config() -> dict:
 
 def test_accepts_exact_service_environment_allowlists():
     validate_compose_config(compose_config())
+
+
+@pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
+@pytest.mark.parametrize(
+    "logging",
+    [
+        None,
+        {},
+        {"driver": "local", "options": {"max-size": "10m", "max-file": "3"}},
+        {"driver": "json-file"},
+        {"driver": "json-file", "options": {"max-file": "3"}},
+        {
+            "driver": "json-file",
+            "options": {"max-size": "0", "max-file": "3"},
+        },
+        {
+            "driver": "json-file",
+            "options": {"max-size": "10m", "max-file": "0"},
+        },
+        {
+            "driver": "json-file",
+            "options": {"max-size": "10m", "max-file": "3", "labels": "*"},
+        },
+    ],
+)
+def test_rejects_missing_unbounded_or_altered_logging(service, logging):
+    config = compose_config()
+    if logging is None:
+        del config["services"][service]["logging"]
+    else:
+        config["services"][service]["logging"] = logging
+
+    with pytest.raises(ValueError, match="logging must use json-file"):
+        validate_compose_config(config)
 
 
 def test_rejects_unreviewed_additional_service():
