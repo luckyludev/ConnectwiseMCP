@@ -2,6 +2,7 @@
 set -euo pipefail
 
 image="${1:?usage: smoke_cloudflared_read_only.sh IMAGE}"
+expected_user="65532:65532"
 container="legacy-cloudflared-read-only-smoke-${GITHUB_RUN_ID:-local}-$$"
 log_file="$(mktemp)"
 
@@ -13,7 +14,13 @@ trap cleanup EXIT
 
 test_tunnel_token="$(python3 -c 'import base64, json; payload = {"a": "00000000000000000000000000000001", "t": "00000000-0000-4000-8000-000000000001", "s": "Y2ktb25seS1ub3QtYS1zZWNyZXQ="}; print(base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode())')"
 
+if [[ "$(docker image inspect --format '{{.Config.User}}' "$image")" != "$expected_user" ]]; then
+  printf '%s\n' "cloudflared image must declare the exact numeric non-root user $expected_user." >&2
+  exit 1
+fi
+
 docker run --detach --name "$container" \
+  --user "$expected_user" \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --read-only \
@@ -23,6 +30,11 @@ docker run --detach --name "$container" \
 
 if [[ "$(docker inspect --format '{{.HostConfig.PidsLimit}}' "$container")" != "128" ]]; then
   printf '%s\n' "cloudflared did not run with the exact 128-process PID ceiling." >&2
+  exit 1
+fi
+
+if [[ "$(docker inspect --format '{{.Config.User}}' "$container")" != "$expected_user" ]]; then
+  printf '%s\n' "cloudflared did not run as the exact numeric non-root user $expected_user." >&2
   exit 1
 fi
 

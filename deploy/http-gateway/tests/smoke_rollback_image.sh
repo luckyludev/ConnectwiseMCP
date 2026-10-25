@@ -36,6 +36,7 @@ common_env=(
   --env CONNECTWISE_AUTH_PREFIX=ci-only-prefix+
 )
 runtime_security=(
+  --user 10001:10001
   --cap-drop ALL
   --security-opt no-new-privileges:true
   --read-only
@@ -44,8 +45,8 @@ runtime_security=(
 )
 
 runtime_uid="$(docker run --rm "${runtime_security[@]}" --entrypoint python "$image" -c 'import os; print(os.geteuid())')"
-if [[ ! "$runtime_uid" =~ ^[0-9]+$ || "$runtime_uid" -eq 0 ]]; then
-  printf '%s\n' "Rollback image must run as a numeric non-root user." >&2
+if [[ "$runtime_uid" != "10001" ]]; then
+  printf '%s\n' "Rollback image must run as the exact numeric non-root user 10001:10001." >&2
   exit 1
 fi
 

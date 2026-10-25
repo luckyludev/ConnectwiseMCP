@@ -37,6 +37,8 @@ The rollback authority may roll back before a threshold is crossed when evidence
 
 Every successful canonical `main` run of `legacy-oauth-ci` retains `legacy-rollback-image-<release-commit>` for 90 days. The artifact contains the exact gateway and digest-pinned `cloudflared` image archives that CI reloaded and smoke-tested, their SHA-256 checksums, a CycloneDX SBOM generated from the gateway image, the exact Compose descriptor validated by CI, and a manifest binding both archives, the SBOM, and the Compose digests plus both image IDs to the workflow commit and run. GitHub artifact attestations cryptographically bind all six files to the canonical repository and workflow identity. A pull-request merge commit, a failed run, an expired artifact, an unattested file, or a local rebuild is not rollback evidence.
 
+The retained Compose descriptor fixes the gateway to numeric user/group `10001:10001` and `cloudflared` to `65532:65532`; CI rejects missing, named, root, or altered identities and smoke-tests both exact users. Keep these overrides with the other runtime restrictions when rehearsing or invoking rollback. Do not rely only on an image's mutable user default.
+
 Before the change window, select a successful `push`, `schedule`, or manually dispatched run on `refs/heads/main` whose full 40-character `headSha` is the reviewed release commit. Record its run URL/ID in the approved operations system. Download the artifact without renaming its files:
 
 ```bash
