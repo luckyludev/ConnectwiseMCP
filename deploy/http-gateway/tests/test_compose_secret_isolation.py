@@ -3,6 +3,7 @@ import pytest
 from verify_compose_secret_isolation import (
     CANARY_VALUES,
     EXPECTED_GATEWAY_BUILD_CONTEXT,
+    EXPECTED_GATEWAY_TMPFS,
     EXPECTED_LOGGING,
     GATEWAY_ENVIRONMENT,
     TUNNEL_ENVIRONMENT,
@@ -23,6 +24,8 @@ def compose_config() -> dict:
                 "environment": {name: f"gateway-{name}" for name in GATEWAY_ENVIRONMENT},
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
+                "read_only": True,
+                "tmpfs": EXPECTED_GATEWAY_TMPFS.copy(),
                 "logging": EXPECTED_LOGGING.copy() | {
                     "options": EXPECTED_LOGGING["options"].copy()
                 },
@@ -45,6 +48,7 @@ def compose_config() -> dict:
                 "environment": {name: f"tunnel-{name}" for name in TUNNEL_ENVIRONMENT},
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
+                "read_only": True,
                 "logging": EXPECTED_LOGGING.copy() | {
                     "options": EXPECTED_LOGGING["options"].copy()
                 },
@@ -139,6 +143,49 @@ def test_rejects_permissive_or_non_allowlisted_runtime_settings(
     config["services"][service][field] = value
 
     with pytest.raises(ValueError, match=error):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize("service", ["mcp-gateway", "cloudflared"])
+@pytest.mark.parametrize("read_only", [None, False, "true", 1])
+def test_rejects_writable_or_non_boolean_root_filesystem(service, read_only):
+    config = compose_config()
+    if read_only is None:
+        del config["services"][service]["read_only"]
+    else:
+        config["services"][service]["read_only"] = read_only
+
+    with pytest.raises(ValueError, match="root filesystem must be read-only"):
+        validate_compose_config(config)
+
+
+@pytest.mark.parametrize(
+    "tmpfs",
+    [
+        None,
+        [],
+        ["/run/connectwise-memory"],
+        ["/run/connectwise-memory:rw,size=32m,uid=10001,gid=10001,mode=0700"],
+        ["/run/connectwise-memory:rw,noexec,nosuid,nodev,size=16m,uid=0,gid=0,mode=0777"],
+        EXPECTED_GATEWAY_TMPFS + ["/tmp:size=16m"],
+    ],
+)
+def test_rejects_missing_unbounded_or_altered_fast_memory_tmpfs(tmpfs):
+    config = compose_config()
+    if tmpfs is None:
+        del config["services"]["mcp-gateway"]["tmpfs"]
+    else:
+        config["services"]["mcp-gateway"]["tmpfs"] = tmpfs
+
+    with pytest.raises(ValueError, match="bounded, restricted Fast Memory tmpfs"):
+        validate_compose_config(config)
+
+
+def test_rejects_cloudflared_tmpfs():
+    config = compose_config()
+    config["services"]["cloudflared"]["tmpfs"] = ["/tmp:size=16m"]
+
+    with pytest.raises(ValueError, match="non-allowlisted service fields: tmpfs"):
         validate_compose_config(config)
 
 

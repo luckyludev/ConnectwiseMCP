@@ -610,13 +610,20 @@ describe("legacy rollback deployment surface", () => {
 
 describe("legacy rollback image security", () => {
   it("smoke-tests the digest-pinned cloudflared image rendered from Compose", async () => {
-    const [workflow, compose] = await Promise.all([
+    const [workflow, compose, cloudflaredSmoke] = await Promise.all([
       readFile(
         new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
         "utf8",
       ),
       readFile(
         new URL("../deploy/http-gateway/docker-compose.yml", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "../deploy/http-gateway/tests/smoke_cloudflared_read_only.sh",
+          import.meta.url,
+        ),
         "utf8",
       ),
     ]);
@@ -629,7 +636,15 @@ describe("legacy rollback image security", () => {
     );
     expect(workflow).toContain('docker pull "$cloudflared_image"');
     expect(workflow).toContain(
-      'docker run --rm --cap-drop ALL --security-opt no-new-privileges:true "$cloudflared_image" --version',
+      'docker run --rm --cap-drop ALL --security-opt no-new-privileges:true --read-only "$cloudflared_image" --version',
+    );
+    expect(workflow).toContain(
+      'bash deploy/http-gateway/tests/smoke_cloudflared_read_only.sh "$cloudflared_image"',
+    );
+    expect(cloudflaredSmoke).toContain("--read-only");
+    expect(cloudflaredSmoke).toContain('"$image" tunnel run');
+    expect(cloudflaredSmoke).toContain(
+      "cloudflared tunnel command remained running with a read-only root filesystem.",
     );
   });
 
@@ -825,7 +840,10 @@ describe("legacy rollback image security", () => {
       'test "$(docker image inspect --format \'{{.Id}}\' "$cloudflared_repository")" = "$cloudflared_image_id"',
     );
     expect(workflow).toContain(
-      'docker run --rm --cap-drop ALL --security-opt no-new-privileges:true "$cloudflared_repository" --version',
+      'docker run --rm --cap-drop ALL --security-opt no-new-privileges:true --read-only "$cloudflared_repository" --version',
+    );
+    expect(workflow).toContain(
+      'bash deploy/http-gateway/tests/smoke_cloudflared_read_only.sh "$cloudflared_repository"',
     );
     expect(attestJob).toContain(
       "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",

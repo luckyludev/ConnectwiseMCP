@@ -1,4 +1,5 @@
 # These legacy files predate V2 and are intentionally retained with CRLF.
 deploy/cwm-mcp/api_gateway/server.py whitespace=cr-at-eol
+deploy/cwm-mcp/api_gateway/fast_memory_db.py whitespace=cr-at-eol
 deploy/cwm-mcp/setup.py whitespace=cr-at-eol
 deploy/cwm-mcp/cwm_api_gateway_mcp.egg-info/PKG-INFO whitespace=cr-at-eol
