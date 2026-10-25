@@ -17,8 +17,14 @@ docker run --detach --name "$container" \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --read-only \
+  --pids-limit 128 \
   --env TUNNEL_TOKEN="$test_tunnel_token" \
   "$image" tunnel run >/dev/null
+
+if [[ "$(docker inspect --format '{{.HostConfig.PidsLimit}}' "$container")" != "128" ]]; then
+  printf '%s\n' "cloudflared did not run with the exact 128-process PID ceiling." >&2
+  exit 1
+fi
 
 for ((attempt = 1; attempt <= 10; attempt += 1)); do
   state="$(docker inspect --format '{{.State.Status}}' "$container")"
