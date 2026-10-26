@@ -264,6 +264,22 @@ describe("authenticated MCP transport", () => {
       );
       expect(tool?.inputSchema?.properties).not.toHaveProperty("memberId");
     }
+    for (const [name, fields] of [
+      ["create_schedule_entry", ["dateStart", "dateEnd"]],
+      ["update_schedule_entry", ["dateStart", "dateEnd"]],
+      ["create_time_entry", ["timeStart", "timeEnd"]],
+    ] as const) {
+      const properties = body.result.tools.find(
+        (candidate) => candidate.name === name,
+      )?.inputSchema?.properties;
+      for (const field of fields) {
+        expect(properties?.[field]).toMatchObject({
+          type: "string",
+          minLength: 10,
+          maxLength: 40,
+        });
+      }
+    }
 
     const appOnlyTools = body.result.tools.filter(
       (tool) =>

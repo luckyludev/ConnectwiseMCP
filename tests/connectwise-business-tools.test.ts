@@ -133,23 +133,34 @@ async function callRegisteredBusinessTool(
   props: Record<string, unknown>,
   dependencies: Parameters<typeof registerConnectWiseBusinessTools>[3],
 ) {
+  return callNamedRegisteredBusinessTool(
+    "get_service_boards",
+    {},
+    props,
+    businessEnv,
+    dependencies,
+  );
+}
+
+async function callNamedRegisteredBusinessTool(
+  name: string,
+  args: Record<string, unknown>,
+  props: Record<string, unknown>,
+  env: object,
+  dependencies: Parameters<typeof registerConnectWiseBusinessTools>[3],
+) {
   const server = new McpServer({
     name: "business-tool-test",
     version: "1.0.0",
   });
-  registerConnectWiseBusinessTools(
-    server,
-    businessEnv,
-    () => props,
-    dependencies,
-  );
+  registerConnectWiseBusinessTools(server, env, () => props, dependencies);
   const client = new Client({ name: "business-tool-test", version: "1.0.0" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   try {
-    return await client.callTool({ name: "get_service_boards", arguments: {} });
+    return await client.callTool({ name, arguments: args });
   } finally {
     await client.close();
     await server.close();
@@ -163,6 +174,70 @@ function serviceBoardClient(): ConnectWiseClient {
     },
   } as unknown as ConnectWiseClient;
 }
+
+describe("write timestamp input bounds", () => {
+  it.each([
+    [
+      "create_schedule_entry",
+      "dateStart",
+      { dateStart: "x".repeat(41), dateEnd: "2026-09-01T13:00:00-04:00" },
+    ],
+    [
+      "create_schedule_entry",
+      "dateEnd",
+      { dateStart: "2026-09-01T12:00:00-04:00", dateEnd: "x".repeat(41) },
+    ],
+    [
+      "update_schedule_entry",
+      "dateStart",
+      { entryId: 1, dateStart: "x".repeat(41) },
+    ],
+    [
+      "update_schedule_entry",
+      "dateEnd",
+      { entryId: 1, dateEnd: "x".repeat(41) },
+    ],
+    [
+      "create_time_entry",
+      "timeStart",
+      { timeStart: "x".repeat(41), timeEnd: "2026-09-01T13:00:00-04:00" },
+    ],
+    [
+      "create_time_entry",
+      "timeEnd",
+      { timeStart: "2026-09-01T12:00:00-04:00", timeEnd: "x".repeat(41) },
+    ],
+  ] as const)(
+    "rejects oversized %s.%s before profile or secret access",
+    async (tool, _field, args) => {
+      const environmentReads: string[] = [];
+      let clientCreated = false;
+      const env = new Proxy(businessEnv, {
+        get(target, property, receiver) {
+          environmentReads.push(String(property));
+          return Reflect.get(target, property, receiver);
+        },
+      });
+
+      const result = await callNamedRegisteredBusinessTool(
+        tool,
+        args,
+        { ...resourceProps, scopes: ["mcp:read", "mcp:write"] },
+        env,
+        {
+          createClient: () => {
+            clientCreated = true;
+            return serviceBoardClient();
+          },
+        },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(environmentReads).toEqual([]);
+      expect(clientCreated).toBe(false);
+    },
+  );
+});
 
 describe("business-tool identity snapshot", () => {
   it("reuses one identity snapshot for authorization, credentials, and audit", async () => {
