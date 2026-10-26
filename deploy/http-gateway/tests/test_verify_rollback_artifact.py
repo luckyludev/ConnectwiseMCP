@@ -730,7 +730,7 @@ def test_checked_in_compose_binds_cloudflared_manifest_reference():
     compose = verifier.Path(__file__).parents[1] / "docker-compose.yml"
     checked_in_image = (
         "cloudflare/cloudflared:latest@sha256:"
-        "faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39"
+        "c6c7ae1d5dfdcb094ad344ed68ccffc26635c9c6be80965664c33baf064b0515"
     )
 
     verifier._verify_compose_cloudflared_image(compose.read_bytes(), checked_in_image)

@@ -39,7 +39,7 @@ services:
       AZURE_SCOPES: ${AZURE_SCOPES:-openid profile email}
 
   cloudflared:
-    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39}
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest@sha256:c6c7ae1d5dfdcb094ad344ed68ccffc26635c9c6be80965664c33baf064b0515}
     container_name: connectwise-mcp-cloudflared
     user: "65532:65532"
     restart: unless-stopped
