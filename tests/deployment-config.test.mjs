@@ -242,6 +242,40 @@ describe("dependency maintenance configuration", () => {
     }
   });
 
+  it("verifies registry signatures after installing and auditing both Node dependency trees", async () => {
+    const [rootPackage, legacyWorkflow] = await Promise.all([
+      readJson("../package.json"),
+      readFile(
+        new URL("../.github/workflows/legacy-oauth-ci.yml", import.meta.url),
+        "utf8",
+      ),
+    ]);
+
+    expect(rootPackage.scripts?.check).toMatch(
+      /^npm run verify:npm && npm audit signatures && npm run scripts:check/u,
+    );
+
+    const installOffset = legacyWorkflow.indexOf(
+      "npm ci --prefix deploy/cwm-mcp --ignore-scripts",
+    );
+    const signatureAuditOffset = legacyWorkflow.indexOf(
+      "npm audit signatures --prefix deploy/cwm-mcp",
+    );
+    const vulnerabilityAuditOffset = legacyWorkflow.indexOf(
+      "npm audit --prefix deploy/cwm-mcp --audit-level=moderate",
+    );
+    const nextStepOffset = legacyWorkflow.indexOf(
+      "      - name: Seed ignored build-context canaries",
+    );
+    expect(installOffset).toBeGreaterThan(-1);
+    expect(signatureAuditOffset).toBeGreaterThan(installOffset);
+    expect(vulnerabilityAuditOffset).toBeGreaterThan(signatureAuditOffset);
+    expect(nextStepOffset).toBeGreaterThan(vulnerabilityAuditOffset);
+    expect(
+      legacyWorkflow.match(/npm audit signatures --prefix deploy\/cwm-mcp/gu),
+    ).toHaveLength(1);
+  });
+
   it("pins every CI job to the reviewed Ubuntu runner image", async () => {
     const workflows = await Promise.all(
       ["v2-ci.yml", "legacy-oauth-ci.yml"].map((file) =>

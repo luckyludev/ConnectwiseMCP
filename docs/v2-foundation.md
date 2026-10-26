@@ -138,7 +138,7 @@ npm ci --ignore-scripts
 npm run check
 ```
 
-`npm run check` executes strict typecheck, all tests, Prettier verification, npm audit at moderate severity, and top-level plus staging Wrangler `--dry-run` bundles. Dry-run does not authenticate, inspect remote staging variables, validate their presence or values, or deploy.
+`npm run check` executes strict typecheck, all tests, Prettier verification, npm vulnerability and registry-signature/provenance audits, and top-level plus staging Wrangler `--dry-run` bundles. Dry-run does not authenticate, inspect remote staging variables, validate their presence or values, or deploy.
 
 ## Next stages
 
