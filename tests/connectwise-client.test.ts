@@ -5824,8 +5824,8 @@ describe("ConnectWiseClient", () => {
           // ConnectWise create receipts can omit the target relationship.
           return Response.json({
             id: 777,
-            dateStart: "2026-08-31T16:30:00Z",
-            dateEnd: "2026-08-31T21:00:00Z",
+            dateStart: "2024-02-29T16:30:00Z",
+            dateEnd: "2024-02-29T21:00:00Z",
           });
         }
         return Response.json({
@@ -5834,8 +5834,8 @@ describe("ConnectWiseClient", () => {
           objectId: 1892065,
           type: { id: 4 },
           status: { id: 1 },
-          dateStart: "2026-08-31T16:30:00Z",
-          dateEnd: "2026-08-31T21:00:00Z",
+          dateStart: "2024-02-29T16:30:00Z",
+          dateEnd: "2024-02-29T21:00:00Z",
           allowScheduleConflictsFlag: true,
           doneFlag: false,
           name: "Test from pi",
@@ -5846,8 +5846,8 @@ describe("ConnectWiseClient", () => {
     await client.createScheduleEntry({
       objectId: 1892065,
       objectType: 4,
-      dateStart: "2026-08-31T12:30:00-04:00",
-      dateEnd: "2026-08-31T17:00:00-04:00",
+      dateStart: "2024-02-29T12:30:00.12345678901234-04:00",
+      dateEnd: "2024-02-29T17:00:00-04:00",
       allowConflicts: true,
       name: "Test from pi",
     });
@@ -5857,8 +5857,8 @@ describe("ConnectWiseClient", () => {
     );
     const body = calls[0]!.body as Record<string, unknown>;
     // CW rejects fractional seconds; the client must send second precision.
-    expect(body.dateStart).toBe("2026-08-31T16:30:00Z");
-    expect(body.dateEnd).toBe("2026-08-31T21:00:00Z");
+    expect(body.dateStart).toBe("2024-02-29T16:30:00Z");
+    expect(body.dateEnd).toBe("2024-02-29T21:00:00Z");
     expect(body.allowScheduleConflictsFlag).toBe(true);
     expect((body.member as { id: number }).id).toBe(149);
     expect(calls[1]!.method).toBe("GET");
@@ -5918,6 +5918,41 @@ describe("ConnectWiseClient", () => {
       await expect(
         client.createScheduleEntry({ objectId: 9, dateStart, dateEnd }),
       ).rejects.toThrow(message);
+      expect(requests).toBe(0);
+    },
+  );
+
+  it.each([
+    ["schedule", "2026-02-30T12:30:00Z", "2026-05-01T13:30:00Z"],
+    ["schedule", "2026-05-01T12:30:00Z", "2026-06-31T13:30:00Z"],
+    ["time", "1900-02-29T12:30:00-04:00", "2026-05-01T13:30:00Z"],
+    ["time", "2026-05-01T12:30:00Z", "2026-04-31T13:30:00-04:00"],
+  ] as const)(
+    "rejects an impossible calendar date for a %s write without issuing a request",
+    async (kind, invalidStart, invalidEnd) => {
+      let requests = 0;
+      const client = createConnectWiseClient(credentials, {
+        fetcher: async () => {
+          requests += 1;
+          return Response.json({});
+        },
+      });
+
+      const write =
+        kind === "schedule"
+          ? client.createScheduleEntry({
+              objectId: 9,
+              dateStart: invalidStart,
+              dateEnd: invalidEnd,
+            })
+          : client.createTimeEntry({
+              timeStart: invalidStart,
+              timeEnd: invalidEnd,
+            });
+
+      await expect(write).rejects.toThrow(
+        /Invalid (dateStart|dateEnd|timeStart|timeEnd)/,
+      );
       expect(requests).toBe(0);
     },
   );
@@ -6587,6 +6622,11 @@ describe("ConnectWiseClient", () => {
       "an interval longer than 24 hours",
       { dateEnd: "2026-09-02T12:00:01-04:00" },
       /schedule duration must not exceed 24 hours/,
+    ],
+    [
+      "an impossible calendar date",
+      { dateStart: "2026-02-30T12:00:00-04:00" },
+      /Invalid dateStart/,
     ],
   ])(
     "rejects a one-sided schedule update with %s",

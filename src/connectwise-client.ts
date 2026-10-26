@@ -940,7 +940,10 @@ function unicodeCaseFold(value: string): string {
 const ISO_OFFSET_RE =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|([+-])(\d{2})(?::?(\d{2}))?)$/;
 
-function strictIsoTimestampMs(value: unknown): number {
+function strictIsoTimestampMs(
+  value: unknown,
+  enforceMillisecondPrecision = true,
+): number {
   if (typeof value !== "string" || value.length > 40) return Number.NaN;
   const match = ISO_OFFSET_RE.exec(value);
   if (!match) return Number.NaN;
@@ -976,7 +979,9 @@ function strictIsoTimestampMs(value: unknown): number {
     hour > 23 ||
     minute > 59 ||
     second > 59 ||
-    (fractionalSecond !== undefined && fractionalSecond.length > 3) ||
+    (fractionalSecond !== undefined &&
+      enforceMillisecondPrecision &&
+      fractionalSecond.length > 3) ||
     offsetHour > 14 ||
     offsetMinute > 59 ||
     (offsetHour === 14 && offsetMinute !== 0)
@@ -994,7 +999,9 @@ function toUtcIso(value: string, label: string): string {
   if (!ISO_OFFSET_RE.test(value)) {
     throw new ConnectWiseUserError("timezone_required");
   }
-  const ms = Date.parse(value);
+  // Preserve the fractional precision accepted by this bounded write input;
+  // ConnectWise receives the value normalized to whole seconds below.
+  const ms = strictIsoTimestampMs(value, false);
   if (!Number.isFinite(ms)) {
     throw new Error(`Invalid ${label}`);
   }
