@@ -71,13 +71,13 @@ export const EXPECTED_TOOL_SCHEMA_HASHES = Object.freeze({
   update_service_ticket:
     "d8244216ed2a169b41bf75ef1214081b26345e8ad06f2185925666c546ba28d8",
   create_schedule_entry:
-    "43e74833ece7c1795119470bd6866efd3f35988e8bef43a52ab566f12de4595f",
+    "d1f5f6a9c4983b4a7364fea029782bfac5a32139d59b9178630b7ab655598480",
   update_schedule_entry:
-    "e649b32476f8fd95485fb802516f5e69931e935dfacb228e65a868550fb50d55",
+    "0ebd50e6df1b01bbcddfe5240141618f48b649d13c8f91624a73933209f48328",
   delete_schedule_entry:
     "cca10d4eeaa70734a42e8edc520bb0daf3b515f80145117ef510a072310fecce",
   create_time_entry:
-    "8a6228dc953be722c7bd2190de0ad1dd0660b1d4545714f43e22af94d16e20b3",
+    "e616a2ce71e9a3819fa665ad7ae88070406f81b86eac17107f51e4a527e4513c",
 });
 
 export const EXPECTED_TOOL_NAMES = Object.freeze(

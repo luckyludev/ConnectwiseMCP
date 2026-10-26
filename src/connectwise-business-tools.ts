@@ -437,6 +437,7 @@ async function runBusinessTool(
 }
 
 const positiveId = z.number().int().positive();
+const writeTimestamp = z.string().min(10).max(40);
 const pageSize = z.number().int().min(1).max(50).default(20);
 const ticketSearchPageSize = z.number().int().min(1).max(20).default(20);
 const targetedSearchPageSize = z.number().int().min(1).max(20).default(10);
@@ -664,8 +665,8 @@ const serviceTicketUpdateInput = z
 const scheduleEntryUpdateInput = z
   .object({
     entryId: positiveId,
-    dateStart: z.string().optional(),
-    dateEnd: z.string().optional(),
+    dateStart: writeTimestamp.optional(),
+    dateEnd: writeTimestamp.optional(),
     statusId: positiveId.optional(),
     doneFlag: z.boolean().optional(),
     name: z.string().trim().min(1).max(500).optional(),
@@ -1985,8 +1986,8 @@ export function registerConnectWiseBusinessTools(
       description:
         "Create a schedule entry on the mapped profile member's calendar. The member is always selected server-side from the authenticated user's profile. dateStart/dateEnd must be ISO 8601 WITH an explicit timezone offset (e.g. 2026-08-31T08:30:00-04:00); bare local or bare UTC times are rejected and converted to UTC server-side, so what lands on the calendar is always unambiguous. The end must be after the start and the interval must not exceed 24 hours. objectId is the ticket/record the entry attaches to and is required for service entries (objectType 4). allowConflicts defaults to false and sends allowScheduleConflictsFlag only when true. whereId sets the location (e.g. on-site vs Remote); omit to use the member's default. Returns the created entry with its stored UTC times.",
       inputSchema: {
-        dateStart: z.string(),
-        dateEnd: z.string(),
+        dateStart: writeTimestamp,
+        dateEnd: writeTimestamp,
         objectId: positiveId.optional(),
         objectType: z.number().int().min(1).max(100).optional(),
         statusId: positiveId.optional(),
@@ -2095,8 +2096,8 @@ export function registerConnectWiseBusinessTools(
       description:
         "Create a time entry for the member fixed in the authenticated user's server-side ConnectWise profile. timeStart/timeEnd must be ISO 8601 WITH an explicit timezone offset (converted to UTC server-side); the end must be after the start and the interval must not exceed 24 hours. Supply at most one target: ticketId for a service ticket or chargeToId for a charge code. If a timesheet is pending approval the write is refused with a clear instruction to recall/approve it first. Known charge mappings: Unprofitable chargeTo 13/workType 25/DoNotBill; Vacation chargeTo 2/workType 7/NoCharge; Sick chargeTo 7/workType 6/NoCharge. Returns the confirmed stored entry.",
       inputSchema: {
-        timeStart: z.string(),
-        timeEnd: z.string(),
+        timeStart: writeTimestamp,
+        timeEnd: writeTimestamp,
         notes: z.string().trim().min(1).max(2000).optional(),
         ticketId: positiveId.optional(),
         chargeToId: positiveId.optional(),
