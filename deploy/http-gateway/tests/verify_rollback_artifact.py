@@ -18,6 +18,7 @@ CLOUDFLARED_ARCHIVE_NAME = "connectwise-legacy-rollback-cloudflared-image.tar.gz
 CHECKSUM_NAME = "connectwise-legacy-rollback-image.sha256"
 MANIFEST_NAME = "connectwise-legacy-rollback-image.json"
 SBOM_NAME = "connectwise-legacy-rollback-image.cdx.json"
+CLOUDFLARED_SBOM_NAME = "connectwise-legacy-rollback-cloudflared-image.cdx.json"
 COMPOSE_NAME = "connectwise-legacy-rollback-compose.yml"
 MAX_SBOM_BYTES = 16 * 1024 * 1024
 MAX_COMPOSE_BYTES = 256 * 1024
@@ -39,6 +40,8 @@ MANIFEST_KEYS = {
     "cloudflaredArchiveSha256",
     "sbom",
     "sbomSha256",
+    "cloudflaredSbom",
+    "cloudflaredSbomSha256",
     "compose",
     "composeSha256",
 }
@@ -265,6 +268,78 @@ def _verify_archive(
         raise ValueError(f"{label.capitalize()} SHA-256 mismatch")
 
 
+def _verify_sbom(
+    directory_descriptor: int,
+    name: str,
+    expected_sha256: str,
+    expected_image_id: str,
+    expected_repo_digest: str | None,
+    label: str,
+) -> None:
+    try:
+        with _regular_file(directory_descriptor, name) as sbom_file:
+            sbom_bytes = sbom_file.read(MAX_SBOM_BYTES + 1)
+        if len(sbom_bytes) > MAX_SBOM_BYTES:
+            raise ValueError(f"{label} exceeds the maximum allowed size")
+        sbom = json.loads(sbom_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} must be valid UTF-8 JSON") from exc
+    if hashlib.sha256(sbom_bytes).hexdigest() != expected_sha256:
+        raise ValueError(f"{label} SHA-256 mismatch")
+    components = sbom.get("components") if isinstance(sbom, dict) else None
+    if (
+        not isinstance(sbom, dict)
+        or sbom.get("bomFormat") != "CycloneDX"
+        or sbom.get("specVersion") not in {"1.4", "1.5", "1.6"}
+        or type(sbom.get("version")) is not int
+        or sbom["version"] < 1
+        or not isinstance(components, list)
+        or not components
+        or any(
+            not isinstance(component, dict)
+            or type(component.get("type")) is not str
+            or not component["type"].strip()
+            or type(component.get("name")) is not str
+            or not component["name"].strip()
+            for component in components
+        )
+    ):
+        raise ValueError(f"{label} must be a valid CycloneDX component inventory")
+
+    metadata = sbom.get("metadata")
+    root = metadata.get("component") if isinstance(metadata, dict) else None
+    properties = root.get("properties") if isinstance(root, dict) else None
+    if (
+        not isinstance(root, dict)
+        or root.get("type") != "container"
+        or not isinstance(properties, list)
+        or any(
+            not isinstance(prop, dict)
+            or type(prop.get("name")) is not str
+            or type(prop.get("value")) is not str
+            for prop in properties
+        )
+    ):
+        raise ValueError(f"{label} must identify a scanned container image")
+
+    image_ids = [
+        prop["value"]
+        for prop in properties
+        if prop["name"] == "aquasecurity:trivy:ImageID"
+    ]
+    if image_ids != [expected_image_id]:
+        raise ValueError(f"{label} image ID does not match the manifest")
+
+    if expected_repo_digest is not None:
+        repo_digests = [
+            prop["value"]
+            for prop in properties
+            if prop["name"] == "aquasecurity:trivy:RepoDigest"
+        ]
+        if repo_digests != [expected_repo_digest]:
+            raise ValueError(f"{label} repository digest does not match the manifest")
+
+
 def _verify_rollback_artifact(
     directory: Path,
     expected_release_commit: str,
@@ -292,8 +367,8 @@ def _verify_rollback_artifact(
             raise ValueError("Manifest must be valid UTF-8 JSON") from exc
         if not isinstance(manifest, dict) or set(manifest) != MANIFEST_KEYS:
             raise ValueError("Manifest must contain exactly the required fields")
-        if type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 4:
-            raise ValueError("Manifest schemaVersion must be 4")
+        if type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 5:
+            raise ValueError("Manifest schemaVersion must be 5")
 
         _require_exact_string(
             manifest["releaseCommit"], expected_release_commit, "releaseCommit"
@@ -311,6 +386,9 @@ def _verify_rollback_artifact(
             "cloudflaredArchive",
         )
         _require_exact_string(manifest["sbom"], SBOM_NAME, "sbom")
+        _require_exact_string(
+            manifest["cloudflaredSbom"], CLOUDFLARED_SBOM_NAME, "cloudflaredSbom"
+        )
         _require_exact_string(manifest["compose"], COMPOSE_NAME, "compose")
 
         image_id = manifest["imageId"]
@@ -350,6 +428,14 @@ def _verify_rollback_artifact(
         sbom_sha256 = manifest["sbomSha256"]
         if type(sbom_sha256) is not str or not SHA256_RE.fullmatch(sbom_sha256):
             raise ValueError("Manifest sbomSha256 must be a lowercase SHA-256 digest")
+        cloudflared_sbom_sha256 = manifest["cloudflaredSbomSha256"]
+        if (
+            type(cloudflared_sbom_sha256) is not str
+            or not SHA256_RE.fullmatch(cloudflared_sbom_sha256)
+        ):
+            raise ValueError(
+                "Manifest cloudflaredSbomSha256 must be a lowercase SHA-256 digest"
+            )
         compose_sha256 = manifest["composeSha256"]
         if type(compose_sha256) is not str or not SHA256_RE.fullmatch(compose_sha256):
             raise ValueError(
@@ -387,35 +473,22 @@ def _verify_rollback_artifact(
             created_outputs,
         )
 
-        try:
-            with _regular_file(directory_descriptor, SBOM_NAME) as sbom_file:
-                sbom_bytes = sbom_file.read(MAX_SBOM_BYTES + 1)
-            if len(sbom_bytes) > MAX_SBOM_BYTES:
-                raise ValueError("SBOM exceeds the maximum allowed size")
-            sbom = json.loads(sbom_bytes.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError("SBOM must be valid UTF-8 JSON") from exc
-        if hashlib.sha256(sbom_bytes).hexdigest() != sbom_sha256:
-            raise ValueError("Rollback image SBOM SHA-256 mismatch")
-        components = sbom.get("components") if isinstance(sbom, dict) else None
-        if (
-            not isinstance(sbom, dict)
-            or sbom.get("bomFormat") != "CycloneDX"
-            or sbom.get("specVersion") not in {"1.4", "1.5", "1.6"}
-            or type(sbom.get("version")) is not int
-            or sbom["version"] < 1
-            or not isinstance(components, list)
-            or not components
-            or any(
-                not isinstance(component, dict)
-                or type(component.get("type")) is not str
-                or not component["type"].strip()
-                or type(component.get("name")) is not str
-                or not component["name"].strip()
-                for component in components
-            )
-        ):
-            raise ValueError("SBOM must be a valid CycloneDX component inventory")
+        _verify_sbom(
+            directory_descriptor,
+            SBOM_NAME,
+            sbom_sha256,
+            image_id,
+            None,
+            "Rollback image SBOM",
+        )
+        _verify_sbom(
+            directory_descriptor,
+            CLOUDFLARED_SBOM_NAME,
+            cloudflared_sbom_sha256,
+            cloudflared_image_id,
+            cloudflared_image.replace(":latest@", "@", 1),
+            "Cloudflared image SBOM",
+        )
 
         with _regular_file(directory_descriptor, COMPOSE_NAME) as compose_file:
             compose_bytes = compose_file.read(MAX_COMPOSE_BYTES + 1)

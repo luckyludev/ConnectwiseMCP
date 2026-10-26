@@ -9,6 +9,7 @@ from verify_rollback_artifact import (
     ARCHIVE_NAME,
     CHECKSUM_NAME,
     CLOUDFLARED_ARCHIVE_NAME,
+    CLOUDFLARED_SBOM_NAME,
     COMPOSE_NAME,
     IMAGE_REPOSITORY,
     MANIFEST_NAME,
@@ -37,6 +38,18 @@ def artifact_bundle(tmp_path):
                 "bomFormat": "CycloneDX",
                 "specVersion": "1.6",
                 "version": 1,
+                "metadata": {
+                    "component": {
+                        "type": "container",
+                        "name": "connectwise-legacy-rollback-ci",
+                        "properties": [
+                            {
+                                "name": "aquasecurity:trivy:ImageID",
+                                "value": IMAGE_ID,
+                            }
+                        ],
+                    }
+                },
                 "components": [{"type": "library", "name": "example"}],
             },
             separators=(",", ":"),
@@ -45,6 +58,37 @@ def artifact_bundle(tmp_path):
         encoding="utf-8",
     )
     sbom_digest = hashlib.sha256(sbom.read_bytes()).hexdigest()
+    cloudflared_sbom = tmp_path / CLOUDFLARED_SBOM_NAME
+    cloudflared_sbom.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "version": 1,
+                "metadata": {
+                    "component": {
+                        "type": "container",
+                        "name": "cloudflared",
+                        "properties": [
+                            {
+                                "name": "aquasecurity:trivy:ImageID",
+                                "value": CLOUDFLARED_IMAGE_ID,
+                            },
+                            {
+                                "name": "aquasecurity:trivy:RepoDigest",
+                                "value": CLOUDFLARED_IMAGE.replace(":latest@", "@", 1),
+                            },
+                        ],
+                    }
+                },
+                "components": [{"type": "application", "name": "cloudflared"}],
+            },
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cloudflared_sbom_digest = hashlib.sha256(cloudflared_sbom.read_bytes()).hexdigest()
     compose = tmp_path / COMPOSE_NAME
     compose.write_text(
         "services:\n"
@@ -56,7 +100,7 @@ def artifact_bundle(tmp_path):
     )
     compose_digest = hashlib.sha256(compose.read_bytes()).hexdigest()
     manifest = {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "releaseCommit": RELEASE_COMMIT,
         "workflowRunId": WORKFLOW_RUN_ID,
         "imageRepository": IMAGE_REPOSITORY,
@@ -69,6 +113,8 @@ def artifact_bundle(tmp_path):
         "cloudflaredArchiveSha256": cloudflared_digest,
         "sbom": SBOM_NAME,
         "sbomSha256": sbom_digest,
+        "cloudflaredSbom": CLOUDFLARED_SBOM_NAME,
+        "cloudflaredSbomSha256": cloudflared_sbom_digest,
         "compose": COMPOSE_NAME,
         "composeSha256": compose_digest,
     }
@@ -368,6 +414,8 @@ def test_rejects_invalid_or_stale_expected_bindings(
         ),
         ("sbom", "renamed.cdx.json", "sbom"),
         ("sbomSha256", "A" * 64, "sbomSha256"),
+        ("cloudflaredSbom", "renamed-cloudflared.cdx.json", "cloudflaredSbom"),
+        ("cloudflaredSbomSha256", "A" * 64, "cloudflaredSbomSha256"),
         ("compose", "renamed.yml", "compose"),
         ("composeSha256", "A" * 64, "composeSha256"),
     ],
@@ -460,6 +508,129 @@ def test_rejects_sbom_digest_mismatch_and_removes_archive_output(tmp_path):
     assert not archive_output.exists()
 
 
+def test_rejects_cloudflared_sbom_digest_mismatch(tmp_path):
+    artifact_bundle(tmp_path)
+    (tmp_path / CLOUDFLARED_SBOM_NAME).write_text(
+        '{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Cloudflared image SBOM SHA-256 mismatch"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+@pytest.mark.parametrize(
+    ("sbom_name", "sha_field", "properties", "message"),
+    [
+        (SBOM_NAME, "sbomSha256", [], "image ID"),
+        (
+            SBOM_NAME,
+            "sbomSha256",
+            [
+                {"name": "aquasecurity:trivy:ImageID", "value": "sha256:" + "0" * 64}
+            ],
+            "image ID",
+        ),
+        (
+            SBOM_NAME,
+            "sbomSha256",
+            [
+                {"name": "aquasecurity:trivy:ImageID", "value": IMAGE_ID},
+                {"name": "aquasecurity:trivy:ImageID", "value": IMAGE_ID},
+            ],
+            "image ID",
+        ),
+        (
+            CLOUDFLARED_SBOM_NAME,
+            "cloudflaredSbomSha256",
+            [{"name": "aquasecurity:trivy:ImageID", "value": CLOUDFLARED_IMAGE_ID}],
+            "repository digest",
+        ),
+        (
+            CLOUDFLARED_SBOM_NAME,
+            "cloudflaredSbomSha256",
+            [
+                {"name": "aquasecurity:trivy:ImageID", "value": CLOUDFLARED_IMAGE_ID},
+                {
+                    "name": "aquasecurity:trivy:RepoDigest",
+                    "value": "cloudflare/cloudflared@sha256:" + "0" * 64,
+                },
+            ],
+            "repository digest",
+        ),
+        (
+            CLOUDFLARED_SBOM_NAME,
+            "cloudflaredSbomSha256",
+            [
+                {"name": "aquasecurity:trivy:ImageID", "value": CLOUDFLARED_IMAGE_ID},
+                {
+                    "name": "aquasecurity:trivy:RepoDigest",
+                    "value": CLOUDFLARED_IMAGE.replace(":latest@", "@", 1),
+                },
+                {
+                    "name": "aquasecurity:trivy:RepoDigest",
+                    "value": CLOUDFLARED_IMAGE.replace(":latest@", "@", 1),
+                },
+            ],
+            "repository digest",
+        ),
+    ],
+)
+def test_rejects_unbound_or_ambiguous_sbom_identity(
+    tmp_path, sbom_name, sha_field, properties, message
+):
+    manifest = artifact_bundle(tmp_path)
+    sbom_path = tmp_path / sbom_name
+    sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+    sbom["metadata"]["component"]["properties"] = properties
+    sbom_path.write_text(json.dumps(sbom, separators=(",", ":")) + "\n", encoding="utf-8")
+    manifest[sha_field] = hashlib.sha256(sbom_path.read_bytes()).hexdigest()
+    write_manifest(tmp_path, manifest)
+
+    with pytest.raises(ValueError, match=message):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+def test_rejects_swapped_sboms_even_when_manifest_hashes_are_updated(tmp_path):
+    manifest = artifact_bundle(tmp_path)
+    gateway_path = tmp_path / SBOM_NAME
+    cloudflared_path = tmp_path / CLOUDFLARED_SBOM_NAME
+    gateway_bytes = gateway_path.read_bytes()
+    cloudflared_bytes = cloudflared_path.read_bytes()
+    gateway_path.write_bytes(cloudflared_bytes)
+    cloudflared_path.write_bytes(gateway_bytes)
+    manifest["sbomSha256"] = hashlib.sha256(cloudflared_bytes).hexdigest()
+    manifest["cloudflaredSbomSha256"] = hashlib.sha256(gateway_bytes).hexdigest()
+    write_manifest(tmp_path, manifest)
+
+    with pytest.raises(ValueError, match="image ID does not match"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+def test_rejects_sbom_without_container_root(tmp_path):
+    manifest = artifact_bundle(tmp_path)
+    sbom_path = tmp_path / SBOM_NAME
+    sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+    sbom["metadata"]["component"]["type"] = "application"
+    sbom_path.write_text(json.dumps(sbom, separators=(",", ":")) + "\n", encoding="utf-8")
+    manifest["sbomSha256"] = hashlib.sha256(sbom_path.read_bytes()).hexdigest()
+    write_manifest(tmp_path, manifest)
+
+    with pytest.raises(ValueError, match="scanned container image"):
+        verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
+
+
+@pytest.mark.parametrize(
+    ("sbom_name", "sha_field", "label"),
+    [
+        (SBOM_NAME, "sbomSha256", "Rollback image SBOM"),
+        (
+            CLOUDFLARED_SBOM_NAME,
+            "cloudflaredSbomSha256",
+            "Cloudflared image SBOM",
+        ),
+    ],
+)
 @pytest.mark.parametrize(
     "invalid_sbom",
     [
@@ -484,14 +655,16 @@ def test_rejects_sbom_digest_mismatch_and_removes_archive_output(tmp_path):
         },
     ],
 )
-def test_rejects_invalid_cyclonedx_inventory(tmp_path, invalid_sbom):
+def test_rejects_invalid_cyclonedx_inventory(
+    tmp_path, invalid_sbom, sbom_name, sha_field, label
+):
     manifest = artifact_bundle(tmp_path)
-    sbom = tmp_path / SBOM_NAME
+    sbom = tmp_path / sbom_name
     sbom.write_text(json.dumps(invalid_sbom) + "\n", encoding="utf-8")
-    manifest["sbomSha256"] = hashlib.sha256(sbom.read_bytes()).hexdigest()
+    manifest[sha_field] = hashlib.sha256(sbom.read_bytes()).hexdigest()
     write_manifest(tmp_path, manifest)
 
-    with pytest.raises(ValueError, match="CycloneDX component inventory"):
+    with pytest.raises(ValueError, match=f"{label} must be a valid"):
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
 
 
@@ -520,7 +693,7 @@ def test_rejects_manifest_cloudflared_image_not_bound_to_compose(tmp_path):
     manifest["cloudflaredImage"] = "cloudflare/cloudflared:latest@sha256:" + "e" * 64
     write_manifest(tmp_path, manifest)
 
-    with pytest.raises(ValueError, match="image default does not match"):
+    with pytest.raises(ValueError, match="repository digest does not match"):
         verify_rollback_artifact(tmp_path, RELEASE_COMMIT, WORKFLOW_RUN_ID)
 
 
@@ -557,7 +730,7 @@ def test_checked_in_compose_binds_cloudflared_manifest_reference():
     compose = verifier.Path(__file__).parents[1] / "docker-compose.yml"
     checked_in_image = (
         "cloudflare/cloudflared:latest@sha256:"
-        "b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4"
+        "c6c7ae1d5dfdcb094ad344ed68ccffc26635c9c6be80965664c33baf064b0515"
     )
 
     verifier._verify_compose_cloudflared_image(compose.read_bytes(), checked_in_image)
@@ -614,6 +787,7 @@ def test_rejects_oversized_compose(tmp_path, monkeypatch):
         CHECKSUM_NAME,
         MANIFEST_NAME,
         SBOM_NAME,
+        CLOUDFLARED_SBOM_NAME,
         COMPOSE_NAME,
     ],
 )
@@ -633,6 +807,7 @@ def test_rejects_missing_required_file(tmp_path, name):
         CHECKSUM_NAME,
         MANIFEST_NAME,
         SBOM_NAME,
+        CLOUDFLARED_SBOM_NAME,
         COMPOSE_NAME,
     ],
 )
@@ -655,6 +830,7 @@ def test_rejects_symlinked_artifact_file(tmp_path, name):
         CHECKSUM_NAME,
         MANIFEST_NAME,
         SBOM_NAME,
+        CLOUDFLARED_SBOM_NAME,
         COMPOSE_NAME,
     ],
 )
