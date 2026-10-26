@@ -80,9 +80,10 @@ jobs:
           pip-audit -r deploy/http-gateway/requirements-ci.lock
           pip-audit -r deploy/http-gateway/requirements.lock
           pip-audit -r deploy/cwm-mcp/requirements.txt
-      - name: Verify legacy Node dependencies
+      - name: Verify legacy Node dependency authenticity
         run: |
           npm ci --prefix deploy/cwm-mcp --ignore-scripts
+          npm audit signatures --prefix deploy/cwm-mcp
           npm audit --prefix deploy/cwm-mcp --audit-level=moderate
       - name: Seed ignored build-context canaries
         run: |
