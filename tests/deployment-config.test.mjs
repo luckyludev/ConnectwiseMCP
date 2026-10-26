@@ -1609,6 +1609,7 @@ describe("staging deployment configuration", () => {
     );
 
     expect(config.name).toBe("connectwise-mcp-v2");
+    expect(config.upload_source_maps).toBe(false);
     expect(staging).not.toHaveProperty("name");
     expect(staging?.workers_dev).toBe(true);
     for (const deploymentTarget of [config, staging]) {
